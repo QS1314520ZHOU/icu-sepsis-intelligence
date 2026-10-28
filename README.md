@@ -117,3 +117,4 @@ E2E_ALLOW_SIMULATION=true node tests/embed-e2e.cjs
 
 - v5 床旁工作台（概览 / 预警处理 / 记录与依据、记录单、集束化、宿主角标消息）：`docs/12-bedside-workbench-v5.md`
 - [ICU-05 感染性休克 Bundle 时间轴](docs/13-icu05-septic-shock-bundle.md)
+- [科研工具包（去标识导出 + 六个研究方向分析）](docs/14-research-toolkit.md)

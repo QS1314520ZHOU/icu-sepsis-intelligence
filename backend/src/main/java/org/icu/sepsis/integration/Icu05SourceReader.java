@@ -52,6 +52,11 @@ public class Icu05SourceReader {
   }
 
   public Evidence collect(String hostPatientId, String encounterId, Instant asOf) {
+    return collect(hostPatientId, encounterId, asOf, Duration.ofHours(6), false);
+  }
+
+  /** @param after how far after T0 to read (bedside ICU-05 uses 6h; research export uses 24h+). */
+  public Evidence collect(String hostPatientId, String encounterId, Instant asOf, Duration after, boolean withHeartRate) {
     if (hostPatientId == null || !OBJECT_ID.matcher(hostPatientId).matches())
       throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_PATIENT_ID", "患者 id 需为 24 位十六进制");
     Document p = smartcare.getCollection("patient").find(new Document("_id", new ObjectId(hostPatientId)))
@@ -78,13 +83,14 @@ public class Icu05SourceReader {
       if (first != null) { e.t0 = toInstant(first.get("orderTime")); e.t0OrderName = first.getString("orderName"); }
     } catch (RuntimeException ex) { e.failed.add("VI_ICU_ZYYZ"); return e; }
     if (e.t0 == null) return e;
-    Instant from = e.t0.minus(Duration.ofHours(24)), to = e.t0.plus(Duration.ofHours(6));
+    Instant from = e.t0.minus(Duration.ofHours(24)), to = e.t0.plus(after);
     if (to.isAfter(asOf)) to = asOf;
     Date dFrom = Date.from(from), dTo = Date.from(to);
     loadDictionaries(e);
     readBloodGas(e, mrn, dFrom, dTo);
     readGcs(e, hostPatientId, dFrom, dTo);
     readMap(e, hostPatientId, dFrom, dTo);
+    if (withHeartRate) readHeartRate(e, hostPatientId, dFrom, dTo);
     readDrugs(e, hostPatientId, dFrom, dTo);
     readCultures(e, hisPid, dFrom, dTo);
     return e;
@@ -149,10 +155,21 @@ public class Icu05SourceReader {
   private void readMap(Evidence e, String pid, Date from, Date to) {
     try {
       for (Document d : smartcare.getCollection("bedside").find(new Document("pid", pid).append("code", new Document("$in", List.of("param_nibp_m", "param_ibp_m")))
-          .append("valid", true).append("time", new Document("$gte", from).append("$lte", to))).projection(new Document("code", 1).append("strVal", 1).append("time", 1)).limit(3000)) {
+          .append("valid", true).append("time", new Document("$gte", from).append("$lte", to))).projection(new Document("code", 1).append("strVal", 1).append("time", 1)).sort(new Document("time", 1)).limit(20000)) {
         Double v = num(d.get("strVal")); Instant t = toInstant(d.get("time"));
         if (v == null || t == null || v <= 0) continue;
         e.map.add(new Point(t, v, "param_ibp_m".equals(d.getString("code")) ? "IBP" : "NIBP", "SmartCare.bedside:" + d.get("_id")));
+      }
+    } catch (RuntimeException ex) { e.failed.add("bedside"); }
+  }
+
+  private void readHeartRate(Evidence e, String pid, Date from, Date to) {
+    try {
+      for (Document d : smartcare.getCollection("bedside").find(new Document("pid", pid).append("code", "param_HR").append("valid", true)
+          .append("time", new Document("$gte", from).append("$lte", to))).projection(new Document("strVal", 1).append("time", 1))
+          .sort(new Document("time", 1)).limit(20000)) {
+        Double v = num(d.get("strVal")); Instant t = toInstant(d.get("time"));
+        if (v != null && t != null && v > 0) e.hr.add(new Point(t, v, null, "SmartCare.bedside:" + d.get("_id")));
       }
     } catch (RuntimeException ex) { e.failed.add("bedside"); }
   }

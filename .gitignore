@@ -21,3 +21,8 @@ pkg-lock.tmp
 
 frontend/.angular/
 
+
+__pycache__/
+*.pyc
+research-export/
+research-report/

@@ -51,7 +51,7 @@ public final class Icu05Rules {
     public Instant t0; public String t0OrderName;
     public Instant icuAdmission; public Instant hospitalAdmission; public String admissionType;
     public String diagnosisText;
-    public List<Point> lactate = new ArrayList<>(), pf = new ArrayList<>(), gcs = new ArrayList<>(), map = new ArrayList<>();
+    public List<Point> lactate = new ArrayList<>(), pf = new ArrayList<>(), gcs = new ArrayList<>(), map = new ArrayList<>(), hr = new ArrayList<>();
     public List<Drug> drugs = new ArrayList<>();
     public List<Order> cultureOrders = new ArrayList<>();
     public Set<String> vasoDictionary = new HashSet<>(), antibioticDictionary = new HashSet<>();
@@ -79,7 +79,7 @@ public final class Icu05Rules {
   static final List<String> CRYSTALLOID = List.of("生理盐水", "0.9%氯化钠", "normal saline", "乳酸林格", "林格", "lactated ringer", "醋酸林格", "plasmalyte", "复方氯化钠");
   static final List<String> COLLOID = List.of("白蛋白", "albumin", "羟乙基淀粉", "voluven", "明胶", "gelatin", "右旋糖酐", "dextran");
   public static final String CULTURE_REGEX = "血培养|痰培养|尿培养|细菌培养|真菌培养|分泌物培养|引流液培养|胸水培养|腹水培养|脑脊液培养|导管培养";
-  static final Set<String> STOP_ACTIONS = Set.of("stop", "pause", "cancel", "停止", "暂停", "取消", "停用");
+  public static final Set<String> STOP_ACTIONS = Set.of("stop", "pause", "cancel", "停止", "暂停", "取消", "停用");
 
   static String norm(String name) {
     if (name == null) return "";

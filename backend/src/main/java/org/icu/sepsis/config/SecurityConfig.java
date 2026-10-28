@@ -12,7 +12,9 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.provisioning.InMemoryUserDetailsManager;
 import org.springframework.security.web.SecurityFilterChain;
 
+/** Web only: the offline research export (web-application-type=none) needs no role passwords. */
 @Configuration
+@org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication
 @EnableGlobalMethodSecurity(prePostEnabled = true)
 public class SecurityConfig {
   @Bean
