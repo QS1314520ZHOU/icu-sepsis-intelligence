@@ -73,6 +73,7 @@ public class SmartCareSourceReader {
   public boolean isReadable() {
     try {
       smartcare.getDb().runCommand(new Document("ping", 1));
+      dataCenter.getDb().runCommand(new Document("ping", 1));
       return true;
     } catch (Exception e) {
       return false;
@@ -137,7 +138,7 @@ public class SmartCareSourceReader {
             .with(Sort.by(Sort.Direction.DESC, "time"))
             .limit(4000);
     List<Observation> rows = new ArrayList<>();
-    for (Document d : smartcare.getCollection("bedside").find(q.getQueryObject())) {
+    for (Document d : smartcare.find(q, Document.class, "bedside")) {
       String code = d.getString("code");
       String parameter = BEDSIDE_TO_PARAMETER.get(code);
       if (parameter == null) continue;
@@ -184,7 +185,7 @@ public class SmartCareSourceReader {
             .with(Sort.by(Sort.Direction.DESC, "authTime"))
             .limit(400);
     List<Observation> rows = new ArrayList<>();
-    for (Document d : dataCenter.getCollection("VI_ICU_EXAM_ITEM").find(q.getQueryObject())) {
+    for (Document d : dataCenter.find(q, Document.class, "VI_ICU_EXAM_ITEM")) {
       String itemCode = d.getString("itemCode");
       if (itemCode == null || !LACTATE_ITEM.matcher(itemCode).matches()) continue;
       Double value = parseDouble(d.get("result"));
@@ -225,7 +226,7 @@ public class SmartCareSourceReader {
             .with(Sort.by(Sort.Direction.DESC, "time"))
             .limit(200);
     List<Observation> rows = new ArrayList<>();
-    for (Document d : smartcare.getCollection("score").find(q.getQueryObject())) {
+    for (Document d : smartcare.find(q, Document.class, "score")) {
       String type = d.getString("scoreType");
       String parameter;
       if ("gcsScore".equals(type)) parameter = "GCS";

@@ -22,7 +22,7 @@ interface Plot {
     <div class="section-head">
       <div>
         <p class="eyebrow" *ngIf="!embedded">OBSERVED VITALS</p>
-        <h2>生命体征</h2>
+        <h2>观测趋势</h2>
       </div>
       <div class="segmented" role="group" aria-label="趋势时间范围">
         <button
@@ -35,12 +35,17 @@ interface Plot {
         </button>
       </div>
     </div>
-    <div class="chart-caption" *ngIf="!embedded">
-      <span class="legend-line"></span>实际存储的观测 · 非预测曲线
+    <div class="chart-caption">
+      <span class="legend-line"></span>观测记录 · 非预测曲线
       <span>{{ from | date: 'MM-dd HH:mm' }} — {{ end | date: 'MM-dd HH:mm' }}</span>
     </div>
     <div class="missing" *ngIf="items.length >= 2000">已达读取上限，趋势可能不完整。</div>
-    <div class="trend-grid">
+    <div class="trend-empty-summary" *ngIf="!hasPlottable">
+      <strong>当前时间窗未取得可绘制的观测</strong>
+      <p>缺失不代表正常。可切换时间窗，或到原始记录核对来源、单位及采样时间。</p>
+      <dl><ng-container *ngFor="let p of plots"><dt>{{ p.m.label }}</dt><dd>— {{ p.m.unit }}</dd></ng-container></dl>
+    </div>
+    <div class="trend-grid" *ngIf="hasPlottable">
       <article class="trend-tile" *ngFor="let p of plots">
         <div class="trend-title">
           <div>
@@ -50,7 +55,7 @@ interface Plot {
           <span class="tag" *ngIf="!p.last">无数据</span>
           <span class="tag warning" *ngIf="p.last && p.stale">过期</span>
         </div>
-        <div class="trend-reading" [style.color]="p.m.color">
+        <div class="trend-reading" >
           {{ p.last?.value ?? '—' }}<small>{{ p.m.unit }}</small>
           <span *ngIf="p.last">{{ p.last.eventTime | date: 'MM-dd HH:mm' }}</span>
         </div>
@@ -69,7 +74,7 @@ interface Plot {
               stroke="#e5ebf2"
               stroke-dasharray="3 4"
             />
-            <text x="29" [attr.y]="24 + tick * 48" text-anchor="end" fill="#7b8794" font-size="10">
+            <text x="29" [attr.y]="24 + tick * 48" text-anchor="end" fill="#7b8794" font-size="12">
               {{ p.high - ((p.high - p.low) * tick) / 2 | number: '1.0-1' }}
             </text>
           </g>
@@ -98,14 +103,14 @@ interface Plot {
               {{ o.sourceSystem }}
             </title>
           </circle>
-          <text x="36" y="145" fill="#7b8794" font-size="10">{{ from | date: 'MM-dd HH:mm' }}</text>
-          <text x="310" y="145" text-anchor="end" fill="#7b8794" font-size="10">
+          <text x="36" y="145" fill="#7b8794" font-size="12">{{ from | date: 'MM-dd HH:mm' }}</text>
+          <text x="310" y="145" text-anchor="end" fill="#7b8794" font-size="12">
             {{ end | date: 'MM-dd HH:mm' }}
           </text>
         </svg>
         <div *ngIf="!p.points.length" class="chart-empty">该时间窗无观测</div>
-        <div class="trend-foot" *ngIf="!embedded">
-          <span>{{ p.points.length }} 次观测</span>
+        <div class="trend-foot">
+          <span>{{ p.points.length }} 次观测<span *ngIf="p.excluded"> · {{ p.excluded }} 条未绘制</span></span>
           <button *ngIf="p.last" (click)="choose(p.last)">核查数据点</button>
         </div>
       </article>
@@ -122,12 +127,11 @@ interface Plot {
         <dd>{{ selected.eventTime | date: 'MM-dd HH:mm' }}</dd>
         <dt>来源</dt>
         <dd>{{ selected.sourceSystem }}</dd>
-        <dt *ngIf="!embedded">记录 ID</dt>
-        <dd *ngIf="!embedded">{{ selected.sourceRecordId }}</dd>
+        <dt>记录 ID</dt><dd>{{ selected.sourceRecordId }}</dd>
       </dl>
     </div>
-    <p class="muted small" *ngIf="!embedded">
-      纵轴独立缩放，直线连接相邻观测，不补值。单位无效或同刻冲突不绘制。
+    <p class="trend-method-note">
+      各图纵轴独立，勿跨图比较斜率；缺测不补值，间隔过长断线。点击数据点查看时间与来源。
     </p>
   </section>`,
 })
@@ -135,16 +139,18 @@ export class ClinicalTrends implements OnChanges {
   @Input() items: Observation[] = [];
   @Input() asOf = '';
   @Input() embedded = false;
-  hours = 72;
+  @Input() availableHours = 168;
+  hours = 12;
   hourOptions = [6, 12, 24, 72, 168];
   end = Date.now();
   from = this.end - this.hours * 3600000;
   plots: Plot[] = [];
   selected: Observation | null = null;
+  get hasPlottable() { return this.plots.some(p => p.points.length > 0); }
   ngOnChanges() {
     this.end = Date.parse(this.asOf) || Date.now();
-    this.hours = this.embedded ? 72 : 12;
-    this.hourOptions = this.embedded ? [6, 12, 24, 72, 168] : [6, 12, 24];
+    this.hours = 12;
+    this.hourOptions = (this.embedded ? [6, 12, 24, 72, 168] : [6, 12, 24]).filter(h => h <= this.availableHours);
     this.refresh();
   }
   setHours(h: number) {

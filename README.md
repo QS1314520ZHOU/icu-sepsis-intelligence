@@ -4,7 +4,17 @@
 
 最终技术补充优先：Java 15 / Spring Boot 2.7.18 / MongoDB / Angular 20.3.34。全部患者为明确标记的模拟数据；真实模型未接入。没有风险百分比、训练指标或临床效果承诺。
 
-## 0.3 iframe 嵌入入口（本次重点）
+## 临床工作台修订 v2（本次交付，优先于下方历史说明）
+
+基于 `e051ac24b2414bb6bbc9971adb8308c587782ac6` 直接修改源码，详见 [实施与验收说明](docs/09-clinical-workbench-v2.md)。
+
+- iframe 内只有当前患者核对条和五个局部页签，不增加第二份患者列表或登录界面；宿主医生模式保留，**本次没有实现新的身份认证/SSO**。
+- 首屏改为临床概览：观测曲线、近期异常证据、缺项和待办同屏；原始记录及来源可核对。
+- 移除缺数据时的“0分/极低风险”和未经验证的自动休克分类、治疗 Bundle 达标判定；未知保留未知。
+- `/patients/{id}/sepsis-assessment` 改为 `schemaVersion: 2`，前后端须一起部署。模型预测与 AI 摘要仍未配置，不生成假概率或假摘要。
+- 验收：后端 76 项、前端 36 项、模拟接口下浏览器 14 个场景通过；尚未完成真实医院宿主/源库联调和临床验证。
+
+## 0.3 iframe 嵌入入口（历史说明）
 - 正式嵌入路由 `/embed?parentOrigin=...`：不显示独立顶栏、侧栏、患者列表或登录表单；只保留当前患者核对条和四个局部页签。
 - **真实宿主协议（2026-10）**：兼容科室概览 v3 `SmartCareReady` / `SmartCare` / `select-patient` / `SmartCareNavigate`；前端见 `frontend/src/smartcare-protocol.ts`，后端绑定 `POST /embed-api/host-context`。
 - **真实源库只读接入**：`CLINICAL_SOURCE_MODE=smartcare` 时，患者与生命体征/乳酸等从 `192.168.31.185:27017` 的 SmartCare / DataCenter 读取；业务写入仍强制落在独立 `icu_sepsis_*` 库，禁止写医院源库。

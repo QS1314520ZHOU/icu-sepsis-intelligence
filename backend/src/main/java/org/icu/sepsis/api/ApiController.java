@@ -116,7 +116,7 @@ public class ApiController {
     return Envelope.ok(q.page(c, Assessment.class, page, size, Views::assessment));
   }
 
-  /** Real-time sepsis / septic-shock auto classification + 1h3h6h Bundle + explainable AI risk. */
+  /** Read-only recent-evidence review (schema v2); not a diagnosis or prediction model. */
   @GetMapping("/patients/{id}/sepsis-assessment")
   public Envelope<?> sepsisAssessment(@PathVariable String id) {
     Patient p = s.patient(id);
