@@ -88,3 +88,15 @@ ui-icon{display:inline-flex;width:18px;height:18px;flex:none;align-items:center;
 @media (max-width:900px){.sx-grid{grid-template-columns:1fr}.sx-head{flex-direction:column;align-items:flex-start}.sx-head-side{justify-content:flex-start}}
 @media (max-width:520px){.sx-vitals{grid-template-columns:repeat(2,minmax(0,1fr))}.sx-tile-value b{font-size:24px}.sx-b-hint,.sx-o-note{display:none}.sx-table th,.sx-table td{padding:6px 4px}.sx-records-bar .record-actions{flex-wrap:wrap}}
 #icu-tasks .work-empty,patient-alerts .work-empty{min-height:0;padding:16px;flex-direction:row;gap:10px}#icu-tasks .work-empty span{color:#a0a7b4}#icu-tasks .card{padding:6px 16px}
+/* ICU-05 septic-shock bundle timeline */
+.i5 .review-card-title{gap:6px;flex-wrap:wrap}.i5 .review-card-title h2{margin-right:auto}
+.sx-chip[data-tone=critical]{color:var(--crit);background:var(--crit-bg);border-color:#ffccc7;font-weight:600}.sx-chip[data-tone=abnormal]{color:#ad4e00;background:var(--abn-bg);border-color:#ffd8a8;font-weight:600}
+.i5-msg{margin:6px 0 0;color:#606266;font-size:13px}
+.i5-gate{display:flex;flex-direction:column;gap:3px;margin:6px 0 2px;font-size:12px;color:#606266}.i5-gate>span{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline}.i5-gate em{font-style:normal;color:#909399;width:28px;flex:none}
+.i5-gate i{font-style:normal;white-space:nowrap}.i5-gate i[data-v=y]{color:#303133;font-weight:600}.i5-gate i[data-v=u]{color:#a0a7b4}
+.i5-table thead th{font-weight:400;text-align:center;padding:4px 4px 6px;border-bottom:1px solid var(--host-border);width:auto;line-height:1.25}.i5-table thead th:first-child{width:1%}
+.i5-wkey{display:block;font-size:14px;font-weight:700;color:#303133}.i5-wstate{display:inline-block;margin:2px 0;padding:0 6px;border-radius:2px;font-size:12px;color:#606266;background:#f4f5f7}.i5-table thead small{display:block;color:#909399;font-size:11px}
+.i5-table thead th[data-state=met] .i5-wstate{color:#fff;background:var(--host-blue)}.i5-table thead th[data-state=not_met] .i5-wstate{color:#fff;background:var(--crit)}.i5-table thead th[data-state=in_progress] .i5-wstate{color:#ad4e00;background:var(--abn-bg)}
+.i5-table td{text-align:center;white-space:nowrap}.i5-table td b{font-size:13px}.i5-table td small{display:inline;margin-left:5px;color:#909399;font-size:11px}.i5-table td[data-tone=fail] b{font-size:15px}
+.i5-table td[data-tone=done] b{color:var(--host-blue)}.i5-table td[data-tone=fail] b{color:var(--crit)}.i5-table td[data-tone=flag] b{color:#ad4e00}.i5-table td[data-tone=quiet] b,.i5-table td[data-tone=none] b{color:#a0a7b4;font-weight:400}.i5-table td[data-tone=wait] b{color:#ad4e00;font-weight:400}
+.i5-na>summary{cursor:pointer;color:#606266;font-size:12px;margin-top:6px}.i5-limits{margin:8px 0 0}

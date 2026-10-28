@@ -6,6 +6,7 @@ import { ClinicalTrends } from './clinical-trends';
 import { ClinicalReview, Evidence, featureLabel, matchesPatient } from './clinical-review';
 import { Level, ago, baseCode, direction, hoursSince, level, levelRank } from './clinical-flags';
 import { Measure, measures, pointsFor } from './trends';
+import { Icu05Card, Icu05Result } from './icu05-card';
 
 export interface SepsisStatus {
   patientId: string; level: Level | 'unknown'; summary: string;
@@ -23,7 +24,7 @@ const tileName: Record<string, string> = { MAP: '平均动脉压', MAP_IBP: '平
 const units: Record<string, string> = { MAP: 'mmHg', SBP: 'mmHg', LACTATE: 'mmol/L', RR: '次/分', GCS: '分', HR: '次/分', TEMP: '°C', SPO2: '%' };
 
 @Component({
-  selector: 'sepsis-panel', standalone: true, imports: [CommonModule, ClinicalTrends, UiIcon],
+  selector: 'sepsis-panel', standalone: true, imports: [CommonModule, ClinicalTrends, UiIcon, Icu05Card],
   template: `<section class="clinical-review sx-overview" aria-label="患者脓毒症概览" [attr.aria-busy]="loading" [class.nurse-first]="nurseFirst">
     <header class="sx-head" [attr.data-level]="headLevel">
       <div class="sx-head-main">
@@ -31,6 +32,7 @@ const units: Record<string, string> = { MAP: 'mmHg', SBP: 'mmHg', LACTATE: 'mmol
         <div><h1>{{ headline }}</h1><p *ngIf="headDetail">{{ headDetail }}</p></div>
       </div>
       <div class="sx-head-side">
+        <span class="sx-chip i5-head" *ngIf="icu05?.available && (icu05!.status === 'septic_shock' || icu05!.status === 'suspected_review')" [attr.data-tone]="icu05!.status === 'septic_shock' ? 'critical' : 'abnormal'">ICU-05 {{ icu05!.statusLabel }}</span>
         <span class="sx-chip" *ngIf="data?.available" [title]="data!.qsofaNote || ''">qSOFA <b>{{ data!.qsofa ?? '—' }}</b><small *ngIf="data!.qsofa !== null">/3</small><small *ngIf="data!.qsofa === null">无法计算</small></span>
         <button class="sx-pending danger" *ngIf="alertTotal" (click)="openAlerts.emit()"><ui-icon name="bell"/>{{ alertTotal }} 条预警待处理</button>
         <button class="sx-pending" *ngIf="taskTotal" (click)="openTasks.emit()"><ui-icon name="clipboard"/>{{ taskTotal }} 项任务待执行</button>
@@ -60,7 +62,8 @@ const units: Record<string, string> = { MAP: 'mmHg', SBP: 'mmHg', LACTATE: 'mmol
     </div>
 
     <div class="sx-grid" *ngIf="data?.available">
-      <section class="review-card sx-bundle" aria-label="1小时集束化">
+      <icu05-card *ngIf="icu05?.available" [data]="icu05!"/>
+      <section class="review-card sx-bundle" aria-label="1小时集束化" *ngIf="!icu05?.available">
         <div class="review-card-title"><h2><ui-icon name="clipboard"/>1 小时集束化</h2><span class="sx-chip" title="院内尚未确定脓毒症时间零点规则，不计算倒计时">时间零点 <b>未确认</b></span></div>
         <table class="sx-table"><tbody>
           <tr *ngFor="let b of bundle" [attr.data-state]="b.state" [title]="b.tip">
@@ -104,6 +107,7 @@ export class SepsisPanel implements OnChanges, OnDestroy {
   @Output() status = new EventEmitter<SepsisStatus>();
   api = inject(Api);
   data: ClinicalReview | null = null;
+  icu05: Icu05Result | null = null;
   observations: Observation[] = [];
   alertTotal: number | null = null;
   taskTotal: number | null = null;
@@ -119,22 +123,25 @@ export class SepsisPanel implements OnChanges, OnDestroy {
   get hasAnyValue() { return this.tiles.some(t => t.value !== null); }
   get infectionHit() { return !!this.data?.infectionClue && this.data.infectionClue.includes('含感染'); }
   ago(t: string | null) { return ago(t, Date.parse(this.asOf) || Date.now()); }
-  ngOnChanges() { this.data = null; this.observations = []; this.selected = null; this.showTrends = false; this.derive(); void this.load(); }
+  ngOnChanges() { this.data = null; this.icu05 = null; this.observations = []; this.selected = null; this.showTrends = false; this.derive(); void this.load(); }
   ngOnDestroy() { ++this.generation; }
   async load() {
     const generation = ++this.generation; if (!this.patientId) return;
     this.loading = true; this.error = ''; this.observationsError = ''; this.selected = null;
     // Clear stale counts/data before refresh. A failed request must never look like a zero count.
-    this.data = null; this.observations = []; this.alertTotal = null; this.taskTotal = null; this.derive();
+    this.data = null; this.icu05 = null; this.observations = []; this.alertTotal = null; this.taskTotal = null; this.derive();
     const base = '/patients/' + encodeURIComponent(this.patientId);
     const results = await Promise.allSettled([
       this.api.get<ClinicalReview>(base + '/sepsis-assessment'),
       this.api.get<{ items: Observation[]; asOf: string }>(base + '/clinical-data?hours=24'),
       this.api.get<Page<Alert>>('/alerts?status=pending&size=1'),
       this.api.get<Page<Task>>('/bundles/tasks?metric=pending&patientId=' + encodeURIComponent(this.patientId) + '&size=1'),
+      this.api.get<Icu05Result>(base + '/icu05-bundle'),
     ] as const);
     if (generation !== this.generation) return;
-    const [review, observations, alerts, tasks] = results;
+    const [review, observations, alerts, tasks, icu05] = results;
+    // ICU-05 is optional: a failed or mismatched response falls back to the plain checklist, never to "not met".
+    this.icu05 = icu05.status === 'fulfilled' && icu05.value?.schemaVersion === 1 && matchesPatient(icu05.value, this.patientId, this.encounterId) ? icu05.value : null;
     if (review.status === 'fulfilled' && review.value.schemaVersion === 2 && matchesPatient(review.value, this.patientId, this.encounterId)) this.data = review.value;
     else this.error = review.status === 'rejected' ? errorMessage(review.reason) : '患者上下文或接口版本不一致，已停止展示。';
     if (observations.status === 'fulfilled') { this.observations = observations.value.items; this.asOf = observations.value.asOf; }
@@ -144,7 +151,8 @@ export class SepsisPanel implements OnChanges, OnDestroy {
     if (tasks.status === 'fulfilled') this.taskTotal = tasks.value.total;
     this.updatedAt = new Date().toISOString(); this.loading = false;
     this.derive();
-    this.status.emit({ patientId: this.patientId, level: this.headLevel, summary: this.headline, pendingAlerts: this.alertTotal, pendingTasks: this.taskTotal });
+    const shock = this.icu05?.status === 'septic_shock';
+    this.status.emit({ patientId: this.patientId, level: shock ? 'critical' : this.headLevel, summary: shock ? 'ICU-05 ' + this.icu05!.statusLabel + ' · ' + this.headline : this.headline, pendingAlerts: this.alertTotal, pendingTasks: this.taskTotal });
   }
 
   /** All derived view state is computed once per load, not in template getters. */

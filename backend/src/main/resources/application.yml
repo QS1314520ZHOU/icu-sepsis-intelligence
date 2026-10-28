@@ -33,6 +33,10 @@ app:
       # 空则默认用 URI 里的库名 DataCenter（避免 authSource=SmartCause not authorized on DataCenter）
       auth-source: ${DATACENTER_MONGO_AUTH_SOURCE:}
   # 纯 iframe 接入不需要医院 SSO：宿主 SmartCareReady/SmartCare → /embed-api/host-context 即可
+  # ICU-05 感染性休克 Bundle（科室主任规则 v3）
+  icu05:
+    blood-culture-keywords: ${ICU05_BLOOD_CULTURE_KEYWORDS:血培养}
+    culture-time-field: ${ICU05_CULTURE_TIME_FIELD:reviewTime}
   embed-parent-origins: ${EMBED_PARENT_ORIGINS:}
   embed:
     allow-insecure-lan-origins: ${EMBED_ALLOW_INSECURE_LAN_ORIGINS:true}

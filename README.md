@@ -116,3 +116,4 @@ E2E_ALLOW_SIMULATION=true node tests/embed-e2e.cjs
 未接入现有 ICU 宿主、真实临床数据、SSO、真实训练模型；未实现完整SOFA、正式1h/3h/6h治疗Bundle、可靠异步扫描/重试、完整临床参数与长时序服务端聚合、模型验证计算与生产级运维。首版仅闭环核心软件路径，详见验证清单。本次沿用已提供的演示界面蓝白风格；未获得真实医院宿主的源码、组件库或正式视觉规范。
 
 - v5 床旁工作台（概览 / 预警处理 / 记录与依据、记录单、集束化、宿主角标消息）：`docs/12-bedside-workbench-v5.md`
+- [ICU-05 感染性休克 Bundle 时间轴](docs/13-icu05-septic-shock-bundle.md)
