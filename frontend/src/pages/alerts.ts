@@ -1,5 +1,6 @@
 import { CommonModule } from '@angular/common';
 import { Component, EventEmitter, Input, Output, inject, OnInit } from '@angular/core';
+import { UiIcon } from '../ui-icon';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { Alert, Api, errorMessage, History, Page } from '../api';
@@ -7,8 +8,8 @@ import { text } from '../presentation';
 @Component({
   selector: 'patient-alerts',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink],
-  template: `<header class="embedded-section-head" *ngIf="embedded"><div><h1>预警处置</h1><p>复核筛查依据并记录原因，不自动确认诊断。</p></div><button (click)="load()" [disabled]="busy">刷新</button></header><div class="pagehead">
+  imports: [CommonModule, FormsModule, RouterLink, UiIcon],
+  template: `<header class="embedded-section-head" *ngIf="embedded"><h1><ui-icon name="bell"/>预警处置</h1><button (click)="load()" [disabled]="busy"><ui-icon name="refresh"/>刷新</button></header><div class="pagehead">
       <div>
         <p class="eyebrow">ALERT REVIEW CENTER</p>
         <h1>预警处置中心</h1>
@@ -30,11 +31,11 @@ import { text } from '../presentation';
         ><span class="muted">共 {{ total }} 条</span>
       </div>
       <p class="error" role="alert" *ngIf="error">{{ error }}</p>
-      <div class="empty" *ngIf="!alerts.length && !busy && !error">当前筛选下没有预警</div>
+      <div class="work-empty" *ngIf="!alerts.length && !busy && !error"><ui-icon name="bell"/><strong>当前筛选下没有预警</strong><span>可切换状态，或核对患者原始记录</span><button *ngIf="embedded" (click)="openEvidence.emit()">核查患者证据 <ui-icon name="arrow"/></button></div>
       <article class="alertrow" *ngFor="let a of alerts">
         <div>
           <span class="tag" [class.danger]="a.severity === 'critical'">{{ text(a.severity) }}</span
-          ><strong>{{ a.patientId }}</strong
+          ><strong>{{ embedded ? '当前患者预警' : a.patientId }}</strong
           ><small>{{ a.createdAt | date: 'MM-dd HH:mm:ss' }} · {{ a.ruleVersion }}</small>
         </div>
         <div>
@@ -63,7 +64,7 @@ import { text } from '../presentation';
           </button>
         </div>
       </article>
-      <footer class="pager">
+      <footer class="pager" *ngIf="total>0">
         <button (click)="page = page - 1; load()" [disabled]="!page || busy">上一页</button
         ><span>第 {{ page + 1 }} 页</span
         ><button (click)="page = page + 1; load()" [disabled]="(page + 1) * 20 >= total || busy">
@@ -79,7 +80,7 @@ import { text } from '../presentation';
     </section>
     <div class="overlay" *ngIf="selected">
       <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="review-title">
-        <h2 id="review-title">预警复核 · {{ selected.patientId }}</h2>
+        <h2 id="review-title">预警复核<span *ngIf="!embedded"> · {{ selected.patientId }}</span></h2>
         <form (ngSubmit)="submit()">
           <label
             >处置动作<select name="action" [(ngModel)]="action">

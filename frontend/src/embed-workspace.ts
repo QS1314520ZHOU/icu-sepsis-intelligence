@@ -3,6 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { Component, inject, OnInit, OnDestroy, ViewChild } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 import { Api, Envelope, Patient, errorMessage } from './api';
+import { UiIcon } from './ui-icon';
 import { Detail } from './pages/detail';
 import { Alerts } from './pages/alerts';
 import { Bundles } from './pages/bundles';
@@ -33,7 +34,7 @@ interface HostPatientSession extends Session {
 
 @Component({
   standalone: true,
-  imports: [CommonModule, Detail, Alerts, Bundles, SepsisPanel],
+  imports: [CommonModule, Detail, Alerts, Bundles, SepsisPanel, UiIcon],
   template: ` <main class="icu-embed">
     <!-- 等待宿主 -->
     <section class="icu-embed-wait" *ngIf="!patient && !loading">
@@ -68,9 +69,9 @@ interface HostPatientSession extends Session {
           *ngFor="let t of tabs"
           [class.active]="view === t.key"
           [attr.aria-current]="view === t.key ? 'page' : null"
-          (click)="setView(t.key)"
+          (click)="trendInitialHours=12; setView(t.key)"
         >
-          {{ t.label }}
+          <ui-icon [name]="tabIcon(t.key)"/>{{ t.label }}
         </button>
       </nav></div>
 
@@ -78,11 +79,11 @@ interface HostPatientSession extends Session {
 
       <section class="icu-body">
         <sepsis-panel *ngIf="view === 'risk'" [patientId]="p.id" [encounterId]="p.encounterId"
-          (openEvidence)="setView('evidence')" (openAlerts)="setView('alerts')" (openTasks)="setView('tasks')" />
+          (openTrends)="openTrendHistory()" (openEvidence)="setView('evidence')" (openAlerts)="setView('alerts')" (openTasks)="setView('tasks')" />
         <patient-detail
           *ngIf="view === 'trends' || view === 'evidence'"
           [patientId]="p.id"
-          [embedded]="true"
+          [embedded]="true" [initialHours]="trendInitialHours" (openRecords)="setView('evidence')"
           [panel]="view === 'trends' ? 'trends' : 'evidence'"
           (openAlerts)="setView('alerts')"
         />
@@ -105,6 +106,9 @@ interface HostPatientSession extends Session {
   </main>`,
 })
 export class EmbedWorkspace implements OnInit, OnDestroy {
+  trendInitialHours=12;
+  openTrendHistory(){this.trendInitialHours=168;this.setView('trends');}
+  tabIcon(key:string) { return ({risk:'activity',trends:'chart',evidence:'file',alerts:'bell',tasks:'clipboard'} as Record<string,string>)[key] || 'file'; }
   api = inject(Api);
   http = inject(HttpClient);
   @ViewChild(Detail) detail?: Detail;

@@ -1,5 +1,6 @@
 import { CommonModule } from '@angular/common';
 import { Component, EventEmitter, Input, Output, inject, OnInit } from '@angular/core';
+import { UiIcon } from '../ui-icon';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { Api, errorMessage, History, Page, Task } from '../api';
@@ -7,8 +8,8 @@ import { text } from '../presentation';
 @Component({
   selector: 'patient-bundles',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink],
-  template: `<header class="embedded-section-head" *ngIf="embedded"><div><h1>执行与审核</h1><p>适用性、实际执行、目标与审核分别记录。</p></div><button (click)="load()" [disabled]="busy">刷新</button></header><div class="pagehead">
+  imports: [CommonModule, FormsModule, RouterLink, UiIcon],
+  template: `<header class="embedded-section-head" *ngIf="embedded"><h1><ui-icon name="clipboard"/>执行与审核</h1><button (click)="load()" [disabled]="busy"><ui-icon name="refresh"/>刷新</button></header><div class="pagehead">
       <div>
         <p class="eyebrow">BUNDLE WORKFLOW</p>
         <h1>Bundle 任务工作台</h1>
@@ -16,14 +17,10 @@ import { text } from '../presentation';
       </div>
       <button (click)="load()" [disabled]="busy">刷新</button>
     </div>
-    <div class="notice">
-      当前只启用“临床复评”模拟任务。60分钟是软件演示参数，不是已批准的治疗 Bundle 时限。
-    </div>
+    <details class="workflow-rules"><summary><ui-icon name="info"/>任务规则</summary><p>当前只启用“临床复评”模拟任务。60分钟是软件演示参数，不是已批准的治疗 Bundle 时限。</p></details>
     <p class="error" role="alert" *ngIf="error">{{ error }}</p>
     <section class="card">
-      <div class="empty" *ngIf="!tasks.length && !busy && !error">
-        暂无任务。医生确认筛查预警后，创建待审核演示任务。
-      </div>
+      <div class="work-empty" *ngIf="!tasks.length && !busy && !error"><ui-icon name="clipboard"/><strong>暂无待处理任务</strong><span>这里显示已建立的执行与审核记录，不代表治疗已完成</span><button *ngIf="embedded" (click)="openEvidence.emit()">核查患者证据 <ui-icon name="arrow"/></button></div>
       <article class="taskrow" *ngFor="let t of tasks">
         <div class="tasktitle">
           <strong>{{ t.itemName }}</strong
@@ -66,7 +63,7 @@ import { text } from '../presentation';
           </button>
         </div>
       </article>
-      <footer class="pager">
+      <footer class="pager" *ngIf="total>0">
         <button (click)="page = page - 1; load()" [disabled]="!page || busy">上一页</button
         ><span>第 {{ page + 1 }} 页 · 共 {{ total }} 条</span
         ><button (click)="page = page + 1; load()" [disabled]="(page + 1) * 20 >= total || busy">
