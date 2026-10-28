@@ -19,3 +19,5 @@ release/*.jar
 *.jar
 pkg-lock.tmp
 
+frontend/.angular/
+

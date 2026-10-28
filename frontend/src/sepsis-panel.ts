@@ -94,8 +94,7 @@ interface SepsisAssessment {
 
     <div class="sepsis-grid">
       <article class="card">
-        <h3>AI 可解释风险因子</h3>
-        <p class="muted small">{{ d.ai?.promptNote }}</p>
+        <h3>风险因子</h3>
         <ul class="factor-list">
           <li *ngFor="let f of d.risk?.factors || []">
             <span class="fw">+{{ f.weight }}</span>
@@ -124,11 +123,10 @@ interface SepsisAssessment {
               <span class="dot" [attr.data-done]="dot(it.done)"></span>
               <div>
                 <div>{{ it.name }}</div>
-                <small *ngIf="it.evidence">{{ it.evidence }}</small>
               </div>
             </div>
-            <div class="bundle-reasons" *ngIf="w.reasons?.length">
-              {{ w.reasons.join(' · ') }}
+            <div class="bundle-reasons" *ngIf="w.reasons?.length && showReasons(w)">
+              {{ reasonText(w) }}
             </div>
           </div>
         </div>
@@ -136,7 +134,7 @@ interface SepsisAssessment {
     </div>
 
     <article class="card subtypes">
-      <h3>亚型提示（规则推断）</h3>
+      <h3>亚型提示</h3>
       <div class="subtype-chips">
         <div class="chip" *ngFor="let s of d.subtypes || []">
           <strong>{{ s.label }}</strong>
@@ -144,11 +142,6 @@ interface SepsisAssessment {
         </div>
       </div>
     </article>
-
-    <p class="sepsis-foot">
-      结果为规则辅助分诊，需医师复核；不构成诊断，不自动开立医嘱。引擎 {{ d.engine }} ·
-      {{ d.ruleSource }}
-    </p>
   </section>
   <p class="icu-error" *ngIf="error">{{ error }}</p>`,
 })
@@ -186,5 +179,25 @@ export class SepsisPanel implements OnChanges {
 
   dot(v?: boolean | null): string {
     return v === true ? 'ok' : v === false ? 'bad' : 'unknown';
+  }
+
+  showReasons(w: BundleWindow): boolean {
+    if (!w.reasons?.length) return false;
+    return !w.reasons.every((r) => r === 'DATA_MISSING' || r === 'A1_NOT_MET' || r.endsWith('_MISSING'));
+  }
+
+  reasonText(w: BundleWindow): string {
+    const map: Record<string, string> = {
+      FLUID_INSUFFICIENT: '液体量不足 1500ml',
+      MAP_TRIGGERED: 'MAP 触发复苏',
+      LAC_RECHECK_MISSING: '需复测乳酸',
+      VASO_NOT_STARTED: '升压药未启动',
+      REASSESS_MISSING: '需容量再评估',
+      ABX_BEFORE_CULTURE: '抗菌药早于培养',
+    };
+    const parts = (w.reasons || [])
+      .map((r) => map[r] || r)
+      .filter((t) => t && !/^[A-Z0-9_]+$/.test(t));
+    return parts.join(' · ');
   }
 }
