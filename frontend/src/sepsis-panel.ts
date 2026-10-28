@@ -27,6 +27,9 @@ import { ClinicalReview, Evidence, featureLabel, yesNoUnknown, matchesPatient, r
       <button class="review-stat" (click)="openTasks.emit()"><span>待审核任务</span><strong>{{ tasksError ? '—' : (taskTotal ?? '—') }}<small *ngIf="!tasksError"> 项</small></strong><small>{{ tasksError ? '读取失败，可进入重试' : '查看执行与审核 ›' }}</small></button>
     </section>
 
+    <section class="review-source-warnings" *ngIf="data?.sourceWarnings?.length" aria-label="数据使用限制">
+      <strong>数据使用限制</strong><p *ngFor="let warning of data!.sourceWarnings">{{ warning }}</p>
+    </section>
     <div class="review-columns">
       <section class="review-trends" aria-label="观测趋势">
         <p class="review-inline-error" role="alert" *ngIf="observationsError">{{ observationsError }} <button (click)="load()">重试</button></p>
@@ -44,6 +47,10 @@ import { ClinicalReview, Evidence, featureLabel, yesNoUnknown, matchesPatient, r
           <p class="review-empty" *ngIf="!data?.available">数据尚不可用于核对，不作正常判断。</p>
           <p class="review-empty" *ngIf="data?.available && !data!.findings.length">有效记录中暂未见本次规则的阈值异常，不代表已排除疾病。</p>
           <div class="review-missing" *ngIf="data?.available && data!.missingFeatures.length"><strong>缺失 / 过期</strong><span>{{ missingText }}</span></div>
+          <div class="review-pressure" *ngIf="data?.pressureEvidence?.length">
+            <strong>血压分通道 · 待核对</strong>
+            <button *ngFor="let e of data!.pressureEvidence" (click)="selected=e">{{ featureName(e.code) }}：{{ e.value }} {{ e.unit }} · {{ e.eventTime | date:'HH:mm' }}</button>
+          </div>
           <dl class="review-facts" *ngIf="data?.available"><dt>qSOFA</dt><dd>{{ data!.qsofa ?? '无法计算' }}<span *ngIf="data!.qsofa !== null"> / 3</span> · 非诊断</dd><dt>升压药状态</dt><dd>{{ triState(data!.vasopressorActive) }}</dd></dl>
           <p class="review-help" *ngIf="data?.available">{{ data!.infectionClue }}</p>
         </section>
@@ -63,9 +70,16 @@ import { ClinicalReview, Evidence, featureLabel, yesNoUnknown, matchesPatient, r
         <tbody><tr *ngFor="let it of data!.checklist"><th scope="row">{{ it.name }}</th><td data-label="记录状态"><span class="review-record-state" [class.has-record]="it.status === 'recorded'">{{ it.status === 'recorded' ? '已有结果' : '待核对' }}</span></td><td data-label="事件时间">{{ it.eventTime ? (it.eventTime | date:'MM-dd HH:mm') : '—' }}</td><td data-label="核对内容">{{ it.note }}</td></tr></tbody></table></div>
       <p class="review-help review-table-note">{{ data!.taskNote }}</p>
     </section>
+    <section class="review-card review-context" *ngIf="data?.contextEvidence?.length" aria-label="住院关联未确认的候选报告">
+      <div class="review-card-title"><h2>候选报告 · 未纳入当前判断</h2><button (click)="openEvidence.emit()">原始记录</button></div>
+      <p class="review-help">仅按 HIS 患者键找到，尚不能确认本次住院归属；以下是报告时间，不是采样时间。结果状态未核验，不能据此判断正常或治疗达标。</p>
+      <div class="review-table-wrap"><table><thead><tr><th>项目</th><th>报告值</th><th>报告 / 审核时间</th><th>来源</th></tr></thead><tbody>
+        <tr *ngFor="let e of data!.contextEvidence"><td>{{ featureName(e.code) }}</td><td>{{ e.value }} {{ e.unit || '单位未知' }}</td><td>{{ e.eventTime | date:'MM-dd HH:mm' }}</td><td><button (click)="selected=e">查看来源</button></td></tr>
+      </tbody></table></div>
+    </section>
     <section class="review-evidence-detail" *ngIf="selected" aria-label="所选异常的来源证据">
-      <div class="review-card-title"><h2>{{ selected.label }} · 来源证据</h2><button (click)="selected = null">关闭</button></div>
-      <dl><dt>观测值</dt><dd>{{ selected.value }} {{ selected.unit }}</dd><dt>事件时间</dt><dd>{{ selected.eventTime | date:'yyyy-MM-dd HH:mm:ss' }}</dd><dt>来源系统</dt><dd>{{ selected.sourceSystem || '未标注' }}</dd><dt>来源记录</dt><dd>{{ selected.sourceRecordId || '未标注' }}</dd></dl>
+      <div class="review-card-title"><h2>{{ selected.label || featureName(selected.code) }} · 来源证据</h2><button (click)="selected = null">关闭</button></div>
+      <dl><dt>观测值</dt><dd>{{ selected.value }} {{ selected.unit }}</dd><dt>{{ selected.timeBasis === 'reported' ? '报告 / 审核时间' : '观测事件时间' }}</dt><dd>{{ selected.eventTime | date:'yyyy-MM-dd HH:mm:ss' }}</dd><dt>来源系统</dt><dd>{{ selected.sourceSystem || '未标注' }}</dd><dt>来源记录</dt><dd>{{ selected.sourceRecordId || '未标注' }}</dd><dt *ngIf="selected.qualityNote">证据限制</dt><dd *ngIf="selected.qualityNote">{{ selected.qualityNote }}</dd><dt *ngIf="selected.sourceParameterCode">源指标</dt><dd *ngIf="selected.sourceParameterCode">{{ selected.sourceParameterCode }}</dd></dl>
     </section>
   </section>`,
 })
@@ -83,6 +97,7 @@ export class SepsisPanel implements OnChanges, OnDestroy {
   loading = false; error = ''; observationsError = ''; alertsError = false; tasksError = false;
   asOf = ''; updatedAt = ''; selected: Evidence | null = null;
   private generation = 0;
+  featureName = featureLabel;
   state = reviewState; title = reviewTitle; triState = yesNoUnknown;
   get missingText() { return this.data?.missingFeatures.map(featureLabel).join('、') || ''; }
   ngOnChanges() { this.data=null; this.observations=[]; this.selected=null; void this.load(); }

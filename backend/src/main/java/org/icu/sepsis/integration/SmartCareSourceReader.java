@@ -3,7 +3,6 @@ package org.icu.sepsis.integration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Date;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -39,15 +38,15 @@ public class SmartCareSourceReader {
 
   private static final Map<String, String> BEDSIDE_TO_PARAMETER = Map.of(
       "param_HR", "HR",
-      "param_nibp_m", "MAP",
-      "param_nibp_s", "SBP",
-      "param_nibp_d", "DBP",
+      "param_nibp_m", "MAP_NIBP",
+      "param_nibp_s", "SBP_NIBP",
+      "param_nibp_d", "DBP_NIBP",
       "param_resp", "RR",
       "param_spo2", "SPO2",
       "param_T", "TEMP",
-      "param_ibp_m", "MAP",
-      "param_ibp_s", "SBP",
-      "param_ibp_d", "DBP");
+      "param_ibp_m", "MAP_IBP",
+      "param_ibp_s", "SBP_IBP",
+      "param_ibp_d", "DBP_IBP");
 
   private static final Map<String, String> PARAMETER_UNITS = Map.of(
       "HR", "bpm",
@@ -93,15 +92,15 @@ public class SmartCareSourceReader {
             .first();
     if (doc == null) return null;
     String hisPid = doc.getString("hisPid");
-    return hisPid == null || hisPid.isBlank() ? doc.getString("mrn") : hisPid;
+    return hisPid == null || hisPid.isBlank() ? null : hisPid;
   }
 
   private Document requireDocument(String hostPatientId) {
-    Document doc =
-        smartcare
-            .getCollection("patient")
-            .find(new Document("_id", new ObjectId(requireId(hostPatientId))))
-            .first();
+    Query q = Query.query(Criteria.where("_id").is(new ObjectId(requireId(hostPatientId))));
+    q.fields().include("name").include("hisPid").include("mrn").include("hospitalTime")
+        .include("deptCode").include("deptCode2").include("dept").include("showBed")
+        .include("hisBed").include("icuAdmissionTime").include("admissionTime");
+    Document doc = smartcare.findOne(q, Document.class, "patient");
     if (doc == null) throw ApiException.notFound();
     return doc;
   }
@@ -114,10 +113,19 @@ public class SmartCareSourceReader {
 
   public List<Observation> observations(
       String hostPatientId, String encounterId, String department, Instant from, Instant asOf) {
+    Document patient = requireDocument(hostPatientId);
+    if (!encounterIdOf(patient).equals(encounterId))
+      throw ApiException.conflict("住院上下文已变化，请重新选择患者。");
+    Instant admission = toInstant(patient.get("icuAdmissionTime"));
+    if (admission == null) admission = toInstant(patient.get("admissionTime"));
+    if (admission == null)
+      throw new ApiException(HttpStatus.CONFLICT, "ENCOUNTER_BOUNDARY_UNCONFIRMED", "入科边界未确认，暂停跨时间窗取数。");
+    Instant boundedFrom = from.isAfter(admission) ? from : admission;
+    if (boundedFrom.isAfter(asOf)) return List.of();
     List<Observation> out = new ArrayList<>();
-    out.addAll(bedsideObservations(hostPatientId, encounterId, department, from, asOf));
-    out.addAll(lactateObservations(hostPatientId, encounterId, department, from, asOf));
-    out.addAll(scoreObservations(hostPatientId, encounterId, department, from, asOf));
+    out.addAll(bedsideObservations(hostPatientId, encounterId, department, boundedFrom, asOf));
+    out.addAll(lactateObservations(patient, hostPatientId, department, boundedFrom, asOf));
+    out.addAll(scoreObservations(hostPatientId, encounterId, department, boundedFrom, asOf));
     return out;
   }
 
@@ -137,6 +145,7 @@ public class SmartCareSourceReader {
                     .lte(Date.from(asOf)))
             .with(Sort.by(Sort.Direction.DESC, "time"))
             .limit(4000);
+    q.fields().include("code").include("strVal").include("time").include("valid");
     List<Observation> rows = new ArrayList<>();
     for (Document d : smartcare.find(q, Document.class, "bedside")) {
       String code = d.getString("code");
@@ -146,31 +155,18 @@ public class SmartCareSourceReader {
       if (value == null) continue;
       Instant event = toInstant(d.get("time"));
       if (event == null) continue;
-      rows.add(
-          observation(
-              hostPatientId,
-              encounterId,
-              department,
-              parameter,
-              value,
-              PARAMETER_UNITS.get(parameter),
-              event,
-              event,
-              "SmartCare.bedside",
-              String.valueOf(d.get("_id"))));
+      Observation o = observation(hostPatientId, encounterId, department, parameter, value,
+          PARAMETER_UNITS.get(parameter.split("_")[0]), event, null,
+          "SmartCare.bedside", String.valueOf(d.get("_id")));
+      o.sourceParameterCode = code;
+      o.measurementChannel = code.startsWith("param_nibp_") ? "NIBP" : code.startsWith("param_ibp_") ? "IBP" : null;
+      rows.add(o);
     }
     return rows;
   }
 
   private List<Observation> lactateObservations(
-      String hostPatientId, String encounterId, String department, Instant from, Instant asOf) {
-    Document patient =
-        smartcare
-            .getCollection("patient")
-            .find(new Document("_id", new ObjectId(hostPatientId)))
-            .projection(new Document("hisPid", 1))
-            .first();
-    if (patient == null) return List.of();
+      Document patient, String hostPatientId, String department, Instant from, Instant asOf) {
     String hisPid = patient.getString("hisPid");
     if (hisPid == null || hisPid.isBlank()) return List.of();
     Query q =
@@ -178,12 +174,14 @@ public class SmartCareSourceReader {
                 Criteria.where("hisPid")
                     .is(hisPid)
                     .and("itemCode")
-                    .regex("(?i)LAC\\d*")
+                    .regex("(?i)^LAC\\d*$")
                     .and("authTime")
                     .gte(Date.from(from))
                     .lte(Date.from(asOf)))
             .with(Sort.by(Sort.Direction.DESC, "authTime"))
             .limit(400);
+    q.fields().include("itemCode").include("result").include("unit").include("authTime")
+        .include("resultStatus").include("almFlag").include("seriousFlag");
     List<Observation> rows = new ArrayList<>();
     for (Document d : dataCenter.find(q, Document.class, "VI_ICU_EXAM_ITEM")) {
       String itemCode = d.getString("itemCode");
@@ -193,19 +191,18 @@ public class SmartCareSourceReader {
       Instant event = toInstant(d.get("authTime"));
       if (event == null) continue;
       String unit = d.getString("unit");
-      if (unit == null || unit.isBlank()) unit = "mmol/L";
-      rows.add(
-          observation(
-              hostPatientId,
-              encounterId,
-              department,
-              "LACTATE",
-              value,
-              unit,
-              event,
-              event,
-              "DataCenter.VI_ICU_EXAM_ITEM",
-              String.valueOf(d.get("_id"))));
+      // Unknown unit stays unknown; never manufacture mmol/L.
+      Observation o = observation(hostPatientId, null, department, "LACTATE", value, unit,
+          event, null, "DataCenter.VI_ICU_EXAM_ITEM", String.valueOf(d.get("_id")));
+      o.sourceParameterCode = itemCode;
+      o.timeBasis = "reported";
+      o.reportedAt = event;
+      o.encounterLinkStatus = "unconfirmed";
+      o.clinicalUse = "context_only";
+      o.qualityStatus = "unverified";
+      o.sourceResultStatus = d.get("resultStatus") == null ? null : String.valueOf(d.get("resultStatus"));
+      o.qualityNote = "仅按 HIS 患者键找到的报告；本次住院关联、采样时间及结果有效状态未确认，不用于当前判断或治疗时效计算。";
+      rows.add(o);
     }
     return rows;
   }
@@ -225,6 +222,7 @@ public class SmartCareSourceReader {
                     .lte(Date.from(asOf)))
             .with(Sort.by(Sort.Direction.DESC, "time"))
             .limit(200);
+    q.fields().include("scoreType").include("total").include("time").include("valid");
     List<Observation> rows = new ArrayList<>();
     for (Document d : smartcare.find(q, Document.class, "score")) {
       String type = d.getString("scoreType");
@@ -246,7 +244,7 @@ public class SmartCareSourceReader {
               total,
               "score",
               event,
-              event,
+              null,
               "SmartCare.score",
               String.valueOf(d.get("_id"))));
     }
@@ -292,8 +290,7 @@ public class SmartCareSourceReader {
             .projection(
                 new Document("clinicalDiagnosis", 1)
                     .append("admissionDiagnosis", 1)
-                    .append("clinicalDiagnosisCodeList", 1)
-                    .append("diagnosisHistoryList", 1))
+                    .append("clinicalDiagnosisCodeList", 1))
             .first();
     if (d == null) return "";
     StringBuilder sb = new StringBuilder();
@@ -302,16 +299,6 @@ public class SmartCareSourceReader {
     Object codes = d.get("clinicalDiagnosisCodeList");
     if (codes instanceof List) {
       for (Object o : (List) codes) appendText(sb, String.valueOf(o));
-    }
-    Object hist = d.get("diagnosisHistoryList");
-    if (hist instanceof List) {
-      for (Object o : (List) hist) {
-        if (o instanceof Document) {
-          Document hd = (Document) o;
-          appendText(sb, hd.getString("diagnosis"));
-          appendText(sb, hd.getString("name"));
-        }
-      }
     }
     return sb.toString();
   }
@@ -322,143 +309,33 @@ public class SmartCareSourceReader {
     sb.append(s.trim());
   }
 
-  /** Window stats for MAP/SBP/RR/GCS/LACTATE. */
+  /** Legacy APIs fail explicitly until execution and encounter mappings are approved. Never return fake zero/empty attainment. */
+  @Deprecated
   public Map<String, Object> vitalsWindow(String hostPatientId, Instant from, Instant asOf) {
-    Map<String, Double> mins = new HashMap<>();
-    Map<String, Double> maxs = new HashMap<>();
-    Map<String, Double> latest = new HashMap<>();
-    Map<String, Instant> latestAt = new HashMap<>();
-    for (Observation o : observations(hostPatientId, "", "", from, asOf)) {
-      if (o.value == null || o.eventTime == null) continue;
-      String c = o.parameterCode;
-      if (c == null) continue;
-      mins.merge(c, o.value, Math::min);
-      maxs.merge(c, o.value, Math::max);
-      Instant prev = latestAt.get(c);
-      if (prev == null || o.eventTime.isAfter(prev)) {
-        latest.put(c, o.value);
-        latestAt.put(c, o.eventTime);
-      }
-    }
-    Map<String, Object> out = new LinkedHashMap<>();
-    out.put("mapMin", mins.get("MAP"));
-    out.put("mapMax", maxs.get("MAP"));
-    out.put("sbpMin", mins.get("SBP"));
-    out.put("rrMax", maxs.get("RR"));
-    out.put("lactateMax", maxs.get("LACTATE"));
-    out.put("gcsMin", mins.get("GCS"));
-    out.put("sofaMax", maxs.get("SOFA"));
-    out.put("hrMax", maxs.get("HR"));
-    out.put("tempMax", maxs.get("TEMP"));
-    out.put("latest", latest);
-    return out;
+    throw unverifiedExecution();
   }
-
   public static final class EventHit {
     public final Instant time;
     public final String name;
     public final Double amountMl;
-    public EventHit(Instant time, String name, Double amountMl) {
-      this.time = time;
-      this.name = name;
-      this.amountMl = amountMl;
-    }
-    public Instant time() {
-      return time;
-    }
+    public EventHit(Instant time, String name, Double amountMl) { this.time=time; this.name=name; this.amountMl=amountMl; }
+    public Instant time() { return time; }
   }
-
+  @Deprecated
   public Optional<EventHit> findDrugEvent(String hostPatientId, Instant from, Instant asOf, List<String> keywords) {
-    Instant best = null;
-    String bestName = null;
-    for (Document d :
-        smartcare
-            .getCollection("drugExe")
-            .find(
-                new Document("pid", hostPatientId)
-                    .append("createdTime", new Document("$gte", Date.from(from)).append("$lte", Date.from(asOf))))
-            .limit(500)) {
-      String names = drugNames(d);
-      if (!org.icu.sepsis.sepsis.SepsisClinicalRules.anyKeyword(names, keywords)) continue;
-      Instant t = toInstant(d.get("createdTime"));
-      if (t == null) continue;
-      if (best == null || t.isBefore(best)) {
-        best = t;
-        bestName = names;
-      }
-    }
-    if (best == null) return Optional.empty();
-    return Optional.of(new EventHit(best, bestName, null));
+    throw unverifiedExecution();
   }
-
+  @Deprecated
   public Optional<EventHit> findOrderEvent(String hisPid, Instant from, Instant asOf, List<String> keywords) {
-    if (hisPid == null || hisPid.isBlank()) return Optional.empty();
-    Instant best = null;
-    String bestName = null;
-    for (Document d :
-        dataCenter
-            .getCollection("VI_ICU_ZYYZ")
-            .find(
-                new Document("pid", hisPid)
-                    .append("orderTime", new Document("$gte", Date.from(from)).append("$lte", Date.from(asOf))))
-            .limit(800)) {
-      String name = firstNonBlank(d.getString("orderName"), "");
-      if (!org.icu.sepsis.sepsis.SepsisClinicalRules.anyKeyword(name, keywords)) continue;
-      String status = firstNonBlank(d.getString("status"), "");
-      if (status.startsWith("停") || "已停止".equals(status)) continue;
-      Instant t = toInstant(d.get("orderTime"));
-      if (t == null) continue;
-      if (best == null || t.isBefore(best)) {
-        best = t;
-        bestName = name;
-      }
-    }
-    if (best == null) return Optional.empty();
-    return Optional.of(new EventHit(best, bestName, null));
+    throw unverifiedExecution();
   }
-
+  @Deprecated
   public double fluidVolumeMl(String hostPatientId, Instant from, Instant asOf) {
-    double total = 0;
-    for (Document d :
-        smartcare
-            .getCollection("drugExe")
-            .find(
-                new Document("pid", hostPatientId)
-                    .append("createdTime", new Document("$gte", Date.from(from)).append("$lte", Date.from(asOf))))
-            .limit(800)) {
-      String names = drugNames(d);
-      if (!org.icu.sepsis.sepsis.SepsisClinicalRules.anyKeyword(
-              names, org.icu.sepsis.sepsis.SepsisClinicalRules.CRYSTALLOID)
-          && !org.icu.sepsis.sepsis.SepsisClinicalRules.anyKeyword(
-              names, org.icu.sepsis.sepsis.SepsisClinicalRules.COLLOID)) continue;
-      Object li = d.get("liquidAmount");
-      if (li instanceof Number) total += ((Number) li).doubleValue();
-      Object drugs = d.get("drugList");
-      if (drugs instanceof List) {
-        for (Object o : (List) drugs) {
-          if (o instanceof Document && ((Document) o).get("liquidAmount") instanceof Number)
-            total += ((Number) ((Document) o).get("liquidAmount")).doubleValue();
-        }
-      }
-    }
-    return total;
+    throw unverifiedExecution();
   }
-
-  private static String drugNames(Document d) {
-    StringBuilder sb = new StringBuilder();
-    Object list = d.get("drugList");
-    if (list instanceof List) {
-      for (Object o : (List) list) {
-        if (o instanceof Document) {
-          String n = ((Document) o).getString("name");
-          if (n != null) {
-            if (sb.length() > 0) sb.append(' ');
-            sb.append(n);
-          }
-        }
-      }
-    }
-    return sb.toString();
+  private static ApiException unverifiedExecution() {
+    return new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "SOURCE_EXECUTION_UNVERIFIED",
+        "执行时间、状态及住院归属尚未核验；不自动推导给药、输液或治疗达标。");
   }
 
   private Observation observation(
@@ -473,6 +350,7 @@ public class SmartCareSourceReader {
       String sourceSystem,
       String sourceRecordId) {
     Observation o = new Observation();
+    o.id = sourceSystem + ":" + sourceRecordId;
     o.patientId = hostPatientId;
     o.encounterId = encounterId;
     o.department = department;
@@ -485,7 +363,11 @@ public class SmartCareSourceReader {
     o.sourceSystem = sourceSystem;
     o.sourceRecordId = sourceRecordId;
     o.qualityStatus = "valid";
-    o.createdAt = ingestTime;
+    o.createdAt = null;
+    o.timeBasis = "observed";
+    o.ingestTimeBasis = "unknown";
+    o.encounterLinkStatus = "source_patient_record";
+    o.clinicalUse = "review";
     return o;
   }
 
@@ -536,15 +418,9 @@ public class SmartCareSourceReader {
     if (raw instanceof Number) return ((Number) raw).doubleValue();
     String s = String.valueOf(raw).trim();
     if (s.isEmpty()) return null;
-    int cut = 0;
-    while (cut < s.length()
-        && (Character.isDigit(s.charAt(cut))
-            || s.charAt(cut) == '.'
-            || s.charAt(cut) == '-'
-            || s.charAt(cut) == '+')) cut++;
-    if (cut == 0) return null;
     try {
-      return Double.parseDouble(s.substring(0, cut));
+      double value = Double.parseDouble(s);
+      return Double.isFinite(value) ? value : null;
     } catch (NumberFormatException e) {
       return null;
     }

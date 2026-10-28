@@ -49,7 +49,10 @@ export interface Observation {
   unit: string | null;
   text: string | null;
   eventTime: string;
-  ingestTime: string;
+  ingestTime: string | null;
+  sourceParameterCode?: string; measurementChannel?: string;
+  timeBasis?: string; ingestTimeBasis?: string; encounterLinkStatus?: string; clinicalUse?: string;
+  reportedAt?: string | null; sampledAt?: string | null; sourceResultStatus?: string | null; qualityNote?: string;
   sourceSystem: string;
   sourceRecordId: string;
   qualityStatus: string;

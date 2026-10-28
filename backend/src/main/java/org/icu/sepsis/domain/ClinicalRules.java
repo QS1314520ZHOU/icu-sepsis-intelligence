@@ -44,10 +44,13 @@ public class ClinicalRules {
   }
 
   public boolean valid(Observation o, Instant t) {
+    if ("context_only".equals(o.clinicalUse) || "unconfirmed".equals(o.encounterLinkStatus)) return false;
+    boolean sourceIngestUnknown = o.ingestTime == null && "unknown".equals(o.ingestTimeBasis)
+        && "review".equals(o.clinicalUse);
     if (o.eventTime == null
-        || o.ingestTime == null
+        || (o.ingestTime == null && !sourceIngestUnknown)
         || o.eventTime.isAfter(t)
-        || o.ingestTime.isAfter(t)
+        || (o.ingestTime != null && o.ingestTime.isAfter(t))
         || !"valid".equals(o.qualityStatus)) return false;
     long age = Duration.between(o.eventTime, t).getSeconds();
     int max =
@@ -64,6 +67,12 @@ public class ClinicalRules {
         return "/min".equals(o.unit) && o.value >= 1 && o.value <= 100;
       case "MAP":
       case "SBP":
+      case "MAP_IBP":
+      case "MAP_NIBP":
+      case "SBP_IBP":
+      case "SBP_NIBP":
+      case "DBP_IBP":
+      case "DBP_NIBP":
         return "mmHg".equals(o.unit) && o.value >= 10 && o.value <= 300;
       case "LACTATE":
         return "mmol/L".equals(o.unit) && o.value >= 0 && o.value <= 40;
@@ -92,6 +101,10 @@ public class ClinicalRules {
         } else latest.merge(o.parameterCode, o, (x, y) -> x.eventTime.isAfter(y.eventTime) ? x : y);
       }
     a.evidence.addAll(latest.values());
+    if (latest.keySet().stream().anyMatch(c -> c.matches("(MAP|SBP|DBP)_(IBP|NIBP)"))) {
+      latest.remove("MAP"); latest.remove("SBP");
+      a.conflictingEvidence.add("PRESSURE_CHANNEL_SELECTION_REQUIRED");
+    }
     a.infectionVerdict = infection(a.evidence);
     for (String c : List.of("MAP", "SBP", "RR", "GCS", "LACTATE", "VASOPRESSOR_ACTIVE"))
       if (!latest.containsKey(c)) a.missingFeatures.add(c);

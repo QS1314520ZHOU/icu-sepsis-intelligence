@@ -1,7 +1,7 @@
 import { CommonModule } from '@angular/common';
 import { Component, Input, OnChanges } from '@angular/core';
 import type { Observation } from './api';
-import { measures, pointsFor, segments, stale, Measure } from './trends';
+import { measuresFor, pointsFor, segments, stale, timeLabel, evidenceNote, Measure } from './trends';
 
 interface Plot {
   m: Measure;
@@ -123,15 +123,17 @@ interface Plot {
       <dl>
         <dt>数值</dt>
         <dd>{{ selected.value }} {{ selected.unit }}</dd>
-        <dt>事件时间</dt>
+        <dt>{{ timeLabel(selected.timeBasis) }}</dt>
         <dd>{{ selected.eventTime | date: 'MM-dd HH:mm' }}</dd>
         <dt>来源</dt>
         <dd>{{ selected.sourceSystem }}</dd>
         <dt>记录 ID</dt><dd>{{ selected.sourceRecordId }}</dd>
+        <dt *ngIf="selected.sourceParameterCode">源指标</dt><dd *ngIf="selected.sourceParameterCode">{{ selected.sourceParameterCode }}</dd>
+        <dt *ngIf="evidenceNote(selected)">证据限制</dt><dd *ngIf="evidenceNote(selected)">{{ evidenceNote(selected) }}</dd>
       </dl>
     </div>
     <p class="trend-method-note">
-      各图纵轴独立，勿跨图比较斜率；缺测不补值，间隔过长断线。点击数据点查看时间与来源。
+      有创 / 无创分图，不自动择优；住院归属未确认的报告不绘制。各图纵轴独立，勿跨图比较斜率；缺测不补值，间隔过长断线。点击数据点查看时间与来源。
     </p>
   </section>`,
 })
@@ -140,6 +142,7 @@ export class ClinicalTrends implements OnChanges {
   @Input() asOf = '';
   @Input() embedded = false;
   @Input() availableHours = 168;
+  timeLabel = timeLabel; evidenceNote = evidenceNote;
   hours = 12;
   hourOptions = [6, 12, 24, 72, 168];
   end = Date.now();
@@ -169,7 +172,7 @@ export class ClinicalTrends implements OnChanges {
   }
   refresh() {
     this.from = this.end - this.hours * 3600000;
-    this.plots = measures.map((m) => {
+    this.plots = measuresFor(this.items).map((m) => {
       const points = pointsFor(this.items, m, this.from, this.end),
         values = points.map((o) => o.value!);
       const min = values.length ? Math.min(...values) : 0,

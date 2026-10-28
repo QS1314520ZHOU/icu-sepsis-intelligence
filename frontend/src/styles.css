@@ -1512,3 +1512,10 @@ body {
 .trend-empty-summary dl { display:grid; grid-template-columns:1fr 1fr; gap:6px 12px; margin:0; font-size:14px; }
 .trend-empty-summary dt { margin:0; }.trend-empty-summary dd { text-align:right; margin:0; }
 .review-empty-records { margin-top:10px; }
+
+/* Read-only source adapter limitations stay visible inside the embedded clinical workspace. */
+.review-source-warnings{margin:12px 0;padding:12px 16px;border:1px solid #dac9ae;border-left:3px solid #a97331;background:#fffaf2;font-size:13px;color:#624d32}
+.review-source-warnings p{margin:5px 0;line-height:1.6}
+.review-pressure{margin:12px 0;padding:10px;background:#f4f7fa;border:1px solid #dce4ed;display:grid;gap:6px}
+.review-pressure button{text-align:left;white-space:normal;font-size:13px;padding:6px;border:0;background:transparent;color:#315d78}
+.review-context{margin-top:16px}

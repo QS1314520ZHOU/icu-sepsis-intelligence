@@ -39,6 +39,12 @@ public class SepsisAssessmentService {
       if (g.stream().map(o->o.value).distinct().count()!=1) continue;
       Observation o=g.get(0); latest.merge(o.parameterCode,o,(a,b)->a.eventTime.isAfter(b.eventTime)?a:b);
     }
+    boolean channelPressure = latest.keySet().stream().anyMatch(c -> c.matches("(MAP|SBP|DBP)_(IBP|NIBP)"));
+    // No site-approved preferred channel: never silently use a generic pressure alongside explicit channels.
+    if (channelPressure) { latest.remove("MAP"); latest.remove("SBP"); }
+    List<String> sourceWarnings = new ArrayList<>();
+    if (channelPressure) sourceWarnings.add("有创与无创血压分通道展示，尚未确认院内择优规则；不自动合成为单一血压输入，qSOFA 血压项待核对。");
+    if ("smartcare".equals(mode)) sourceWarnings.add("源记录入库时间未确认，不能据此进行历史时点回放；乳酸报告的采样时间、结果状态及本次住院关联未确认，候选报告仅供原始记录核对。");
     List<String> missing=new ArrayList<>();
     for(String code:List.of("MAP","SBP","RR","GCS","LACTATE")) if(!latest.containsKey(code)) missing.add(code);
     List<Map<String,Object>> findings=new ArrayList<>();
@@ -47,6 +53,11 @@ public class SepsisAssessmentService {
     abnormal(findings,latest,"RR","呼吸频率",22,false,"达到 qSOFA 呼吸频率项阈值");
     abnormal(findings,latest,"GCS","意识评分",15,true,"需结合镇静和基础神经状态核对");
     abnormal(findings,latest,"LACTATE","乳酸",config.getLactateHigh(),false,"乳酸升高，需结合灌注等临床情况核对");
+    for (String channel : List.of("IBP", "NIBP")) {
+      String suffix = "IBP".equals(channel) ? "（有创）" : "（无创）";
+      abnormal(findings,latest,"MAP_"+channel,"平均动脉压"+suffix,config.getMapLow(),true,"该通道低于核对阈值；未自动择优");
+      abnormal(findings,latest,"SBP_"+channel,"收缩压"+suffix,config.getSbpLow(),true,"该通道低于核对阈值；未自动择优");
+    }
     String status=!available?"unavailable":!findings.isEmpty()?"review_required":!missing.isEmpty()?"insufficient_data":"not_triggered";
     String label=!available?"数据暂不可用":!findings.isEmpty()?"存在待复核异常":!missing.isEmpty()?"数据不全，不能完整评估":"本次核对未见阈值异常";
     Map<String,Object> out=new LinkedHashMap<>();
@@ -54,8 +65,15 @@ public class SepsisAssessmentService {
     out.put("asOf",now); out.put("engine",SepsisClinicalRules.ENGINE_VERSION); out.put("ruleSource",SepsisClinicalRules.RULE_SOURCE);
     out.put("dataMode",mode); out.put("simulated",patient.simulated); out.put("available",available); out.put("message",message);
     out.put("screeningStatus",status); out.put("screeningLabel",label); out.put("missingFeatures",missing); out.put("findings",findings);
+    out.put("sourceWarnings",sourceWarnings);
+    out.put("pressureSelectionRequired",channelPressure);
+    out.put("pressureEvidence",latest.values().stream().filter(o -> o.parameterCode.matches("(MAP|SBP|DBP)_(IBP|NIBP)"))
+        .sorted(Comparator.comparing(o -> o.parameterCode)).map(this::evidence).collect(Collectors.toList()));
+    out.put("contextEvidence",rows.stream().filter(o -> "context_only".equals(o.clinicalUse))
+        .sorted(Comparator.comparing((Observation o) -> o.eventTime,Comparator.nullsLast(Comparator.reverseOrder())))
+        .limit(20).map(this::evidence).collect(Collectors.toList()));
     out.put("qsofa",SepsisClinicalRules.qSofa(value(latest,"SBP"),value(latest,"RR"),value(latest,"GCS")));
-    out.put("qsofaNote","仅使用新鲜且有效的最近记录；缺项不计零，qSOFA 不能单独诊断或排除脓毒症。");
+    out.put("qsofaNote","仅使用新鲜且有效的最近记录；未核验报告和未选定血压通道不参与计算；缺项不计零，qSOFA 不能单独诊断或排除脓毒症。");
     out.put("vasopressorActive",latest.containsKey("VASOPRESSOR_ACTIVE")?value(latest,"VASOPRESSOR_ACTIVE")==1:null);
     String diagnosis="";
     if(available) {
@@ -81,6 +99,10 @@ public class SepsisAssessmentService {
   private Double value(Map<String,Observation> m,String code) { return m.containsKey(code)?m.get(code).value:null; }
   private Map<String,Object> evidence(Observation o) {
     Map<String,Object> m=new LinkedHashMap<>();m.put("code",o.parameterCode);m.put("value",o.value);m.put("unit",o.unit);
+    m.put("sourceParameterCode",o.sourceParameterCode);m.put("measurementChannel",o.measurementChannel);
+    m.put("timeBasis",o.timeBasis);m.put("reportedAt",o.reportedAt);m.put("sampledAt",o.sampledAt);
+    m.put("encounterLinkStatus",o.encounterLinkStatus);m.put("clinicalUse",o.clinicalUse);
+    m.put("ingestTimeBasis",o.ingestTimeBasis);m.put("sourceResultStatus",o.sourceResultStatus);m.put("qualityNote",o.qualityNote);
     m.put("eventTime",o.eventTime);m.put("sourceSystem",o.sourceSystem);m.put("sourceRecordId",o.sourceRecordId);return m;
   }
   private void abnormal(List<Map<String,Object>> out,Map<String,Observation> m,String code,String label,double threshold,boolean below,String reason) {

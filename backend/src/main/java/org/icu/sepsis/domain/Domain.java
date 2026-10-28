@@ -28,6 +28,10 @@ public final class Domain {
     public String parameterCode, unit, sourceSystem, sourceRecordId, qualityStatus, text;
     public Double value;
     public Instant eventTime, ingestTime;
+    // Source semantics: never infer sampling/ingestion or encounter membership from a report time.
+    public String sourceParameterCode, measurementChannel, timeBasis, ingestTimeBasis,
+        encounterLinkStatus, clinicalUse, sourceResultStatus, qualityNote;
+    public Instant reportedAt, sampledAt;
   }
 
   @Document("sepsis_risk_assessment")
@@ -88,6 +92,7 @@ public final class Domain {
   public static class Execution extends Base {
     public String taskId, sourceRecordId, sourceSystem, actor;
     public Instant eventTime, ingestTime;
+
   }
 
   @Document("sepsis_state_history")

@@ -34,4 +34,22 @@ class ClinicalReviewTest {
   @Test void negativeAndHistoricalDiagnosisAreNotPositiveClues(){assertFalse(SepsisClinicalRules.infectionText("排除肺炎，无感染证据"));assertFalse(SepsisClinicalRules.infectionText("既往肺炎"));assertTrue(SepsisClinicalRules.infectionText("肺炎待排"));assertTrue(SepsisClinicalRules.infectionText("不能排除感染"));}
   @Test void eventTimingRequiresAnchorAndDeadline(){assertEquals("unknown",BundleModels.eventStatus(now,null,now.plusSeconds(3600)));assertEquals("recorded_late",BundleModels.eventStatus(now.plusSeconds(3601),now,now.plusSeconds(3600)));assertEquals("before_anchor",BundleModels.eventStatus(now.minusSeconds(1),now,now.plusSeconds(3600)));assertEquals("recorded_in_window",BundleModels.eventStatus(now.plusSeconds(3600),now,now.plusSeconds(3600)));}
   @Test void noHardCodedCompletedReassessmentOrTreatmentTargets(){Map<String,Object> r=run(List.of(obs("LACTATE",1.5,"mmol/L",now)));String checklist=r.get("checklist").toString();assertTrue(checklist.contains("REASSESS"));assertFalse(checklist.contains("status=completed"));assertFalse(checklist.contains("1500"));assertFalse(r.containsKey("bundle"));}
+
+  @Test void channelsRetainIndependentFindingsAndDoNotSelectQsofaPressure(){
+    Map<String,Object> r=run(List.of(obs("MAP_IBP",58,"mmHg",now),obs("MAP_NIBP",76,"mmHg",now),obs("SBP_NIBP",85,"mmHg",now),obs("RR",28,"/min",now),obs("GCS",14,"score",now)));
+    assertEquals(true,r.get("pressureSelectionRequired"));assertEquals(3,((List<?>)r.get("pressureEvidence")).size());assertNull(r.get("qsofa"));assertTrue(((List<?>)r.get("missingFeatures")).contains("SBP"));
+    assertTrue(r.get("findings").toString().contains("MAP_IBP"));assertFalse(r.get("findings").toString().contains("code=MAP_NIBP"));
+  }
+  @Test void genericPressureCannotOverrideExplicitChannel(){
+    Map<String,Object> r=run(List.of(obs("SBP",120,"mmHg",now),obs("SBP_IBP",80,"mmHg",now),obs("RR",28,"/min",now),obs("GCS",14,"score",now)));
+    assertNull(r.get("qsofa"));assertTrue(((List<?>)r.get("missingFeatures")).contains("SBP"));
+  }
+  @Test void sameChannelConflictDoesNotEraseOtherChannel(){
+    Map<String,Object> r=run(List.of(obs("MAP_IBP",58,"mmHg",now),obs("MAP_IBP",68,"mmHg",now),obs("MAP_NIBP",76,"mmHg",now)));
+    assertEquals(1,((List<?>)r.get("pressureEvidence")).size());assertTrue(r.get("pressureEvidence").toString().contains("MAP_NIBP"));
+  }
+  @Test void candidateReportIsContextOnlyNotFreshConfirmedLactate(){
+    Observation lac=obs("LACTATE",4.2,"mmol/L",now);lac.clinicalUse="context_only";lac.encounterLinkStatus="unconfirmed";lac.timeBasis="reported";lac.reportedAt=now;
+    Map<String,Object> r=run(List.of(lac));assertTrue(((List<?>)r.get("findings")).isEmpty());assertEquals(1,((List<?>)r.get("contextEvidence")).size());assertTrue(((List<?>)r.get("missingFeatures")).contains("LACTATE"));assertFalse(r.get("checklist").toString().contains("status=recorded"));
+  }
 }

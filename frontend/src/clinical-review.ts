@@ -2,6 +2,9 @@
 export interface Evidence {
   code: string; label?: string; value: number; unit: string; eventTime: string;
   sourceSystem: string; sourceRecordId: string; reason?: string;
+  sourceParameterCode?: string; measurementChannel?: string; timeBasis?: string;
+  encounterLinkStatus?: string; clinicalUse?: string; qualityNote?: string;
+  reportedAt?: string | null; sampledAt?: string | null;
 }
 export interface ReviewItem {
   code: string; name: string; status: 'recorded' | 'unknown'; note: string; eventTime: string | null;
@@ -12,11 +15,14 @@ export interface ClinicalReview {
   screeningStatus: string; screeningLabel: string; missingFeatures: string[];
   findings: Evidence[]; latestEvidence: Evidence[]; qsofa: number | null; qsofaNote: string;
   vasopressorActive: boolean | null; infectionClue: string;
+  sourceWarnings?: string[]; pressureSelectionRequired?: boolean;
+  pressureEvidence?: Evidence[]; contextEvidence?: Evidence[];
   checklist: ReviewItem[]; taskNote: string;
   model: { configured: boolean; label: string; message: string };
   ai: { configured: boolean; label: string };
 }
-const names: Record<string,string> = {MAP:'平均动脉压',SBP:'收缩压',RR:'呼吸频率',GCS:'意识评分',LACTATE:'乳酸'};
+const names: Record<string,string> = {MAP:'平均动脉压',SBP:'收缩压',RR:'呼吸频率',GCS:'意识评分',LACTATE:'乳酸',
+  MAP_IBP:'平均动脉压（有创）',MAP_NIBP:'平均动脉压（无创）',SBP_IBP:'收缩压（有创）',SBP_NIBP:'收缩压（无创）',DBP_IBP:'舒张压（有创）',DBP_NIBP:'舒张压（无创）'};
 export function featureLabel(code: string): string { return names[code] || code; }
 export function yesNoUnknown(value: boolean | null | undefined): string {
   return value === true ? '有记录' : value === false ? '记录为无' : '未取得有效记录';
