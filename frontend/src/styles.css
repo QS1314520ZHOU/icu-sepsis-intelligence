@@ -148,7 +148,7 @@ small,
   grid-template-columns: 206px minmax(0, 1fr);
   min-height: calc(100vh - 112px);
 }
-aside {
+.shell > aside {
   background: #f9fbfe;
   border-right: 1px solid #d9e1ed;
   padding: 24px 12px;
@@ -598,7 +598,7 @@ textarea {
   .shell {
     display: block;
   }
-  aside {
+  .shell > aside {
     padding: 8px 12px;
     border-right: 0;
     border-bottom: 1px solid #d9e1ed;
@@ -1321,7 +1321,6 @@ body {
   box-shadow: 0 2px 8px #1a3a6a22;
 }
 /* embed 组件内去营销文案 */
-.icu-embed .notice,
 .icu-embed .pagehead,
 .icu-embed .eyebrow {
   display: none !important;
@@ -1395,70 +1394,4 @@ body {
   .icu-body {
     padding: 8px;
   }
-}
-.sepsis-panel { display: flex; flex-direction: column; gap: 12px; }
-.sepsis-head {
-  display: grid;
-  grid-template-columns: 180px 1fr;
-  gap: 12px;
-  padding: 12px 14px;
-  background: #fff;
-  border: 1px solid #d9e2ef;
-  border-radius: 4px;
-  border-left: 4px solid #94a3b8;
-}
-.sepsis-head[data-level='critical'] { border-left-color: #c0392b; background: #fff8f7; }
-.sepsis-head[data-level='high'] { border-left-color: #e67e22; background: #fffaf3; }
-.sepsis-head[data-level='moderate'] { border-left-color: #f1c40f; background: #fffdf5; }
-.sepsis-head[data-level='low'] { border-left-color: #2f6fed; }
-.risk-box { display: flex; align-items: center; gap: 10px; }
-.risk-score {
-  width: 56px; height: 56px; border-radius: 4px;
-  display: grid; place-items: center;
-  background: #1f2d3d; color: #fff; font-size: 22px; font-weight: 700;
-}
-.sepsis-head[data-level='critical'] .risk-score { background: #c0392b; }
-.sepsis-head[data-level='high'] .risk-score { background: #e67e22; }
-.risk-level { font-size: 16px; font-weight: 700; }
-.risk-sub { font-size: 12px; color: #5b6b80; }
-.shock-box { border: 1px solid #e1e8f2; border-radius: 4px; padding: 10px 12px; background: #fff; }
-.shock-box.on { border-color: #f5c6c2; background: #fff1f0; }
-.shock-title { font-weight: 700; color: #6b7c93; }
-.shock-box.on .shock-title { color: #c0392b; }
-.shock-rule { font-size: 12px; color: #5b6b80; margin-top: 2px; }
-.shock-flags { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 8px; font-size: 12px; color: #24354e; }
-.sepsis-grid { display: grid; grid-template-columns: 1fr 1.2fr; gap: 12px; }
-.sepsis-panel .card { background: #fff; border: 1px solid #d9e2ef; border-radius: 4px; padding: 12px; }
-.sepsis-panel h3 { margin: 0 0 8px; font-size: 14px; }
-.factor-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-.factor-list li { display: flex; gap: 10px; align-items: flex-start; }
-.factor-list .fw {
-  min-width: 42px; text-align: center; background: #eef4ff; color: #1a4fa8;
-  border-radius: 3px; font-size: 12px; font-weight: 700; padding: 2px 0;
-}
-.factor-list strong { display: block; font-size: 13px; }
-.factor-list small { color: #6b7c93; font-size: 12px; }
-.action-list { margin: 12px 0 0; padding-left: 18px; color: #24354e; font-size: 13px; }
-.bundle-cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-.bundle-col { border: 1px solid #e1e8f2; border-radius: 4px; padding: 8px; background: #fafbfc; }
-.bundle-col[data-finish='ok'] { border-color: #9fd0a8; background: #f4faf5; }
-.bundle-col[data-finish='bad'] { border-color: #f0c2bc; background: #fff6f5; }
-.bundle-title { font-weight: 700; font-size: 13px; margin-bottom: 6px; }
-.bundle-item { display: flex; gap: 8px; font-size: 12px; padding: 4px 0; border-top: 1px dashed #e8eef6; }
-.bundle-item:first-of-type { border-top: 0; }
-.bundle-item .dot {
-  width: 10px; height: 10px; border-radius: 50%; margin-top: 4px; flex-shrink: 0; background: #cbd5e1;
-}
-.bundle-item .dot[data-done='ok'] { background: #22a06b; }
-.bundle-item .dot[data-done='bad'] { background: #c0392b; }
-.bundle-reasons { margin-top: 6px; font-size: 11px; color: #c0392b; }
-.subtypes .subtype-chips { display: flex; flex-wrap: wrap; gap: 8px; }
-.subtypes .chip {
-  border: 1px solid #d9e2ef; border-radius: 4px; padding: 8px 10px; background: #f8fafc; min-width: 160px;
-}
-.subtypes .chip strong { display: block; font-size: 13px; }
-.subtypes .chip small { color: #6b7c93; font-size: 12px; }
-.sepsis-foot { margin: 0; font-size: 12px; color: #7b8794; }
-@media (max-width: 900px) {
-  .sepsis-grid, .bundle-cols, .sepsis-head { grid-template-columns: 1fr; }
 }

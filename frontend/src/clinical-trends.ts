@@ -1,7 +1,8 @@
 import { CommonModule } from '@angular/common';
-import { Component, Input, OnChanges } from '@angular/core';
+import { Component, EventEmitter, Input, Output, OnChanges, SimpleChanges } from '@angular/core';
+import { UiIcon } from './ui-icon';
 import type { Observation } from './api';
-import { measures, pointsFor, segments, stale, Measure } from './trends';
+import { measuresFor, pointsFor, segments, stale, timeLabel, evidenceNote, Measure } from './trends';
 
 interface Plot {
   m: Measure;
@@ -17,12 +18,11 @@ interface Plot {
 @Component({
   selector: 'clinical-trends',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, UiIcon],
   template: ` <section class="card trend-section">
     <div class="section-head">
       <div>
-        <p class="eyebrow" *ngIf="!embedded">OBSERVED VITALS</p>
-        <h2>生命体征</h2>
+        <h2><ui-icon name="chart"/>生命体征趋势<span class="caution-tag" *ngIf="hours > 24">含历史记录</span></h2>
       </div>
       <div class="segmented" role="group" aria-label="趋势时间范围">
         <button
@@ -31,27 +31,29 @@ interface Plot {
           [attr.aria-pressed]="hours === h"
           (click)="setHours(h)"
         >
-          {{ h }}h
+          {{ rangeLabel(h) }}
         </button>
       </div>
     </div>
-    <div class="chart-caption" *ngIf="!embedded">
-      <span class="legend-line"></span>实际存储的观测 · 非预测曲线
-      <span>{{ from | date: 'MM-dd HH:mm' }} — {{ end | date: 'MM-dd HH:mm' }}</span>
+    <div class="chart-caption"><span><ui-icon name="clock"/>{{ from | date:'MM-dd HH:mm' }} — {{ end | date:'MM-dd HH:mm' }}</span><span class="report-chip" *ngIf="contextCount">{{ contextCount }} 条候选报告不参与绘图</span><button class="text-button" *ngIf="embedded" (click)="openRecords.emit()">记录单 <ui-icon name="arrow"/></button></div>
+    <div class="read-limit" *ngIf="items.length >= 2000"><ui-icon name="info"/>读取量较大，当前结果可能截断；不代表所选时段完整数据。</div>
+    <div class="chart-loading" *ngIf="busy" role="status"><span class="spinner"></span>正在读取所选时段…</div>
+    <div class="trend-empty-summary" *ngIf="!hasPlottable && !busy">
+      <div class="missing-metrics"><div *ngFor="let p of plots"><span>{{ p.m.label }}</span><strong>—<small>{{ p.m.unit }}</small></strong><em>无可用记录</em></div></div>
+      <div class="empty-chart-action"><ui-icon name="empty"/><div><strong>近 {{ rangeLabel(hours) }}暂无可绘制记录</strong><p>缺项不代表正常，可扩大范围查找已有记录</p></div><div class="empty-chart-buttons"><button class="primary" (click)="expandRange()">{{ compact ? '查看历史记录' : hours < 168 ? '查看近 7 天' : hours < 720 ? '查看近 30 天' : '查看原始记录' }} <ui-icon name="arrow"/></button><button (click)="openRecords.emit()">查看记录单</button></div></div>
     </div>
-    <div class="missing" *ngIf="items.length >= 2000">已达读取上限，趋势可能不完整。</div>
-    <div class="trend-grid">
+    <div class="trend-grid" *ngIf="hasPlottable && !busy">
       <article class="trend-tile" *ngFor="let p of plots">
         <div class="trend-title">
           <div>
-            <span>{{ p.m.label }}</span
-            ><small *ngIf="!embedded">{{ p.m.code }} · {{ p.m.unit }}</small>
+            <span>{{ p.m.label }}</span>
+            <small *ngIf="!embedded">{{ p.m.code }} · {{ p.m.unit }}</small>
           </div>
           <span class="tag" *ngIf="!p.last">无数据</span>
           <span class="tag warning" *ngIf="p.last && p.stale">过期</span>
         </div>
-        <div class="trend-reading" [style.color]="p.m.color">
-          {{ p.last?.value ?? '—' }}<small>{{ p.m.unit }}</small>
+        <div class="trend-reading" >
+          <strong>{{ p.last?.value ?? '—' }}</strong><small>{{ p.m.unit }}</small>
           <span *ngIf="p.last">{{ p.last.eventTime | date: 'MM-dd HH:mm' }}</span>
         </div>
         <svg
@@ -69,7 +71,7 @@ interface Plot {
               stroke="#e5ebf2"
               stroke-dasharray="3 4"
             />
-            <text x="29" [attr.y]="24 + tick * 48" text-anchor="end" fill="#7b8794" font-size="10">
+            <text x="29" [attr.y]="24 + tick * 48" text-anchor="end" fill="#7b8794" font-size="12">
               {{ p.high - ((p.high - p.low) * tick) / 2 | number: '1.0-1' }}
             </text>
           </g>
@@ -98,15 +100,15 @@ interface Plot {
               {{ o.sourceSystem }}
             </title>
           </circle>
-          <text x="36" y="145" fill="#7b8794" font-size="10">{{ from | date: 'MM-dd HH:mm' }}</text>
-          <text x="310" y="145" text-anchor="end" fill="#7b8794" font-size="10">
+          <text x="36" y="145" fill="#7b8794" font-size="12">{{ from | date: 'MM-dd HH:mm' }}</text>
+          <text x="310" y="145" text-anchor="end" fill="#7b8794" font-size="12">
             {{ end | date: 'MM-dd HH:mm' }}
           </text>
         </svg>
         <div *ngIf="!p.points.length" class="chart-empty">该时间窗无观测</div>
-        <div class="trend-foot" *ngIf="!embedded">
-          <span>{{ p.points.length }} 次观测</span>
-          <button *ngIf="p.last" (click)="choose(p.last)">核查数据点</button>
+        <div class="trend-foot">
+          <span>{{ p.points.length }} 次观测<span *ngIf="p.excluded"> · {{ p.excluded }} 条未绘制</span></span>
+          <button *ngIf="p.last" (click)="choose(p.last)">来源 <ui-icon name="arrow"/></button>
         </div>
       </article>
     </div>
@@ -118,38 +120,50 @@ interface Plot {
       <dl>
         <dt>数值</dt>
         <dd>{{ selected.value }} {{ selected.unit }}</dd>
-        <dt>事件时间</dt>
+        <dt>{{ timeLabel(selected.timeBasis) }}</dt>
         <dd>{{ selected.eventTime | date: 'MM-dd HH:mm' }}</dd>
         <dt>来源</dt>
         <dd>{{ selected.sourceSystem }}</dd>
-        <dt *ngIf="!embedded">记录 ID</dt>
-        <dd *ngIf="!embedded">{{ selected.sourceRecordId }}</dd>
+        <dt>记录 ID</dt><dd>{{ selected.sourceRecordId }}</dd>
+        <dt *ngIf="selected.sourceParameterCode">源指标</dt><dd *ngIf="selected.sourceParameterCode">{{ selected.sourceParameterCode }}</dd>
+        <dt *ngIf="evidenceNote(selected)">证据限制</dt><dd *ngIf="evidenceNote(selected)">{{ evidenceNote(selected) }}</dd>
       </dl>
     </div>
-    <p class="muted small" *ngIf="!embedded">
-      纵轴独立缩放，直线连接相邻观测，不补值。单位无效或同刻冲突不绘制。
-    </p>
+    <details class="trend-method-note"><summary><ui-icon name="info"/>图表说明</summary><p>有创 / 无创分图，不自动择优；住院归属未确认的报告不绘制。纵轴独立，勿跨图比较斜率；不插值，缺测断线。点选记录可查看时间与来源。</p></details>
   </section>`,
 })
 export class ClinicalTrends implements OnChanges {
   @Input() items: Observation[] = [];
   @Input() asOf = '';
   @Input() embedded = false;
-  hours = 72;
+  @Input() availableHours = 168;
+  @Input() windowHours = 12;
+  @Input() compact = false;
+  @Input() busy = false;
+  @Output() requestRange = new EventEmitter<number>();
+  @Output() openHistory = new EventEmitter<void>();
+  @Output() openRecords = new EventEmitter<void>();
+  rangeLabel(h:number) { return h >= 72 ? (h / 24) + ' 天' : h + ' 小时'; }
+  get contextCount() { return this.items.filter(o => o.clinicalUse === 'context_only').length; }
+  expandRange() { if(this.compact) this.openHistory.emit(); else if(this.hours < 168) this.setHours(168); else if(this.hours < 720) this.setHours(720); else this.openRecords.emit(); }
+  timeLabel = timeLabel; evidenceNote = evidenceNote;
+  hours = 12;
   hourOptions = [6, 12, 24, 72, 168];
   end = Date.now();
   from = this.end - this.hours * 3600000;
   plots: Plot[] = [];
   selected: Observation | null = null;
-  ngOnChanges() {
+  get hasPlottable() { return this.plots.some(p => p.points.length > 0); }
+  ngOnChanges(changes: SimpleChanges) {
     this.end = Date.parse(this.asOf) || Date.now();
-    this.hours = this.embedded ? 72 : 12;
-    this.hourOptions = this.embedded ? [6, 12, 24, 72, 168] : [6, 12, 24];
+    if (changes['windowHours']) this.hours = this.windowHours;
+    this.hourOptions = this.compact ? [6,12,24] : [6,12,24,72,168,720];
     this.refresh();
   }
   setHours(h: number) {
-    this.hours = h;
     this.selected = null;
+    if (h > this.availableHours) { this.requestRange.emit(h); return; }
+    this.hours = h;
     this.refresh();
   }
   choose(o: Observation) {
@@ -163,7 +177,7 @@ export class ClinicalTrends implements OnChanges {
   }
   refresh() {
     this.from = this.end - this.hours * 3600000;
-    this.plots = measures.map((m) => {
+    this.plots = measuresFor(this.items).map((m) => {
       const points = pointsFor(this.items, m, this.from, this.end),
         values = points.map((o) => o.value!);
       const min = values.length ? Math.min(...values) : 0,

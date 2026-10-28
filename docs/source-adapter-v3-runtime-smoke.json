@@ -1,0 +1,22 @@
+{
+  "scope": "final packaged jar + dedicated local demo MongoDB; no hospital source connection",
+  "patients": [
+    {
+      "patientId": "demo-insufficient",
+      "status": "insufficient_data",
+      "newMetadataReturned": true
+    },
+    {
+      "patientId": "demo-deteriorating",
+      "status": "review_required",
+      "newMetadataReturned": true
+    },
+    {
+      "patientId": "demo-normal",
+      "status": "not_triggered",
+      "newMetadataReturned": true
+    }
+  ],
+  "servedFrontendMatchesBuild": true,
+  "jarSha256": "7a93d43be62f538a2fb36e9929c13be3d51618700844469ce437c81af488b596"
+}

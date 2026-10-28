@@ -26,6 +26,7 @@ public class ApiController {
   private final ClinicalDataProvider data;
   private final RiskModelProvider model;
   private final org.icu.sepsis.sepsis.SepsisAssessmentService sepsis;
+  private final org.icu.sepsis.sepsis.Icu05Service icu05;
 
   public ApiController(
       Store st,
@@ -34,7 +35,8 @@ public class ApiController {
       WorkflowService w,
       ClinicalDataProvider d,
       RiskModelProvider m,
-      org.icu.sepsis.sepsis.SepsisAssessmentService sepsisSvc) {
+      org.icu.sepsis.sepsis.SepsisAssessmentService sepsisSvc,
+      org.icu.sepsis.sepsis.Icu05Service icu05Svc) {
     s = st;
     q = qs;
     assessments = a;
@@ -42,6 +44,7 @@ public class ApiController {
     data = d;
     model = m;
     sepsis = sepsisSvc;
+    icu05 = icu05Svc;
   }
 
   @GetMapping("/me")
@@ -90,7 +93,7 @@ public class ApiController {
             "limit",
             2000,
             "note",
-            "受限时间窗，最多2000条；未来与尚未入库的数据不返回。"));
+            "受限时间窗与分源条数上限；源入库时间未知时明确标记。候选报告不表示已确认本次住院归属。"));
   }
 
   @PostMapping("/patients/{id}/risk-assessments")
@@ -116,11 +119,18 @@ public class ApiController {
     return Envelope.ok(q.page(c, Assessment.class, page, size, Views::assessment));
   }
 
-  /** Real-time sepsis / septic-shock auto classification + 1h3h6h Bundle + explainable AI risk. */
+  /** Read-only recent-evidence review (schema v2); not a diagnosis or prediction model. */
   @GetMapping("/patients/{id}/sepsis-assessment")
   public Envelope<?> sepsisAssessment(@PathVariable String id) {
     Patient p = s.patient(id);
     return Envelope.ok(sepsis.assess(p, Instant.now()));
+  }
+
+  /** ICU-05 septic-shock bundle timeline per the director's rule set; read-only, tri-state, not a diagnosis. */
+  @GetMapping("/patients/{id}/icu05-bundle")
+  public Envelope<?> icu05Bundle(@PathVariable String id) {
+    Patient p = s.patient(id);
+    return Envelope.ok(icu05.evaluate(p, Instant.now()));
   }
 
   @GetMapping("/risk-assessments/{id}")

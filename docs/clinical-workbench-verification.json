@@ -1,0 +1,29 @@
+{
+  "baseCommit": "e051ac24b2414bb6bbc9971adb8308c587782ac6",
+  "backend": {
+    "passed": 76,
+    "failed": 0,
+    "skipped": 0,
+    "localMongoIntegration": true
+  },
+  "frontend": {
+    "passed": 36,
+    "failed": 0,
+    "productionBuild": true
+  },
+  "browser": {
+    "passed": 14,
+    "failed": 0,
+    "scope": "compiled frontend and synthetic API responses"
+  },
+  "runtimeSmoke": {
+    "demoPatients": 3,
+    "servedFrontendMatchesBuild": true,
+    "scope": "packaged jar and dedicated local MongoDB demo"
+  },
+  "hospitalIntegrationTested": false,
+  "clinicalValidationCompleted": false,
+  "predictionModelConfigured": false,
+  "summaryAIConfigured": false,
+  "githubPushed": false
+}

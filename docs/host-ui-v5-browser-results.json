@@ -1,0 +1,98 @@
+{
+  "scope": "compiled frontend with synthetic API responses; not hospital integration",
+  "tests": [
+    {
+      "name": "overview puts the most urgent values first and keeps curves folded",
+      "passed": true
+    },
+    {
+      "name": "bundle and organ panels never invent completion",
+      "passed": true
+    },
+    {
+      "name": "host receives a per-patient status badge message",
+      "passed": true
+    },
+    {
+      "name": "tile opens source evidence in place",
+      "passed": true
+    },
+    {
+      "name": "vital trends are available on demand",
+      "passed": true
+    },
+    {
+      "name": "pending alert button opens quick-reason review",
+      "passed": true
+    },
+    {
+      "name": "unsaved review rejects patient switching",
+      "passed": true
+    },
+    {
+      "name": "quick reason is saved as the review reason",
+      "passed": true
+    },
+    {
+      "name": "rapid patient selections keep the newest result",
+      "passed": true
+    },
+    {
+      "name": "missing data stays unknown and is not shown as normal",
+      "passed": true
+    },
+    {
+      "name": "empty overview offers working history lookup",
+      "passed": true
+    },
+    {
+      "name": "non-parent message cannot select a patient",
+      "passed": true
+    },
+    {
+      "name": "parent clear removes all previous patient content",
+      "passed": true
+    },
+    {
+      "name": "partial work-queue failure is not shown as zero",
+      "passed": true
+    },
+    {
+      "name": "unavailable source is explicitly reported without low risk",
+      "passed": true
+    },
+    {
+      "name": "narrow iframe keeps readable content without body overflow",
+      "passed": true
+    },
+    {
+      "name": "separate pressure channels both shown, unconfirmed lactate stays out of prompts",
+      "passed": true
+    },
+    {
+      "name": "records open as a time-column flowsheet with flagged cells",
+      "passed": true
+    },
+    {
+      "name": "flowsheet range changes bucket size and paging",
+      "passed": true
+    },
+    {
+      "name": "detail list filter and range apply to rows",
+      "passed": true
+    },
+    {
+      "name": "trend chart mode is inside records tab",
+      "passed": true
+    },
+    {
+      "name": "nurse role sees bundle across the full width",
+      "passed": true
+    },
+    {
+      "name": "no browser runtime errors",
+      "passed": true
+    }
+  ],
+  "errors": []
+}

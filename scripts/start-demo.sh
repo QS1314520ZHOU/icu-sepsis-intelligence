@@ -4,6 +4,8 @@ cd "$(dirname "$0")/.."
 source scripts/check-java15.sh
 [[ -f .runtime/demo.env ]] || bash scripts/generate-demo-env.sh
 set -a; source .runtime/demo.env; set +a
+# Existing demo env files predate the live-source adapter; never default a demo launch to the hospital source.
+export CLINICAL_SOURCE_MODE="${CLINICAL_SOURCE_MODE:-demo}"
 mkdir -p .runtime
 jar=release/sepsis-intelligence-0.3.0.jar
 [[ -f "$jar" ]] || jar=backend/target/sepsis-intelligence-0.3.0.jar

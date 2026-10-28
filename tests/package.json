@@ -4,7 +4,8 @@
   "scripts": {
     "test": "node e2e.cjs",
     "test:visual": "node visual-e2e.cjs",
-    "test:embed": "node embed-e2e.cjs"
+    "test:embed": "node embed-e2e.cjs",
+    "test:clinical": "node clinical-workbench.cjs"
   },
   "devDependencies": {
     "playwright": "1.61.1"

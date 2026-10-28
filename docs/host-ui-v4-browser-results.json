@@ -1,0 +1,98 @@
+{
+  "scope": "compiled frontend with synthetic API responses; not hospital integration",
+  "tests": [
+    {
+      "name": "same patient overview shows observation trends and actionable records",
+      "passed": true
+    },
+    {
+      "name": "source evidence can be inspected without leaving current patient",
+      "passed": true
+    },
+    {
+      "name": "diagnostic checklist uses unknown rather than fabricated target attainment",
+      "passed": true
+    },
+    {
+      "name": "work queue navigates to existing review form",
+      "passed": true
+    },
+    {
+      "name": "unsaved review rejects patient switching",
+      "passed": true
+    },
+    {
+      "name": "rapid patient selections keep the newest result",
+      "passed": true
+    },
+    {
+      "name": "missing data stays unknown and has no artificial curve",
+      "passed": true
+    },
+    {
+      "name": "empty state has compact metric cells and a working history action",
+      "passed": true
+    },
+    {
+      "name": "longer range fetches source window rather than inventing points",
+      "passed": true
+    },
+    {
+      "name": "non-parent message cannot select a patient",
+      "passed": true
+    },
+    {
+      "name": "parent clear removes all previous patient content",
+      "passed": true
+    },
+    {
+      "name": "partial work-queue failure is not shown as zero",
+      "passed": true
+    },
+    {
+      "name": "unavailable source is explicitly reported without low risk",
+      "passed": true
+    },
+    {
+      "name": "narrow iframe keeps readable content without body overflow",
+      "passed": true
+    },
+    {
+      "name": "separate source pressure channels render without silent priority",
+      "passed": true
+    },
+    {
+      "name": "unconfirmed lab report stays out of graph and completion",
+      "passed": true
+    },
+    {
+      "name": "keyboard can open original records tab",
+      "passed": true
+    },
+    {
+      "name": "record filter works and source restrictions stay visible",
+      "passed": true
+    },
+    {
+      "name": "record range applies to rows, not just its label",
+      "passed": true
+    },
+    {
+      "name": "alert review retains actual form and host-blue primary action",
+      "passed": true
+    },
+    {
+      "name": "task empty state is compact and rule explanation remains accessible",
+      "passed": true
+    },
+    {
+      "name": "no stray template punctuation remains",
+      "passed": true
+    },
+    {
+      "name": "no browser runtime errors",
+      "passed": true
+    }
+  ],
+  "errors": []
+}
