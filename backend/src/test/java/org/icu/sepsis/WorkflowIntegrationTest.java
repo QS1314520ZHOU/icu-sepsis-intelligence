@@ -39,6 +39,15 @@ class WorkflowIntegrationTest {
   @Autowired MockMvc http;
 
   @Test
+  void clinicalReviewKeepsMissingUnknownWithoutFakeRisk() throws Exception {
+    http.perform(get("/api/v1/patients/demo-insufficient/sepsis-assessment").with(user("doctor").roles("DOCTOR")))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.data.schemaVersion").value(2))
+      .andExpect(jsonPath("$.data.qsofa").isEmpty()).andExpect(jsonPath("$.data.risk").doesNotExist())
+      .andExpect(jsonPath("$.data.model.configured").value(false))
+      .andExpect(jsonPath("$.data.screeningStatus").value("insufficient_data"));
+  }
+
+  @Test
   void actualBasicAuthenticationSucceeds() throws Exception {
     http.perform(get("/api/v1/me").with(httpBasic("doctor", "test-doctor-123456789")))
         .andExpect(status().isOk())

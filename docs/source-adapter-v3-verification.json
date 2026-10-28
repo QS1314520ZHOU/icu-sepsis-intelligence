@@ -1,0 +1,25 @@
+{
+  "baseCommit": "1f577d3",
+  "source": "user-provided deidentified mapping reports, not a direct source connection",
+  "backend": {
+    "passed": 93,
+    "failed": 0,
+    "skipped": 0
+  },
+  "frontend": {
+    "passed": 43,
+    "failed": 0,
+    "productionBuild": true
+  },
+  "browser": {
+    "passed": 16,
+    "failed": 0,
+    "scope": "synthetic API, compiled frontend"
+  },
+  "actualHospitalDatabaseAccessed": false,
+  "userDatabaseModified": false,
+  "clinicalValidation": false,
+  "newAuthenticationAdded": false,
+  "aiConfigured": false,
+  "githubPushed": false
+}

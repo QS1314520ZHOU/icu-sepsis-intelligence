@@ -8,7 +8,7 @@ import { text } from '../presentation';
   selector: 'patient-bundles',
   standalone: true,
   imports: [CommonModule, FormsModule, RouterLink],
-  template: `<div class="pagehead">
+  template: `<header class="embedded-section-head" *ngIf="embedded"><div><h1>执行与审核</h1><p>适用性、实际执行、目标与审核分别记录。</p></div><button (click)="load()" [disabled]="busy">刷新</button></header><div class="pagehead">
       <div>
         <p class="eyebrow">BUNDLE WORKFLOW</p>
         <h1>Bundle 任务工作台</h1>

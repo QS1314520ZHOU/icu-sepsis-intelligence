@@ -29,7 +29,10 @@ public class Store {
     org.icu.sepsis.embed.EmbedAccess.Grant g = org.icu.sepsis.embed.EmbedAccess.current();
     if (g != null) {
       if (g.patientId != null && g.encounterId != null)
-        return Criteria.where("patientId").is(g.patientId).and("encounterId").is(g.encounterId);
+        // Keep patient/encounter scope nested: downstream summaries also append patientId.
+        return new Criteria().orOperator(Criteria.where("patientId").is(g.patientId)
+            .and("encounterId").is(g.encounterId)
+            .and("department").is(g.department != null ? g.department : department));
       return Criteria.where("department").is(g.department != null ? g.department : department);
     }
     return Criteria.where("department").is(department);

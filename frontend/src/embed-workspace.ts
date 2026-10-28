@@ -53,31 +53,32 @@ interface HostPatientSession extends Session {
     </section>
 
     <ng-container *ngIf="patient as p">
-      <header class="icu-patient-bar">
+      <div class="icu-patient-context"><header class="icu-patient-bar">
         <div class="icu-patient-left">
           <span class="bed-badge">{{ p.bed || '--' }}</span>
           <span class="name">{{ p.label }}</span>
           <span class="meta">{{ mrn }}</span>
           <span class="meta" *ngIf="gender">{{ gender }}</span>
+          <span class="icu-context-kind">{{ p.simulated ? '模拟患者' : '当前患者' }}</span>
         </div>
       </header>
 
-      <nav class="icu-tabs" role="tablist">
+      <nav class="icu-tabs" aria-label="当前患者工作区">
         <button
           *ngFor="let t of tabs"
-          role="tab"
           [class.active]="view === t.key"
-          [attr.aria-selected]="view === t.key"
+          [attr.aria-current]="view === t.key ? 'page' : null"
           (click)="setView(t.key)"
         >
           {{ t.label }}
         </button>
-      </nav>
+      </nav></div>
 
       <p class="icu-error" role="alert" *ngIf="error">{{ error }}</p>
 
       <section class="icu-body">
-        <sepsis-panel *ngIf="view === 'risk'" [patientId]="p.id" />
+        <sepsis-panel *ngIf="view === 'risk'" [patientId]="p.id" [encounterId]="p.encounterId"
+          (openEvidence)="setView('evidence')" (openAlerts)="setView('alerts')" (openTasks)="setView('tasks')" />
         <patient-detail
           *ngIf="view === 'trends' || view === 'evidence'"
           [patientId]="p.id"
@@ -125,11 +126,11 @@ export class EmbedWorkspace implements OnInit, OnDestroy {
   private handshakeTried = 0;
   private applying = false;
   tabs = [
-    { key: 'risk', label: '风险评估' },
-    { key: 'trends', label: '生命体征' },
-    { key: 'evidence', label: '临床数据' },
+    { key: 'risk', label: '临床概览' },
+    { key: 'trends', label: '观测趋势' },
+    { key: 'evidence', label: '原始记录' },
     { key: 'alerts', label: '预警处置' },
-    { key: 'tasks', label: '复评任务' },
+    { key: 'tasks', label: '执行与审核' },
   ];
   private listener = (event: MessageEvent) => void this.receive(event);
 
@@ -171,7 +172,11 @@ export class EmbedWorkspace implements OnInit, OnDestroy {
         this.stopHandshake();
         return;
       }
-      sendSmartCareReady(this.parentOrigin);
+      if (this.parentOrigin !== '*' && (!this.origins.length || this.origins.includes(this.parentOrigin))) {
+        sendSmartCareReady(this.parentOrigin);
+        // Both adapters use the same iframe; preserve the included demo-host handshake.
+        if (this.origins.includes(this.parentOrigin)) this.send(this.parentOrigin, 'READY');
+      } else { this.error = '请配置明确的宿主来源 parentOrigin 后重新打开。'; }
       this.handshakeTried += 1;
       if (this.handshakeTried >= 5) this.stopHandshake();
     };
@@ -225,6 +230,9 @@ export class EmbedWorkspace implements OnInit, OnDestroy {
   async receive(event: MessageEvent) {
     const smartCare = extractSmartCareContext(event);
     if (smartCare) {
+      // Message routing only, not a second login: only the designated parent may select a patient.
+      if (event.source !== window.parent || event.origin !== this.parentOrigin ||
+          (this.origins.length > 0 && !this.origins.includes(event.origin))) return;
       await this.applySmartCare(event, smartCare);
       return;
     }
@@ -236,17 +244,18 @@ export class EmbedWorkspace implements OnInit, OnDestroy {
   private async applySmartCare(event: MessageEvent, msg: { patient?: SmartCarePatient | null }) {
     const hostPatient = msg.patient || {};
     const patientId = String(hostPatient.id || '').trim();
-    if (!patientId || !/^[a-fA-F0-9]{24}$/.test(patientId)) return;
-    // 同一患者重复 SmartCare：不重载、不闪烁
-    if (this.patient?.id === patientId && this.api.token && !this.applying) {
-      this.stopHandshake();
-      return;
+    if (!patientId) {
+      if (this.dirty() || this.busy()) { this.error = '请先完成或取消当前操作，再清空患者。'; return; }
+      ++this.generation; this.revoke(); this.api.logout(); this.patient = null;
+      this.hostMrn = ''; this.hostGender = ''; this.loading = false; this.applying = false;
+      clearTimeout(this.timer); return;
     }
+    if (!/^[a-fA-F0-9]{24}$/.test(patientId)) { this.error='宿主患者标识格式无效，未切换患者。'; return; }
     if (this.dirty() || this.busy()) {
       this.error = '请先完成或取消当前操作，再切换患者。';
       return;
     }
-    if (this.applying) return;
+    // The newest selection wins. A new parent message invalidates any slower pending response.
     this.applying = true;
     const generation = ++this.generation;
     const samePatient = this.patient?.id === patientId;
@@ -258,7 +267,7 @@ export class EmbedWorkspace implements OnInit, OnDestroy {
     this.error = '';
     this.loading = true;
     clearTimeout(this.timer);
-    this.appliedOrigin = event.origin || this.parentOrigin;
+    this.appliedOrigin = event.origin;
     this.hostMrn = String(hostPatient.mrn || '').trim();
     this.hostGender = String(hostPatient.genderStr || hostPatient.gender || '').trim();
     if (this.hostGender === 'Male' || this.hostGender === 'M' || this.hostGender === '1')
@@ -269,7 +278,7 @@ export class EmbedWorkspace implements OnInit, OnDestroy {
       const s = (
         await firstValueFrom(
           this.http.post<Envelope<HostPatientSession>>(
-            '/embed-api/host-context?parentOrigin=' + encodeURIComponent(this.parentOrigin),
+            '/embed-api/host-context?parentOrigin=' + encodeURIComponent(event.origin),
             { patientId },
           ),
         )
@@ -281,6 +290,7 @@ export class EmbedWorkspace implements OnInit, OnDestroy {
       this.api.roles = s.roles;
       const p = await this.api.get<Patient>('/patients/' + encodeURIComponent(s.patientId));
       if (generation !== this.generation) return;
+      if (p.id !== patientId || p.encounterId !== s.encounterId) throw new Error('患者上下文不一致');
       this.patient = p;
       this.view = samePatient ? this.view : 'risk';
       this.stopHandshake();
@@ -301,8 +311,7 @@ export class EmbedWorkspace implements OnInit, OnDestroy {
         this.error = errorMessage(e);
       }
     } finally {
-      if (generation === this.generation) this.loading = false;
-      this.applying = false;
+      if (generation === this.generation) { this.loading = false; this.applying = false; }
     }
   }
 
@@ -339,8 +348,15 @@ export class EmbedWorkspace implements OnInit, OnDestroy {
       this.api.roles = s.roles;
       const p = await this.api.get<Patient>('/patients/' + encodeURIComponent(s.patientId));
       if (generation !== this.generation) return;
+      if (p.id !== m.payload!.patientId || p.encounterId !== m.payload!.encounterId) throw new Error('患者上下文不一致');
       this.patient = p;
-      this.view = 'trends';
+      this.hostMrn = ''; this.hostGender = '';
+      this.view = 'risk';
+      this.timer = setTimeout(() => {
+        ++this.generation; this.revoke(); this.patient = null; this.api.logout();
+        this.error = '患者上下文已过期，请在宿主重新选择患者。';
+        this.send(event.origin, 'AUTH_REQUIRED');
+      }, Math.max(0, Date.parse(s.expiresAt) - Date.now()));
       this.appliedOrigin = event.origin;
       this.parentOrigin = event.origin;
       this.send(event.origin, 'CONTEXT_APPLIED', m.requestId, {

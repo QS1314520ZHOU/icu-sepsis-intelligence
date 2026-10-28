@@ -91,10 +91,10 @@ import { riskText, text } from '../presentation';
             <tbody>
               <tr *ngFor="let o of tableRows">
                 <td>
-                  {{ label(o.parameterCode) }}<small>{{ o.parameterCode }}</small>
+                  {{ label(o.parameterCode) }}<small>{{ o.sourceParameterCode || o.parameterCode }}</small><small class="missing" *ngIf="o.clinicalUse === 'context_only'">仅供核对 · 住院关联 / 结果状态未确认</small>
                 </td>
                 <td>{{ o.text || o.value }} {{ o.unit }}</td>
-                <td>{{ o.eventTime | date: 'MM-dd HH:mm' }}</td>
+                <td>{{ o.eventTime | date: 'MM-dd HH:mm' }}<small>{{ o.timeBasis === 'reported' ? '报告 / 审核；采样未知' : '观测时间' }}</small></td>
                 <td>
                   {{ o.sourceSystem }}<small>{{ o.sourceRecordId }}</small>
                 </td>

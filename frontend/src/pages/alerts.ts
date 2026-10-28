@@ -8,7 +8,7 @@ import { text } from '../presentation';
   selector: 'patient-alerts',
   standalone: true,
   imports: [CommonModule, FormsModule, RouterLink],
-  template: `<div class="pagehead">
+  template: `<header class="embedded-section-head" *ngIf="embedded"><div><h1>预警处置</h1><p>复核筛查依据并记录原因，不自动确认诊断。</p></div><button (click)="load()" [disabled]="busy">刷新</button></header><div class="pagehead">
       <div>
         <p class="eyebrow">ALERT REVIEW CENTER</p>
         <h1>预警处置中心</h1>

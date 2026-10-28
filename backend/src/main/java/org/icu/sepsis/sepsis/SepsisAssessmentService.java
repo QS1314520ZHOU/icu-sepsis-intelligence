@@ -1,253 +1,112 @@
 package org.icu.sepsis.sepsis;
 
-import java.time.Duration;
-import java.time.Instant;
+import java.time.*;
 import java.util.*;
-import org.icu.sepsis.domain.Domain.Patient;
-import org.icu.sepsis.integration.SmartCareSourceReader;
+import java.util.stream.Collectors;
+import org.icu.sepsis.config.RuleConfig;
+import org.icu.sepsis.domain.ClinicalRules;
+import org.icu.sepsis.domain.Domain.*;
+import org.icu.sepsis.integration.*;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-/**
- * Real-time sepsis / septic-shock assessment for host patients.
- * Read-only clinical classification from SmartCare + DataCenter.
- */
+/** Read-only clinical evidence review, schema v2. No fabricated diagnosis/model/Bundle attainment. */
 @Service
 public class SepsisAssessmentService {
+  private final ClinicalDataProvider data;
+  private final ClinicalRules validation;
+  private final RuleConfig config;
   private final ObjectProvider<SmartCareSourceReader> reader;
-  private final boolean smartcareMode;
-
-  public SepsisAssessmentService(
+  private final String mode;
+  public SepsisAssessmentService(ClinicalDataProvider data, ClinicalRules validation, RuleConfig config,
       ObjectProvider<SmartCareSourceReader> reader, @Value("${app.source.mode:demo}") String mode) {
-    this.reader = reader;
-    this.smartcareMode = "smartcare".equalsIgnoreCase(mode);
+    this.data=data; this.validation=validation; this.config=config; this.reader=reader; this.mode=mode;
   }
-
   public Map<String, Object> assess(Patient p, Instant asOf) {
-    Instant now = asOf == null ? Instant.now() : asOf;
-    Instant windowStart = now.minus(Duration.ofHours(24));
-    Instant t0Candidate = p.admittedAt != null ? p.admittedAt : windowStart;
-    // Prefer earliest infection-related anchor in last 72h, else ICU admission within window
-    Instant from72 = now.minus(Duration.ofHours(72));
-
-    Map<String, Object> payload = new LinkedHashMap<>();
-    payload.put("patientId", p.id);
-    payload.put("asOf", now);
-    payload.put("engine", SepsisClinicalRules.ENGINE_VERSION);
-    payload.put("ruleSource", SepsisClinicalRules.RULE_SOURCE);
-    payload.put("dataMode", smartcareMode ? "smartcare" : "demo");
-
-    SmartCareSourceReader src = reader.getIfAvailable();
-    if (src == null || !smartcareMode || !src.isReadable()) {
-      payload.put("available", false);
-      payload.put("message", "未连接 SmartCare 只读源，无法自动判定");
-      payload.put("syndrome", "insufficient_data");
-      payload.put("risk", Map.of("score", 0, "level", "minimal", "levelLabel", "极低", "factors", List.of()));
-      payload.put("bundle", Map.of());
-      payload.put("subtypes", List.of());
-      return payload;
-    }
-
-    String diagnosis = src.diagnosisText(p.id);
-    Map<String, Object> vitals = src.vitalsWindow(p.id, from72, now);
-    Double mapMin = (Double) vitals.get("mapMin");
-    Double lactateMax = (Double) vitals.get("lactateMax");
-    Double gcsMin = (Double) vitals.get("gcsMin");
-    Double sofaMax = (Double) vitals.get("sofaMax");
-    Double rrMax = (Double) vitals.get("rrMax");
-    Double sbpMin = (Double) vitals.get("sbpMin");
-
-    boolean vaso = src
-            .findDrugEvent(p.id, from72, now, SepsisClinicalRules.VASO_KEYWORDS)
-            .isPresent()
-        || src
-            .findOrderEvent(
-                src.hisPidOf(p.id), from72, now, SepsisClinicalRules.VASO_KEYWORDS)
-            .isPresent();
-
-    boolean infectionDiag = SepsisClinicalRules.infectionText(diagnosis);
-    boolean abx =
-        src
-            .findDrugEvent(p.id, from72, now, SepsisClinicalRules.ANTIBIOTIC_KEYWORDS)
-            .isPresent()
-        || src
-            .findOrderEvent(
-                src.hisPidOf(p.id), from72, now, SepsisClinicalRules.ANTIBIOTIC_KEYWORDS)
-            .isPresent();
-    boolean culture =
-        src
-            .findOrderEvent(
-                src.hisPidOf(p.id), from72, now, SepsisClinicalRules.CULTURE_KEYWORDS)
-            .isPresent();
-    boolean infection = infectionDiag || abx || culture;
-
-    int qsofa = SepsisClinicalRules.qSofa(sbpMin, rrMax, gcsMin);
-    Boolean organ = SepsisClinicalRules.organDysfunction(vitalsMap(vitals), sofaMax, gcsMin, vaso);
-    boolean shock = SepsisClinicalRules.septicShockS3(vaso, lactateMax, mapMin);
-    boolean dataComplete = mapMin != null || lactateMax != null || vaso || sofaMax != null || gcsMin != null;
-    String syndrome = SepsisClinicalRules.syndrome(infection, organ, shock, qsofa, dataComplete);
-
-    // Bundle clocks: anchor = first antibiotic/culture/order if any, else admission
-    Instant t0Raw = firstPresent(
-            src.findDrugEvent(p.id, from72, now, SepsisClinicalRules.ANTIBIOTIC_KEYWORDS).map(new java.util.function.Function<SmartCareSourceReader.EventHit, Instant>() {
-              @Override public Instant apply(SmartCareSourceReader.EventHit e) { return e.time(); }
-            }),
-            src.findOrderEvent(src.hisPidOf(p.id), from72, now, SepsisClinicalRules.ANTIBIOTIC_KEYWORDS)
-                .map(new java.util.function.Function<SmartCareSourceReader.EventHit, Instant>() {
-                  @Override public Instant apply(SmartCareSourceReader.EventHit e) { return e.time(); }
-                }),
-            src.findOrderEvent(src.hisPidOf(p.id), from72, now, SepsisClinicalRules.CULTURE_KEYWORDS)
-                .map(new java.util.function.Function<SmartCareSourceReader.EventHit, Instant>() {
-                  @Override public Instant apply(SmartCareSourceReader.EventHit e) { return e.time(); }
-                }));
-    Instant t0 = t0Raw != null ? t0Raw : t0Candidate;
-
-    Instant lactateFirst = null;
-    Instant lactateRecheck = null;
-    List<org.icu.sepsis.domain.Domain.Observation> lacObs =
-        new ArrayList<>(src.observations(p.id, "", "", from72, now));
-    lacObs.removeIf(o -> !"LACTATE".equals(o.parameterCode));
-    lacObs.sort(Comparator.comparing(o -> o.eventTime));
-    if (!lacObs.isEmpty()) {
-      lactateFirst = lacObs.get(0).eventTime;
-      if (lacObs.size() > 1) lactateRecheck = lacObs.get(lacObs.size() - 1).eventTime;
-    }
-
-    var abxHit =
-        src.findDrugEvent(p.id, t0.minus(Duration.ofHours(2)), t0.plus(Duration.ofHours(6)), SepsisClinicalRules.ANTIBIOTIC_KEYWORDS);
-    if (abxHit.isEmpty())
-      abxHit =
-          src.findOrderEvent(
-              src.hisPidOf(p.id), t0.minus(Duration.ofHours(2)), t0.plus(Duration.ofHours(6)),
-              SepsisClinicalRules.ANTIBIOTIC_KEYWORDS);
-    var cultureHit =
-        src.findOrderEvent(
-            src.hisPidOf(p.id), t0.minus(Duration.ofHours(2)), t0.plus(Duration.ofHours(3)),
-            SepsisClinicalRules.CULTURE_KEYWORDS);
-    double fluidMl = src.fluidVolumeMl(p.id, t0, t0.plus(Duration.ofHours(3)));
-    Double mapMinBundle = mapMin;
-    Double lacMaxBundle = lactateMax;
-
-    java.util.function.Function<SmartCareSourceReader.EventHit, Instant> timeFn =
-        new java.util.function.Function<SmartCareSourceReader.EventHit, Instant>() {
-          @Override
-          public Instant apply(SmartCareSourceReader.EventHit e) {
-            return e.time();
-          }
-        };
-    BundleModels.BundleWindow b1 =
-        BundleModels.oneHour(
-            lactateFirst != null,
-            lactateFirst,
-            cultureHit.isPresent(),
-            cultureHit.map(timeFn).orElse(null),
-            abxHit.isPresent(),
-            abxHit.map(timeFn).orElse(null));
-    BundleModels.BundleWindow b3 =
-        BundleModels.threeHour(
-            mapMinBundle != null && mapMinBundle < 70,
-            lacMaxBundle != null && lacMaxBundle >= 4,
-            fluidMl > 0 ? fluidMl : null,
-            lactateRecheck != null,
-            lactateRecheck,
-            t0);
-    BundleModels.BundleWindow b6 =
-        BundleModels.sixHour(
-            shock,
-            vaso,
-            true,
-            lactateRecheck != null);
-
-    Map<String, Object> risk =
-        SepsisClinicalRules.riskScore(
-            syndrome,
-            qsofa,
-            mapMin,
-            lactateMax,
-            gcsMin,
-            sofaMax,
-            vaso,
-            infection,
-            Boolean.TRUE.equals(b1.finish),
-            Boolean.TRUE.equals(b3.finish));
-
-    Map<String, Object> shockBlock = new LinkedHashMap<>();
-    shockBlock.put("confirmed", shock);
-    shockBlock.put("rule", "s3: 升压药 或 (乳酸≥2 且 MAP<70)");
-    shockBlock.put("k1LactateGe2", lactateMax != null && lactateMax >= 2);
-    shockBlock.put("k2Vasopressor", vaso);
-    shockBlock.put("mapMin", mapMin);
-    shockBlock.put("lactateMax", lactateMax);
-    shockBlock.put("qsofa", qsofa);
-    shockBlock.put("organDysfunction", organ);
-    shockBlock.put("infectionEvidence", infection);
-    shockBlock.put("infectionFromDiagnosis", infectionDiag);
-    shockBlock.put("antibiotic", abx);
-    shockBlock.put("culture", culture);
-
-    payload.put("available", true);
-    payload.put("syndrome", syndrome);
-    payload.put("syndromeLabel", syndromeLabel(syndrome));
-    payload.put("shock", shockBlock);
-    payload.put("risk", risk);
-    payload.put(
-        "bundle",
-        Map.of(
-            "t0", t0,
-            "1h", b1,
-            "3h", b3,
-            "6h", b6));
-    payload.put("subtypes", SepsisClinicalRules.subtypes(diagnosis, vitalsMap(vitals), vaso));
-    payload.put("vitals", vitals);
-    payload.put("diagnosisSnippet", diagnosis.length() > 300 ? diagnosis.substring(0, 300) : diagnosis);
-    payload.put(
-        "ai",
-        Map.of(
-            "method", "explainable_multifactor_rules",
-            "notDiagnosis", true,
-            "promptNote",
-            "可解释多因素规则分；非经外部验证的深度学习概率模型。结合 SSC/Sepsis-3 与院内 ICU-05 口径。",
-            "nextActions", nextActions(syndrome, shock, Boolean.TRUE.equals(b1.finish), Boolean.TRUE.equals(b3.finish))));
-    return payload;
+    Instant now=asOf == null ? Instant.now() : asOf;
+    List<Observation> rows;
+    try { rows=data.observations(p.id,p.encounterId,now.minus(Duration.ofHours(24)),now); }
+    catch (RuntimeException e) { return review(p,now,List.of(),false,"临床数据暂不可用，请刷新或联系接口维护人员。"); }
+    return review(p,now,rows,true,"");
   }
-
-  private static List<String> nextActions(String syndrome, boolean shock, boolean b1, boolean b3) {
-    List<String> a = new ArrayList<>();
-    if (shock) {
-      a.add("按脓毒性休克路径：升压药滴定 MAP≥65，评估乳酸清除");
-    } else if ("sepsis".equals(syndrome)) {
-      a.add("确认感染源与培养已送，1h/3h Bundle 计时");
-    } else if ("sepsis_suspect_qsofa".equals(syndrome)) {
-      a.add("qSOFA 阳性：尽快复评灌注与乳酸，勿仅凭 qSOFA 确诊");
+  private Map<String,Object> review(Patient patient,Instant now,List<Observation> rows,boolean available,String message) {
+    Map<String,Observation> latest=new LinkedHashMap<>();
+    // Same-time numeric conflicts are excluded; do not pick whichever database row arrives first.
+    Map<String,List<Observation>> groups=rows.stream().filter(o->validation.valid(o,now))
+        .filter(o->o.value!=null).collect(Collectors.groupingBy(o->o.parameterCode+"|"+o.eventTime));
+    for (List<Observation> g:groups.values()) {
+      if (g.stream().map(o->o.value).distinct().count()!=1) continue;
+      Observation o=g.get(0); latest.merge(o.parameterCode,o,(a,b)->a.eventTime.isAfter(b.eventTime)?a:b);
     }
-    if (!b1) a.add("补齐 1h：乳酸、血/痰/尿培养、广谱抗菌药物");
-    if (!b3) a.add("评估 3h：MAP<70 或乳酸≥4 时晶体/胶体复苏并复测乳酸");
-    if (a.isEmpty()) a.add("继续监测；Bundle 项若数据不全请人工确认");
-    return a;
-  }
-
-  private static String syndromeLabel(String s) {
-    if ("septic_shock".equals(s)) return "脓毒性休克";
-    if ("sepsis".equals(s)) return "脓毒症（感染+器官障碍）";
-    if ("sepsis_suspect_qsofa".equals(s)) return "疑似脓毒症（qSOFA）";
-    if ("infection_at_risk".equals(s)) return "感染证据·待评估器官障碍";
-    if ("noninfectious_organ_failure".equals(s)) return "非感染性器官功能障碍";
-    if ("insufficient_data".equals(s)) return "数据不足";
-    return "未触发";
-  }
-
-  private static Map<String, Double> vitalsMap(Map<String, Object> vitals) {
-    Map<String, Double> m = new HashMap<>();
-    for (Map.Entry<String, Object> e : vitals.entrySet()) {
-      if (e.getValue() instanceof Double) m.put(e.getKey(), (Double) e.getValue());
+    boolean channelPressure = latest.keySet().stream().anyMatch(c -> c.matches("(MAP|SBP|DBP)_(IBP|NIBP)"));
+    // No site-approved preferred channel: never silently use a generic pressure alongside explicit channels.
+    if (channelPressure) { latest.remove("MAP"); latest.remove("SBP"); }
+    List<String> sourceWarnings = new ArrayList<>();
+    if (channelPressure) sourceWarnings.add("有创与无创血压分通道展示，尚未确认院内择优规则；不自动合成为单一血压输入，qSOFA 血压项待核对。");
+    if ("smartcare".equals(mode)) sourceWarnings.add("源记录入库时间未确认，不能据此进行历史时点回放；乳酸报告的采样时间、结果状态及本次住院关联未确认，候选报告仅供原始记录核对。");
+    List<String> missing=new ArrayList<>();
+    for(String code:List.of("MAP","SBP","RR","GCS","LACTATE")) if(!latest.containsKey(code)) missing.add(code);
+    List<Map<String,Object>> findings=new ArrayList<>();
+    abnormal(findings,latest,"MAP","平均动脉压",config.getMapLow(),true,"低于当前核对阈值");
+    abnormal(findings,latest,"SBP","收缩压",config.getSbpLow(),true,"低于当前核对阈值");
+    abnormal(findings,latest,"RR","呼吸频率",22,false,"达到 qSOFA 呼吸频率项阈值");
+    abnormal(findings,latest,"GCS","意识评分",15,true,"需结合镇静和基础神经状态核对");
+    abnormal(findings,latest,"LACTATE","乳酸",config.getLactateHigh(),false,"乳酸升高，需结合灌注等临床情况核对");
+    for (String channel : List.of("IBP", "NIBP")) {
+      String suffix = "IBP".equals(channel) ? "（有创）" : "（无创）";
+      abnormal(findings,latest,"MAP_"+channel,"平均动脉压"+suffix,config.getMapLow(),true,"该通道低于核对阈值；未自动择优");
+      abnormal(findings,latest,"SBP_"+channel,"收缩压"+suffix,config.getSbpLow(),true,"该通道低于核对阈值；未自动择优");
     }
-    return m;
+    String status=!available?"unavailable":!findings.isEmpty()?"review_required":!missing.isEmpty()?"insufficient_data":"not_triggered";
+    String label=!available?"数据暂不可用":!findings.isEmpty()?"存在待复核异常":!missing.isEmpty()?"数据不全，不能完整评估":"本次核对未见阈值异常";
+    Map<String,Object> out=new LinkedHashMap<>();
+    out.put("schemaVersion",2); out.put("patientId",patient.id); out.put("encounterId",patient.encounterId);
+    out.put("asOf",now); out.put("engine",SepsisClinicalRules.ENGINE_VERSION); out.put("ruleSource",SepsisClinicalRules.RULE_SOURCE);
+    out.put("dataMode",mode); out.put("simulated",patient.simulated); out.put("available",available); out.put("message",message);
+    out.put("screeningStatus",status); out.put("screeningLabel",label); out.put("missingFeatures",missing); out.put("findings",findings);
+    out.put("sourceWarnings",sourceWarnings);
+    out.put("pressureSelectionRequired",channelPressure);
+    out.put("pressureEvidence",latest.values().stream().filter(o -> o.parameterCode.matches("(MAP|SBP|DBP)_(IBP|NIBP)"))
+        .sorted(Comparator.comparing(o -> o.parameterCode)).map(this::evidence).collect(Collectors.toList()));
+    out.put("contextEvidence",rows.stream().filter(o -> "context_only".equals(o.clinicalUse))
+        .sorted(Comparator.comparing((Observation o) -> o.eventTime,Comparator.nullsLast(Comparator.reverseOrder())))
+        .limit(20).map(this::evidence).collect(Collectors.toList()));
+    out.put("qsofa",SepsisClinicalRules.qSofa(value(latest,"SBP"),value(latest,"RR"),value(latest,"GCS")));
+    out.put("qsofaNote","仅使用新鲜且有效的最近记录；未核验报告和未选定血压通道不参与计算；缺项不计零，qSOFA 不能单独诊断或排除脓毒症。");
+    out.put("vasopressorActive",latest.containsKey("VASOPRESSOR_ACTIVE")?value(latest,"VASOPRESSOR_ACTIVE")==1:null);
+    String diagnosis="";
+    if(available) {
+      diagnosis=rows.stream().filter(o->"DIAGNOSIS".equals(o.parameterCode)&&validation.valid(o,now))
+          .map(o->o.text==null?"":o.text).collect(Collectors.joining("；"));
+      SmartCareSourceReader src=reader.getIfAvailable();
+      if(src!=null) try { diagnosis=src.diagnosisText(patient.id); } catch(RuntimeException ignored) { /* never fabricate infection */ }
+    }
+    out.put("infectionClue",SepsisClinicalRules.infectionText(diagnosis)?"诊断文本含感染线索，需核对时效及临床依据":"未取得可确认的感染证据");
+    out.put("latestEvidence",latest.values().stream().map(this::evidence).collect(Collectors.toList()));
+    Observation lac=latest.get("LACTATE");
+    out.put("checklist",List.of(
+      BundleModels.item("LACTATE","乳酸结果",lac==null?"unknown":"recorded",lac==null?"未取得新鲜有效结果":"已有结果不等于复苏目标达成",lac==null?null:lac.eventTime),
+      BundleModels.item("BLOOD_CULTURE","血培养采样","unknown","尚无经过映射核验的实际采样证据；医嘱不代表已采样",null),
+      BundleModels.item("ANTIBIOTIC","抗菌药实际执行","unknown","待接入实际给药事件；医嘱和关键词命中不代表已给药",null),
+      BundleModels.item("FLUID","液体量与适用性","unknown","需体重、实际输注量及个体化适用性，暂不自动判定达标",null),
+      BundleModels.item("REASSESS","容量 / 灌注再评估","unknown","需明确的再评估记录，不自动标为完成",null)));
+    out.put("taskNote","本页为只读证据核对，未建立院内批准的 T0 与治疗时限，不自动生成治疗任务。");
+    out.put("model",Map.of("configured",false,"label","未配置预测模型","message","不生成风险分或风险百分比"));
+    out.put("ai",Map.of("configured",false,"label","未配置摘要服务"));
+    return out;
   }
-
-  @SafeVarargs
-  private static Instant firstPresent(Optional<Instant>... opts) {
-    for (Optional<Instant> o : opts) if (o.isPresent()) return o.get();
-    return null;
+  private Double value(Map<String,Observation> m,String code) { return m.containsKey(code)?m.get(code).value:null; }
+  private Map<String,Object> evidence(Observation o) {
+    Map<String,Object> m=new LinkedHashMap<>();m.put("code",o.parameterCode);m.put("value",o.value);m.put("unit",o.unit);
+    m.put("sourceParameterCode",o.sourceParameterCode);m.put("measurementChannel",o.measurementChannel);
+    m.put("timeBasis",o.timeBasis);m.put("reportedAt",o.reportedAt);m.put("sampledAt",o.sampledAt);
+    m.put("encounterLinkStatus",o.encounterLinkStatus);m.put("clinicalUse",o.clinicalUse);
+    m.put("ingestTimeBasis",o.ingestTimeBasis);m.put("sourceResultStatus",o.sourceResultStatus);m.put("qualityNote",o.qualityNote);
+    m.put("eventTime",o.eventTime);m.put("sourceSystem",o.sourceSystem);m.put("sourceRecordId",o.sourceRecordId);return m;
+  }
+  private void abnormal(List<Map<String,Object>> out,Map<String,Observation> m,String code,String label,double threshold,boolean below,String reason) {
+    Observation o=m.get(code);if(o==null||!(below?o.value<threshold:o.value>=threshold))return;
+    Map<String,Object> f=evidence(o);f.put("label",label);f.put("reason",reason);out.add(f);
   }
 }
