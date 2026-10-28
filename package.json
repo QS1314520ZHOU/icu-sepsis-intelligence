@@ -1,0 +1,17 @@
+{
+  "name": "icu-sepsis-intelligence",
+  "version": "1.0.0",
+  "description": "**这是可构建、可运行、带真实 MongoDB 持久化和 Angular 交互的可视化软件工作台，不是临床完成版，不可用于患者诊疗。**",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs"
+}

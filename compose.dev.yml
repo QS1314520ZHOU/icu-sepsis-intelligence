@@ -1,0 +1,12 @@
+# Development template, untested. Requires an existing isolated Mongo replica set URI.
+# Set all passwords and MONGODB_URI through a local secret env file; do not commit it.
+services:
+  workbench:
+    build: .
+    ports:
+      - "127.0.0.1:8080:8080"
+    env_file: .runtime/demo.env
+    environment:
+      BIND_ADDRESS: 0.0.0.0
+# Container localhost is not host localhost. Replace MONGODB_URI with a reachable
+# isolated development replica set and confirm advertised member hostnames.

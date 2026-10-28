@@ -1,0 +1,7 @@
+{
+  "status": "passed",
+  "port": 8081,
+  "database": "reachable",
+  "authenticatedHealth": true,
+  "shellSyntax": "passed"
+}

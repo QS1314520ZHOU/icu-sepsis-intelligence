@@ -1,0 +1,49 @@
+> icu-sepsis-workbench@0.3.0 test
+> node --experimental-strip-types --test tests/*.test.ts
+
+(node:2322) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///data/icu-sepsis-work/icu-sepsis-intelligence/frontend/tests/embed-protocol.test.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /data/icu-sepsis-work/icu-sepsis-intelligence/frontend/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ accept exact parent window, origin, channel and supported schema (2.464061ms)
+✔ reject other origin even when payload looks valid (0.366093ms)
+✔ reject sibling frame source (0.257481ms)
+✔ reject wrong channel and old protocol (0.474469ms)
+✔ roles and tokens cannot be smuggled into context payload (0.34601ms)
+✔ reject oversized or incomplete identifiers (0.274654ms)
+✔ explicit clear-context has no patient data requirements (0.238517ms)
+(node:2329) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///data/icu-sepsis-work/icu-sepsis-intelligence/frontend/tests/presentation.test.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /data/icu-sepsis-work/icu-sepsis-intelligence/frontend/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ missing model never a percentage (1.70648ms)
+✔ rule score explicitly non probability (0.444941ms)
+✔ unvalidated trained source not shown as probability (0.224651ms)
+✔ zero denominator is not zero completion (0.226573ms)
+✔ real zero is shown as zero (0.280143ms)
+✔ clinical statuses visible as text (0.256755ms)
+(node:2336) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///data/icu-sepsis-work/icu-sepsis-intelligence/frontend/tests/trends.test.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /data/icu-sepsis-work/icu-sepsis-intelligence/frontend/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ units never silently converted or mixed (10.356374ms)
+✔ zero is not used for missing observation (0.383425ms)
+✔ invalid quality excluded (0.259729ms)
+✔ future and not yet ingested points excluded (0.323226ms)
+✔ historical freshness does not erase stored past curve (2.455323ms)
+✔ current old reading explicitly marked stale (0.280328ms)
+✔ time window is applied and points sorted chronologically (1.739021ms)
+✔ long gap produces separate line segments (0.657202ms)
+✔ sparse single reading remains one point, not a fabricated curve (0.422035ms)
+✔ same-time conflicting values are not averaged or chosen silently (32.009047ms)
+✔ same-time identical values deduplicated for plotting only (0.325169ms)
+✔ SpO2 and temperature keep separate units and plausible structural ranges (0.17193ms)
+ℹ tests 25
+ℹ suites 0
+ℹ pass 25
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 948.804224
+

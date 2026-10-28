@@ -1,0 +1,50 @@
+{
+  "status": "passed",
+  "tests": [
+    {
+      "name": "patient board uses server validated latest values, missing stays empty",
+      "status": "passed"
+    },
+    {
+      "name": "six API-backed charts contain measured points with finite in-bounds geometry",
+      "status": "passed"
+    },
+    {
+      "name": "6/12/24 hour selection changes actual plotted sample counts",
+      "status": "passed"
+    },
+    {
+      "name": "wrong-unit record excluded, missing MAP samples create disconnected paths",
+      "status": "passed"
+    },
+    {
+      "name": "clickable point reveals exact source record and times",
+      "status": "passed"
+    },
+    {
+      "name": "raw evidence table is optional and retains invalid source record",
+      "status": "passed"
+    },
+    {
+      "name": "missing patient has six honest empty panels and no fabricated curves",
+      "status": "passed"
+    },
+    {
+      "name": "overview renders observation table and actual queue",
+      "status": "passed"
+    },
+    {
+      "name": "quality bars reconcile with table and eligible denominator",
+      "status": "passed"
+    },
+    {
+      "name": "mobile charts and quality table stay within 390px viewport",
+      "status": "passed"
+    },
+    {
+      "name": "no browser runtime errors",
+      "status": "passed"
+    }
+  ],
+  "pageErrors": []
+}

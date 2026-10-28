@@ -1,0 +1,58 @@
+server:
+  address: ${BIND_ADDRESS:127.0.0.1}
+  port: ${PORT:8080}
+  error:
+    include-message: never
+spring:
+  data:
+    mongodb:
+      uri: ${MONGODB_URI:mongodb://127.0.0.1:27017/icu_sepsis_dev}
+      auto-index-creation: false
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+app:
+  demo: ${DEMO_MODE:false}
+  # demo: 只读演示库 icu_sepsis_*；smartcare: 只读医院 SmartCare/DataCenter + 业务写仍进 icu_sepsis_*
+  source:
+    mode: ${CLINICAL_SOURCE_MODE:smartcare}
+    connect-timeout-ms: ${SOURCE_CONNECT_TIMEOUT_MS:5000}
+    socket-timeout-ms: ${SOURCE_SOCKET_TIMEOUT_MS:15000}
+    smartcare:
+      uri: ${SMARTCARE_MONGO_URI:mongodb://192.168.31.185:27017/SmartCare}
+      # 仅 SmartCare；空 = 免密。不要写 DataCenter 账号到这里。
+      username: ${SMARTCARE_MONGO_USERNAME:}
+      password: ${SMARTCARE_MONGO_PASSWORD:}
+      # 空则默认用 URI 里的库名 SmartCare
+      auth-source: ${SMARTCARE_MONGO_AUTH_SOURCE:}
+    datacenter:
+      # 独立 client + 独立凭证，禁止复用 SmartCare/@Primary
+      uri: ${DATACENTER_MONGO_URI:mongodb://192.168.31.185:27017/DataCenter}
+      username: ${DATACENTER_MONGO_USERNAME:}
+      password: ${DATACENTER_MONGO_PASSWORD:}
+      # 空则默认用 URI 里的库名 DataCenter（避免 authSource=SmartCause not authorized on DataCenter）
+      auth-source: ${DATACENTER_MONGO_AUTH_SOURCE:}
+  # 纯 iframe 接入不需要医院 SSO：宿主 SmartCareReady/SmartCare → /embed-api/host-context 即可
+  embed-parent-origins: ${EMBED_PARENT_ORIGINS:}
+  embed:
+    allow-insecure-lan-origins: ${EMBED_ALLOW_INSECURE_LAN_ORIGINS:true}
+    allow-any-frame-ancestor: ${EMBED_ALLOW_ANY_FRAME_ANCESTOR:false}
+  doctor-password: ${DOCTOR_PASSWORD:}
+  nurse-password: ${NURSE_PASSWORD:}
+  quality-password: ${QUALITY_PASSWORD:}
+  department: ${AUTHORIZED_DEPARTMENT:DEMO-ICU}
+  rules:
+    version: draft-demo-v1
+    approval: DRAFT_DEMO_ONLY
+    map-low: 65
+    sbp-low: 90
+    lactate-high: 2
+    fresh-minutes: 120
+    lab-fresh-minutes: 360
+    review-deadline-minutes: 60
+logging:
+  level:
+    org.mongodb.driver: WARN
+springdoc:
+  swagger-ui:
+    path: /api-docs

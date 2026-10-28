@@ -1,0 +1,67 @@
+{
+  "status": "passed",
+  "timestamp": "2026-10-28T04:46:48.073Z",
+  "tests": [
+    {
+      "name": "unauthenticated API returns 401 and trace",
+      "status": "passed"
+    },
+    {
+      "name": "doctor login and real patient API",
+      "status": "passed"
+    },
+    {
+      "name": "overview uses backend counts and working navigation",
+      "status": "passed"
+    },
+    {
+      "name": "empty filter shows explicit empty state",
+      "status": "passed"
+    },
+    {
+      "name": "insufficient data stays unassessable",
+      "status": "passed"
+    },
+    {
+      "name": "normal patient does not trigger",
+      "status": "passed"
+    },
+    {
+      "name": "deterioration yields evidence not model probability",
+      "status": "passed"
+    },
+    {
+      "name": "doctor review creates task and audit history",
+      "status": "passed"
+    },
+    {
+      "name": "nurse role cannot diagnose and records execution",
+      "status": "passed"
+    },
+    {
+      "name": "doctor confirms applicability and history persisted",
+      "status": "passed"
+    },
+    {
+      "name": "quality numerator denominator from actual workflow",
+      "status": "passed"
+    },
+    {
+      "name": "quality card carries identical metric and period to task list",
+      "status": "passed"
+    },
+    {
+      "name": "model unavailable is explicit",
+      "status": "passed"
+    },
+    {
+      "name": "API failure does not show fake values",
+      "status": "passed"
+    },
+    {
+      "name": "mobile navigation and patient list do not overflow page",
+      "status": "passed"
+    }
+  ],
+  "browserErrors": []
+}

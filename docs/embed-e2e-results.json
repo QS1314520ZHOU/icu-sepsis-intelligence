@@ -1,0 +1,58 @@
+{
+  "status": "passed",
+  "tests": [
+    {
+      "name": "actual cross-origin iframe handshake loads only selected patient",
+      "status": "passed"
+    },
+    {
+      "name": "embedded page has no second sidebar, global topbar or patient picker",
+      "status": "passed"
+    },
+    {
+      "name": "bearer grant is restricted to current patient and encounter",
+      "status": "passed"
+    },
+    {
+      "name": "changing patient replaces values rather than retaining previous curves",
+      "status": "passed"
+    },
+    {
+      "name": "late response for previous patient cannot overwrite a new context",
+      "status": "passed"
+    },
+    {
+      "name": "source, origin and channel spoofed messages cannot change active context",
+      "status": "passed"
+    },
+    {
+      "name": "screening and evidence work without routing out of iframe mode",
+      "status": "passed"
+    },
+    {
+      "name": "unsaved review rejects patient change and host selection stays consistent",
+      "status": "passed"
+    },
+    {
+      "name": "contextual evidence link remains in embedded workspace",
+      "status": "passed"
+    },
+    {
+      "name": "scoped task tab shows current-patient workflow only",
+      "status": "passed"
+    },
+    {
+      "name": "explicit clear removes patient data and reload renegotiates a new channel",
+      "status": "passed"
+    },
+    {
+      "name": "narrow host retains one patient picker with no horizontal page overflow",
+      "status": "passed"
+    },
+    {
+      "name": "embedded browser has no runtime exceptions",
+      "status": "passed"
+    }
+  ],
+  "pageErrors": []
+}

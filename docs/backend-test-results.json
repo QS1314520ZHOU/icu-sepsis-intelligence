@@ -1,0 +1,29 @@
+{
+  "tests": 61,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "suites": [
+    {
+      "name": "org.icu.sepsis.WorkflowIntegrationTest",
+      "tests": "30",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "name": "org.icu.sepsis.ClinicalRulesTest",
+      "tests": "23",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "name": "org.icu.sepsis.EmbedIntegrationTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    }
+  ]
+}

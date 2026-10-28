@@ -1,0 +1,12 @@
+{
+  "name": "icu-sepsis-e2e",
+  "private": true,
+  "scripts": {
+    "test": "node e2e.cjs",
+    "test:visual": "node visual-e2e.cjs",
+    "test:embed": "node embed-e2e.cjs"
+  },
+  "devDependencies": {
+    "playwright": "1.61.1"
+  }
+}

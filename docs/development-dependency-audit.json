@@ -1,0 +1,12 @@
+{
+  "counts": {
+    "info": 0,
+    "low": 0,
+    "moderate": 0,
+    "high": 0,
+    "critical": 0,
+    "total": 0
+  },
+  "error": null,
+  "scope": "frontend production and development dependencies, npm registry advisories at scan time"
+}

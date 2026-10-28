@@ -1,0 +1,21 @@
+{
+  "version": "0.3.0",
+  "verifiedAtUtc": "2026-10-28T04:52:29.025211+00:00",
+  "buildAndRuntimeJava": "Zulu 15.0.10",
+  "classFileMajorVersion": 59,
+  "maven": "3.9.9",
+  "angular": "20.3.34",
+  "mongo": "7.0.14 rs0",
+  "backendTests": 61,
+  "frontendUnitTests": 25,
+  "browserScenarios": 39,
+  "embedBrowserScenarios": 13,
+  "browserRuntimeErrors": 0,
+  "newEmbedScreenshots": 4,
+  "jarSha256": "d2528bb07239ca83c1e342704c774e04cbe6b5bc29af3418c2010b1fec5bb099",
+  "realHostConnected": false,
+  "productionSsoConnected": false,
+  "demoTicketIssuerOnly": true,
+  "realModelRunning": false,
+  "clinicalUseAllowed": false
+}

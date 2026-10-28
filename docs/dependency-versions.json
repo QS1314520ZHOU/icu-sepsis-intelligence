@@ -1,0 +1,11 @@
+[
+  "spring-boot-2.7.18.jar",
+  "spring-boot-autoconfigure-2.7.18.jar",
+  "mongodb-driver-sync-4.6.1.jar",
+  "bson-4.6.1.jar",
+  "mongodb-driver-core-4.6.1.jar",
+  "bson-record-codec-4.6.1.jar",
+  "spring-data-mongodb-3.4.18.jar",
+  "spring-security-core-5.7.11.jar",
+  "spring-boot-jarmode-layertools-2.7.18.jar"
+]
