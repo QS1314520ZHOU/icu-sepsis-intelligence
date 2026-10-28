@@ -9,7 +9,7 @@ import { text } from '../presentation';
   selector: 'patient-alerts',
   standalone: true,
   imports: [CommonModule, FormsModule, RouterLink, UiIcon],
-  template: `<header class="embedded-section-head" *ngIf="embedded"><h1><ui-icon name="bell"/>预警处置</h1><button (click)="load()" [disabled]="busy"><ui-icon name="refresh"/>刷新</button></header><div class="pagehead">
+  template: `<header class="embedded-section-head" *ngIf="embedded"><h1><ui-icon name="bell"/>预警处理</h1><button (click)="load()" [disabled]="busy"><ui-icon name="refresh"/>刷新</button></header><div class="pagehead">
       <div>
         <p class="eyebrow">ALERT REVIEW CENTER</p>
         <h1>预警处置中心</h1>
@@ -31,7 +31,7 @@ import { text } from '../presentation';
         ><span class="muted">共 {{ total }} 条</span>
       </div>
       <p class="error" role="alert" *ngIf="error">{{ error }}</p>
-      <div class="work-empty" *ngIf="!alerts.length && !busy && !error"><ui-icon name="bell"/><strong>当前筛选下没有预警</strong><span>可切换状态，或核对患者原始记录</span><button *ngIf="embedded" (click)="openEvidence.emit()">核查患者证据 <ui-icon name="arrow"/></button></div>
+      <div class="work-empty" *ngIf="!alerts.length && !busy && !error"><ui-icon name="bell"/><strong>{{ status === 'pending' ? '暂无待处理预警' : '当前筛选下没有预警' }}</strong><button *ngIf="embedded" (click)="openEvidence.emit()">查看记录 <ui-icon name="arrow"/></button></div>
       <article class="alertrow" *ngFor="let a of alerts">
         <div>
           <span class="tag" [class.danger]="a.severity === 'critical'">{{ text(a.severity) }}</span
@@ -47,7 +47,7 @@ import { text } from '../presentation';
             (keydown.enter)="embedded && openEvidence.emit()"
             [attr.tabindex]="embedded ? 0 : null"
             [attr.role]="embedded ? 'button' : null"
-            >核查患者证据</a
+            >查看依据</a
           >
         </div>
         <div class="actions">
@@ -58,7 +58,7 @@ import { text } from '../presentation';
               ['pending', 'acknowledged', 'deferred', 'confirmed'].includes(a.status)
             "
             class="primary"
-            (click)="selected = a; reason = ''; action = 'confirm'"
+            (click)="selected = a; reason = ''; quick = ''; action = 'confirm'"
           >
             处置
           </button>
@@ -80,7 +80,7 @@ import { text } from '../presentation';
     </section>
     <div class="overlay" *ngIf="selected">
       <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="review-title">
-        <h2 id="review-title">预警复核<span *ngIf="!embedded"> · {{ selected.patientId }}</span></h2>
+        <h2 id="review-title">处理预警<span *ngIf="!embedded"> · {{ selected.patientId }}</span></h2>
         <form (ngSubmit)="submit()">
           <label
             >处置动作<select name="action" [(ngModel)]="action">
@@ -94,18 +94,18 @@ import { text } from '../presentation';
               <option *ngIf="selected.status !== 'confirmed'" value="acknowledge">确认接收</option>
               <option *ngIf="selected.status === 'confirmed'" value="close">关闭预警</option>
             </select></label
-          ><label
-            >临床复核原因<textarea
+          ><fieldset class="quick-reasons"><legend>处理原因</legend><button type="button" *ngFor="let q of quickReasons" [class.selected]="quick === q" [attr.aria-pressed]="quick === q" (click)="quick = q">{{ q }}</button></fieldset><label
+            >{{ quick === '其他' ? '原因说明（必填）' : '补充说明（选填）' }}<textarea
               name="reason"
               [(ngModel)]="reason"
-              required
-              maxlength="1000"
+              maxlength="900"
+              rows="2"
             ></textarea>
           </label>
-          <p class="muted small">记录操作者、时间与前后状态。版本冲突时请刷新后重试。</p>
+          <p class="muted small">保存操作者、时间和前后状态。</p>
           <div class="actions">
             <button type="button" (click)="selected = null" [disabled]="busy">取消</button
-            ><button class="primary" [disabled]="busy || !reason.trim()">
+            ><button class="primary" [disabled]="busy || !finalReason">
               {{ busy ? '保存中…' : '确认提交' }}
             </button>
           </div>
@@ -117,7 +117,17 @@ import { text } from '../presentation';
 export class Alerts implements OnInit {
   @Input() embedded = false;
   @Output() openEvidence = new EventEmitter<void>();
+  @Output() changed = new EventEmitter<void>();
   api = inject(Api);
+  quickReasons = ['已处理', '已知晓，继续观察', '误报：监测干扰', '误报：数据错误', '其他'];
+  quick = '';
+  /** Quick choice plus optional note; "其他" requires a note. */
+  get finalReason() {
+    const note = this.reason.trim();
+    if (!this.quick) return note;
+    if (this.quick === '其他') return note ? '其他：' + note : '';
+    return note ? this.quick + '；' + note : this.quick;
+  }
   route = inject(ActivatedRoute);
   alerts: Alert[] = [];
   records: History[] = [];
@@ -131,7 +141,7 @@ export class Alerts implements OnInit {
   total = 0;
   text = text;
   ngOnInit() {
-    this.status = this.route.snapshot.queryParamMap.get('status') || '';
+    this.status = this.route.snapshot.queryParamMap.get('status') || (this.embedded ? 'pending' : '');
     void this.load();
   }
   async load() {
@@ -150,17 +160,19 @@ export class Alerts implements OnInit {
     }
   }
   async submit() {
-    if (!this.selected || !this.reason.trim()) return;
+    const reason = this.finalReason;
+    if (!this.selected || !reason) return;
     this.busy = true;
     this.error = '';
     try {
       await this.api.post('/alerts/' + this.selected.id + '/review', {
         action: this.selected.status === 'confirmed' ? 'close' : this.action,
-        reason: this.reason,
+        reason,
         expectedVersion: this.selected.version,
       });
       this.selected = null;
       await this.load();
+      this.changed.emit();
     } catch (e) {
       this.error = errorMessage(e);
     } finally {

@@ -2,12 +2,12 @@ import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { Component, inject, OnInit, OnDestroy, ViewChild } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
-import { Api, Envelope, Patient, errorMessage } from './api';
+import { Alert, Api, Envelope, Page, Patient, Task, errorMessage } from './api';
 import { UiIcon } from './ui-icon';
 import { Detail } from './pages/detail';
 import { Alerts } from './pages/alerts';
 import { Bundles } from './pages/bundles';
-import { SepsisPanel } from './sepsis-panel';
+import { SepsisPanel, SepsisStatus } from './sepsis-panel';
 import { namespace, trustedMessage } from './embed-protocol';
 import { uuid4 } from './uuid';
 import {
@@ -15,6 +15,7 @@ import {
   isIframe,
   resolveParentOrigin,
   sendSmartCareReady,
+  sendSepsisStatus,
   type SmartCarePatient,
 } from './smartcare-protocol';
 
@@ -69,34 +70,28 @@ interface HostPatientSession extends Session {
           *ngFor="let t of tabs"
           [class.active]="view === t.key"
           [attr.aria-current]="view === t.key ? 'page' : null"
-          (click)="trendInitialHours=12; setView(t.key)"
+          (click)="recordsPanel='evidence'; trendInitialHours=12; setView(t.key)"
         >
-          <ui-icon [name]="tabIcon(t.key)"/>{{ t.label }}
+          <ui-icon [name]="tabIcon(t.key)"/>{{ t.label }}<span class="icu-tab-badge" *ngIf="t.key === 'alerts' && pendingCount">{{ pendingCount }}</span>
         </button>
       </nav></div>
 
       <p class="icu-error" role="alert" *ngIf="error">{{ error }}</p>
 
       <section class="icu-body">
-        <sepsis-panel *ngIf="view === 'risk'" [patientId]="p.id" [encounterId]="p.encounterId"
-          (openTrends)="openTrendHistory()" (openEvidence)="setView('evidence')" (openAlerts)="setView('alerts')" (openTasks)="setView('tasks')" />
+        <sepsis-panel *ngIf="view === 'risk'" [patientId]="p.id" [encounterId]="p.encounterId" (status)="onStatus($event)"
+          (openTrends)="openTrendHistory()" (openEvidence)="openRecords()" (openAlerts)="setView('alerts')" (openTasks)="openTasksView()" />
         <patient-detail
-          *ngIf="view === 'trends' || view === 'evidence'"
+          *ngIf="view === 'records'"
           [patientId]="p.id"
-          [embedded]="true" [initialHours]="trendInitialHours" (openRecords)="setView('evidence')"
-          [panel]="view === 'trends' ? 'trends' : 'evidence'"
+          [embedded]="true" [initialHours]="trendInitialHours"
+          [panel]="recordsPanel"
           (openAlerts)="setView('alerts')"
         />
-        <patient-alerts
-          *ngIf="view === 'alerts'"
-          [embedded]="true"
-          (openEvidence)="setView('evidence')"
-        />
-        <patient-bundles
-          *ngIf="view === 'tasks'"
-          [embedded]="true"
-          (openEvidence)="setView('evidence')"
-        />
+        <ng-container *ngIf="view === 'alerts'">
+          <patient-alerts [embedded]="true" (openEvidence)="openRecords()" (changed)="refreshStatus()" />
+          <div id="icu-tasks"><patient-bundles [embedded]="true" (openEvidence)="openRecords()" (changed)="refreshStatus()" /></div>
+        </ng-container>
       </section>
     </ng-container>
 
@@ -107,8 +102,37 @@ interface HostPatientSession extends Session {
 })
 export class EmbedWorkspace implements OnInit, OnDestroy {
   trendInitialHours=12;
-  openTrendHistory(){this.trendInitialHours=168;this.setView('trends');}
-  tabIcon(key:string) { return ({risk:'activity',trends:'chart',evidence:'file',alerts:'bell',tasks:'clipboard'} as Record<string,string>)[key] || 'file'; }
+  recordsPanel: 'trends' | 'evidence' = 'evidence';
+  pendingCount = 0;
+  openTrendHistory(){this.trendInitialHours=168;this.recordsPanel='trends';this.setView('records');}
+  openRecords(){this.trendInitialHours=12;this.recordsPanel='evidence';this.setView('records');}
+  openTasksView(){this.setView('alerts');setTimeout(()=>document.getElementById('icu-tasks')?.scrollIntoView({block:'start'}),60);}
+  tabIcon(key:string) { return ({risk:'activity',records:'file',alerts:'bell'} as Record<string,string>)[key] || 'file'; }
+  /** Status for the host's own patient list/badge. Counts that failed to load are sent as null, never 0. */
+  onStatus(s: SepsisStatus) {
+    if (!this.patient || s.patientId !== this.patient.id) return;
+    this.lastStatus = s;
+    this.pendingCount = (s.pendingAlerts || 0) + (s.pendingTasks || 0);
+    this.postStatus();
+  }
+  async refreshStatus() {
+    const p = this.patient; if (!p) return; const generation = this.generation;
+    const [a, t] = await Promise.allSettled([
+      this.api.get<Page<Alert>>('/alerts?status=pending&size=1'),
+      this.api.get<Page<Task>>('/bundles/tasks?metric=pending&patientId=' + encodeURIComponent(p.id) + '&size=1'),
+    ]);
+    if (generation !== this.generation || this.patient?.id !== p.id) return;
+    this.onStatus({ ...(this.lastStatus || { patientId: p.id, level: 'unknown', summary: '' }), patientId: p.id,
+      pendingAlerts: a.status === 'fulfilled' ? a.value.total : null, pendingTasks: t.status === 'fulfilled' ? t.value.total : null });
+  }
+  private lastStatus: SepsisStatus | null = null;
+  private postStatus() {
+    const s = this.lastStatus, origin = this.appliedOrigin;
+    if (!s || !origin || !isIframe()) return;
+    if (this.protocol === 'smartcare') sendSepsisStatus(s, origin);
+    else this.send(origin, 'STATUS', undefined, s);
+  }
+  private protocol: 'smartcare' | 'secure' = 'smartcare';
   api = inject(Api);
   http = inject(HttpClient);
   @ViewChild(Detail) detail?: Detail;
@@ -130,11 +154,9 @@ export class EmbedWorkspace implements OnInit, OnDestroy {
   private handshakeTried = 0;
   private applying = false;
   tabs = [
-    { key: 'risk', label: '临床概览' },
-    { key: 'trends', label: '观测趋势' },
-    { key: 'evidence', label: '原始记录' },
-    { key: 'alerts', label: '预警处置' },
-    { key: 'tasks', label: '执行与审核' },
+    { key: 'risk', label: '概览' },
+    { key: 'alerts', label: '预警处理' },
+    { key: 'records', label: '记录与依据' },
   ];
   private listener = (event: MessageEvent) => void this.receive(event);
 
@@ -295,7 +317,8 @@ export class EmbedWorkspace implements OnInit, OnDestroy {
       const p = await this.api.get<Patient>('/patients/' + encodeURIComponent(s.patientId));
       if (generation !== this.generation) return;
       if (p.id !== patientId || p.encounterId !== s.encounterId) throw new Error('患者上下文不一致');
-      this.patient = p;
+      this.patient = p; this.protocol = 'smartcare';
+      if (!samePatient) { this.lastStatus = null; this.pendingCount = 0; }
       this.view = samePatient ? this.view : 'risk';
       this.stopHandshake();
       this.timer = setTimeout(
@@ -353,7 +376,7 @@ export class EmbedWorkspace implements OnInit, OnDestroy {
       const p = await this.api.get<Patient>('/patients/' + encodeURIComponent(s.patientId));
       if (generation !== this.generation) return;
       if (p.id !== m.payload!.patientId || p.encounterId !== m.payload!.encounterId) throw new Error('患者上下文不一致');
-      this.patient = p;
+      this.patient = p; this.protocol = 'secure'; this.lastStatus = null; this.pendingCount = 0;
       this.hostMrn = ''; this.hostGender = '';
       this.view = 'risk';
       this.timer = setTimeout(() => {

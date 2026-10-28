@@ -22,7 +22,7 @@ interface Plot {
   template: ` <section class="card trend-section">
     <div class="section-head">
       <div>
-        <h2><ui-icon name="chart"/>观测趋势 <span class="neutral-tag">观测值</span><span class="caution-tag" *ngIf="hours > 24">含历史记录</span></h2>
+        <h2><ui-icon name="chart"/>生命体征趋势<span class="caution-tag" *ngIf="hours > 24">含历史记录</span></h2>
       </div>
       <div class="segmented" role="group" aria-label="趋势时间范围">
         <button
@@ -35,12 +35,12 @@ interface Plot {
         </button>
       </div>
     </div>
-    <div class="chart-caption"><span><ui-icon name="clock"/>{{ from | date:'MM-dd HH:mm' }} — {{ end | date:'MM-dd HH:mm' }}</span><span class="report-chip" *ngIf="contextCount">{{ contextCount }} 条候选报告不参与绘图</span><button class="text-button" *ngIf="embedded" (click)="openRecords.emit()">原始记录 <ui-icon name="arrow"/></button></div>
+    <div class="chart-caption"><span><ui-icon name="clock"/>{{ from | date:'MM-dd HH:mm' }} — {{ end | date:'MM-dd HH:mm' }}</span><span class="report-chip" *ngIf="contextCount">{{ contextCount }} 条候选报告不参与绘图</span><button class="text-button" *ngIf="embedded" (click)="openRecords.emit()">记录单 <ui-icon name="arrow"/></button></div>
     <div class="read-limit" *ngIf="items.length >= 2000"><ui-icon name="info"/>读取量较大，当前结果可能截断；不代表所选时段完整数据。</div>
     <div class="chart-loading" *ngIf="busy" role="status"><span class="spinner"></span>正在读取所选时段…</div>
     <div class="trend-empty-summary" *ngIf="!hasPlottable && !busy">
       <div class="missing-metrics"><div *ngFor="let p of plots"><span>{{ p.m.label }}</span><strong>—<small>{{ p.m.unit }}</small></strong><em>无可用记录</em></div></div>
-      <div class="empty-chart-action"><ui-icon name="empty"/><div><strong>近 {{ rangeLabel(hours) }}暂无可绘制记录</strong><p>缺项不代表正常，可扩大范围查找已有记录</p></div><div class="empty-chart-buttons"><button class="primary" (click)="expandRange()">{{ compact ? '查看历史记录' : hours < 168 ? '查看近 7 天' : hours < 720 ? '查看近 30 天' : '查看原始记录' }} <ui-icon name="arrow"/></button><button (click)="openRecords.emit()">核对原始记录</button></div></div>
+      <div class="empty-chart-action"><ui-icon name="empty"/><div><strong>近 {{ rangeLabel(hours) }}暂无可绘制记录</strong><p>缺项不代表正常，可扩大范围查找已有记录</p></div><div class="empty-chart-buttons"><button class="primary" (click)="expandRange()">{{ compact ? '查看历史记录' : hours < 168 ? '查看近 7 天' : hours < 720 ? '查看近 30 天' : '查看原始记录' }} <ui-icon name="arrow"/></button><button (click)="openRecords.emit()">查看记录单</button></div></div>
     </div>
     <div class="trend-grid" *ngIf="hasPlottable && !busy">
       <article class="trend-tile" *ngFor="let p of plots">

@@ -9,7 +9,7 @@ import { text } from '../presentation';
   selector: 'patient-bundles',
   standalone: true,
   imports: [CommonModule, FormsModule, RouterLink, UiIcon],
-  template: `<header class="embedded-section-head" *ngIf="embedded"><h1><ui-icon name="clipboard"/>执行与审核</h1><button (click)="load()" [disabled]="busy"><ui-icon name="refresh"/>刷新</button></header><div class="pagehead">
+  template: `<header class="embedded-section-head sub" *ngIf="embedded"><h2><ui-icon name="clipboard"/>执行任务</h2><button (click)="load()" [disabled]="busy"><ui-icon name="refresh"/>刷新</button></header><div class="pagehead">
       <div>
         <p class="eyebrow">BUNDLE WORKFLOW</p>
         <h1>Bundle 任务工作台</h1>
@@ -20,7 +20,7 @@ import { text } from '../presentation';
     <details class="workflow-rules"><summary><ui-icon name="info"/>任务规则</summary><p>当前只启用“临床复评”模拟任务。60分钟是软件演示参数，不是已批准的治疗 Bundle 时限。</p></details>
     <p class="error" role="alert" *ngIf="error">{{ error }}</p>
     <section class="card">
-      <div class="work-empty" *ngIf="!tasks.length && !busy && !error"><ui-icon name="clipboard"/><strong>暂无待处理任务</strong><span>这里显示已建立的执行与审核记录，不代表治疗已完成</span><button *ngIf="embedded" (click)="openEvidence.emit()">核查患者证据 <ui-icon name="arrow"/></button></div>
+      <div class="work-empty" *ngIf="!tasks.length && !busy && !error"><ui-icon name="clipboard"/><strong>暂无待处理任务</strong><span>确认预警后建立的复评任务显示在这里</span></div>
       <article class="taskrow" *ngFor="let t of tasks">
         <div class="tasktitle">
           <strong>{{ t.itemName }}</strong
@@ -30,7 +30,7 @@ import { text } from '../presentation';
             (keydown.enter)="embedded && openEvidence.emit()"
             [attr.tabindex]="embedded ? 0 : null"
             [attr.role]="embedded ? 'button' : null"
-            >{{ t.patientId }} →</a
+            >{{ embedded ? '查看依据' : t.patientId }} →</a
           ><span class="muted">截止 {{ t.dueAt | date: 'MM-dd HH:mm:ss' }}</span>
         </div>
         <div class="states">
@@ -141,6 +141,7 @@ import { text } from '../presentation';
 export class Bundles implements OnInit {
   @Input() embedded = false;
   @Output() openEvidence = new EventEmitter<void>();
+  @Output() changed = new EventEmitter<void>();
   api = inject(Api);
   route = inject(ActivatedRoute);
   filter = new URLSearchParams();
@@ -224,6 +225,7 @@ export class Bundles implements OnInit {
       );
       this.selected = null;
       await this.load();
+      this.changed.emit();
     } catch (e) {
       this.error = errorMessage(e);
     } finally {
