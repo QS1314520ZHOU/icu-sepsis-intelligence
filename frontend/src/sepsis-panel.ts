@@ -133,8 +133,8 @@ interface SepsisAssessment {
       </article>
     </div>
 
-    <article class="card subtypes">
-      <h3>亚型提示</h3>
+    <article class="card subtypes" *ngIf="(d.subtypes || []).length">
+      <h3>感染源 / 循环</h3>
       <div class="subtype-chips">
         <div class="chip" *ngFor="let s of d.subtypes || []">
           <strong>{{ s.label }}</strong>

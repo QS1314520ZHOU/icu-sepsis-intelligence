@@ -216,40 +216,80 @@ public final class SepsisClinicalRules {
   public static List<Map<String, Object>> subtypes(String diagnosis, Map<String, Double> vitals, boolean vasopressor) {
     List<Map<String, Object>> out = new ArrayList<>();
     String d = diagnosis == null ? "" : diagnosis;
-    if (anyKeyword(d, List.of("肺炎", "呼吸机", "vap", "肺部感染", "ards", "呼吸衰竭")))
-      out.add(subtype("resp", "呼吸源性", "肺炎/VAP/ARDS 线索"));
-    if (anyKeyword(d, List.of("腹膜炎", "腹腔", "胆管", "胆囊", "肠", "胰腺炎")))
-      out.add(subtype("abdomen", "腹腔/胆道源性", "腹腔感染线索"));
-    if (anyKeyword(d, List.of("尿路", "泌尿", "肾盂", "导尿管相关")))
-      out.add(subtype("urinary", "泌尿源性", "尿路感染线索"));
-    if (anyKeyword(d, List.of("菌血症", "败血", "血流", "心内膜")))
-      out.add(subtype("bloodstream", "血流感染倾向", "菌血症/败血症线索"));
-    if (anyKeyword(d, List.of("皮肤", "软组织", "蜂窝", "坏疽", "压疮感染")))
-      out.add(subtype("soft", "皮肤软组织源性", "软组织感染线索"));
-    if (out.isEmpty()) out.add(subtype("unknown", "感染源未定", "诊断未提示明确部位"));
+
+    // Primary infection source: only the strongest diagnosis keyword hit, with evidence.
+    String source = null;
+    String evidence = null;
+    if (containsAny(d, List.of("肺炎", "vap", "肺部感染", "呼吸机相关"), null)) {
+      source = "呼吸源性";
+      evidence = matched(d, List.of("肺炎", "vap", "肺部感染", "呼吸机相关"));
+    } else if (containsAny(d, List.of("腹膜炎", "腹腔感染", "胆管炎", "胆囊炎", "急性胰腺炎"), null)) {
+      source = "腹腔/胆道源性";
+      evidence = matched(d, List.of("腹膜炎", "腹腔感染", "胆管炎", "胆囊炎", "急性胰腺炎"));
+    } else if (containsAny(d, List.of("尿路感染", "泌尿系感染", "肾盂肾炎"), null)) {
+      source = "泌尿源性";
+      evidence = matched(d, List.of("尿路感染", "泌尿系感染", "肾盂肾炎"));
+    } else if (containsAny(d, List.of("菌血症", "败血症", "血流感染", "感染性心内膜炎"), null)) {
+      source = "血流感染";
+      evidence = matched(d, List.of("菌血症", "败血症", "血流感染", "感染性心内膜炎"));
+    } else if (containsAny(d, List.of("软组织感染", "蜂窝织炎", "坏疽性筋膜炎"), null)) {
+      source = "皮肤软组织源性";
+      evidence = matched(d, List.of("软组织感染", "蜂窝织炎", "坏疽性筋膜炎"));
+    } else if (SepsisClinicalRules.infectionText(d)) {
+      source = "感染（部位未明）";
+      evidence = "诊断含感染相关词，但无明确解剖部位";
+    } else {
+      source = "无明确感染源证据";
+      evidence = "诊断未命中感染部位关键词";
+    }
+    Map<String, Object> src = new LinkedHashMap<>();
+    src.put("code", "source");
+    src.put("label", source);
+    src.put("basis", evidence);
+    out.add(src);
 
     Double lac = vitals.get("LACTATE");
-    Double hr = vitals.get("HR");
-    Double temp = vitals.get("TEMP");
-    String circulatory = vasopressor ? "血管麻痹/分布性倾向" : (lac != null && lac >= 4 ? "高乳酸低灌注倾向" : "循环相对稳定");
-    out.add(subtype("circ", circulatory, vasopressor ? "正在或近期使用升压药" : "无升压药记录"));
-    String metabolic = lac == null ? "乳酸未知" : (lac >= 4 ? "高乳酸代谢危机" : lac >= 2 ? "乳酸轻度升高" : "乳酸大致正常");
-    out.add(subtype("meta", metabolic, "乳酸 " + (lac == null ? "—" : fmt(lac))));
-    String inflammatory =
-        temp != null && temp >= 38.5 ? "高炎症表型(发热)" :
-        temp != null && temp <= 36.0 ? "低炎症/免疫抑制样表型(低体温)" :
-        "体温表型不典型";
-    if (hr != null && hr >= 120 && lac != null && lac >= 4) inflammatory += " · 交感高动力";
-    out.add(subtype("pheno", inflammatory, "体温/心率/乳酸组合"));
+    String circulatory;
+    String circEvidence;
+    if (vasopressor) {
+      circulatory = "血管麻痹倾向";
+      circEvidence = "窗口内有升压药/血管活性药执行";
+    } else if (lac != null && lac >= 4) {
+      circulatory = "高乳酸低灌注倾向";
+      circEvidence = "乳酸最高 " + fmt(lac) + " mmol/L";
+    } else {
+      circulatory = "无升压药且乳酸未达高危";
+      circEvidence =
+          "升压药无 · 乳酸" + (lac == null ? "缺失" : fmt(lac));
+    }
+    Map<String, Object> circ = new LinkedHashMap<>();
+    circ.put("code", "circulatory");
+    circ.put("label", circulatory);
+    circ.put("basis", circEvidence);
+    out.add(circ);
     return out;
   }
 
-  private static Map<String, Object> subtype(String code, String label, String basis) {
-    Map<String, Object> m = new LinkedHashMap<>();
-    m.put("code", code);
-    m.put("label", label);
-    m.put("basis", basis);
-    return m;
+  private static boolean containsAny(String text, List<String> keys, Object unused) {
+    if (text == null || text.isBlank()) return false;
+    String t = text.toLowerCase(Locale.ROOT);
+    for (String k : keys) if (t.contains(k.toLowerCase(Locale.ROOT))) return true;
+    return false;
+  }
+
+  private static String matched(String text, List<String> keys) {
+    if (text == null) return "";
+    String t = text.toLowerCase(Locale.ROOT);
+    for (String k : keys) {
+      if (t.contains(k.toLowerCase(Locale.ROOT))) {
+        // return a short window around first match
+        int i = t.indexOf(k.toLowerCase(Locale.ROOT));
+        int a = Math.max(0, i - 12);
+        int b = Math.min(text.length(), i + k.length() + 20);
+        return text.substring(a, b);
+      }
+    }
+    return "";
   }
 
   private static Map<String, Object> factor(String code, String label, double weight, String why) {
