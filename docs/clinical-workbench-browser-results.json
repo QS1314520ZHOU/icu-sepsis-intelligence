@@ -1,0 +1,62 @@
+{
+  "scope": "compiled frontend with synthetic API responses; not hospital integration",
+  "tests": [
+    {
+      "name": "same patient overview shows observation trends and actionable records",
+      "passed": true
+    },
+    {
+      "name": "source evidence can be inspected without leaving current patient",
+      "passed": true
+    },
+    {
+      "name": "diagnostic checklist uses unknown rather than fabricated target attainment",
+      "passed": true
+    },
+    {
+      "name": "work queue navigates to existing review form",
+      "passed": true
+    },
+    {
+      "name": "unsaved review rejects patient switching",
+      "passed": true
+    },
+    {
+      "name": "rapid patient selections keep the newest result",
+      "passed": true
+    },
+    {
+      "name": "missing data stays unknown and has no artificial curve",
+      "passed": true
+    },
+    {
+      "name": "non-parent message cannot select a patient",
+      "passed": true
+    },
+    {
+      "name": "parent clear removes all previous patient content",
+      "passed": true
+    },
+    {
+      "name": "partial work-queue failure is not shown as zero",
+      "passed": true
+    },
+    {
+      "name": "unavailable source is explicitly reported without low risk",
+      "passed": true
+    },
+    {
+      "name": "narrow iframe keeps readable content without body overflow",
+      "passed": true
+    },
+    {
+      "name": "keyboard can open original records tab",
+      "passed": true
+    },
+    {
+      "name": "no browser runtime errors",
+      "passed": true
+    }
+  ],
+  "errors": []
+}

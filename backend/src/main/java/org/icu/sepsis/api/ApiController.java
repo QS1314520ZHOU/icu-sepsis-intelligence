@@ -90,7 +90,7 @@ public class ApiController {
             "limit",
             2000,
             "note",
-            "受限时间窗，最多2000条；未来与尚未入库的数据不返回。"));
+            "受限时间窗与分源条数上限；源入库时间未知时明确标记。候选报告不表示已确认本次住院归属。"));
   }
 
   @PostMapping("/patients/{id}/risk-assessments")
@@ -116,7 +116,7 @@ public class ApiController {
     return Envelope.ok(q.page(c, Assessment.class, page, size, Views::assessment));
   }
 
-  /** Real-time sepsis / septic-shock auto classification + 1h3h6h Bundle + explainable AI risk. */
+  /** Read-only recent-evidence review (schema v2); not a diagnosis or prediction model. */
   @GetMapping("/patients/{id}/sepsis-assessment")
   public Envelope<?> sepsisAssessment(@PathVariable String id) {
     Patient p = s.patient(id);

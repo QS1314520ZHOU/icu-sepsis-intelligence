@@ -1,0 +1,10 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {reviewTitle,reviewState,yesNoUnknown,matchesPatient,featureLabel, type ClinicalReview} from '../src/clinical-review.ts';
+test('unavailable cannot inherit low-risk wording',()=>{const r={available:false,screeningLabel:'极低',screeningStatus:'minimal'} as ClinicalReview;assert.equal(reviewTitle(r),'当前无法评估');assert.equal(reviewState(r),'unavailable');});
+test('null review stays unavailable',()=>assert.equal(reviewTitle(null),'当前无法评估'));
+test('unknown boolean is not absence',()=>{assert.equal(yesNoUnknown(null),'未取得有效记录');assert.equal(yesNoUnknown(undefined),'未取得有效记录');assert.equal(yesNoUnknown(false),'记录为无');assert.equal(yesNoUnknown(true),'有记录');});
+test('same patient but wrong encounter is rejected',()=>assert.equal(matchesPatient({patientId:'a',encounterId:'old'},'a','new'),false));
+test('matching patient and encounter is accepted',()=>assert.equal(matchesPatient({patientId:'a',encounterId:'stay'},'a','stay'),true));
+test('patient mismatch is rejected',()=>assert.equal(matchesPatient({patientId:'b',encounterId:'stay'},'a','stay'),false));
+test('missing feature codes have clinical labels',()=>{assert.equal(featureLabel('LACTATE'),'乳酸');assert.equal(featureLabel('MAP'),'平均动脉压');assert.equal(featureLabel('NEW_CODE'),'NEW_CODE');});

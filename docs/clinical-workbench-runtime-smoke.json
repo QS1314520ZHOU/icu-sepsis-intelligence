@@ -1,0 +1,25 @@
+{
+  "scope": "packaged jar, real local demo provider and dedicated local MongoDB only; no hospital connection",
+  "patients": [
+    {
+      "patientId": "demo-insufficient",
+      "schemaVersion": 2,
+      "status": "insufficient_data",
+      "noFabricatedRiskScore": true
+    },
+    {
+      "patientId": "demo-deteriorating",
+      "schemaVersion": 2,
+      "status": "review_required",
+      "noFabricatedRiskScore": true
+    },
+    {
+      "patientId": "demo-normal",
+      "schemaVersion": 2,
+      "status": "not_triggered",
+      "noFabricatedRiskScore": true
+    }
+  ],
+  "servedFrontendMatchesBuild": true,
+  "jarSha256": "9a1c4013692b4f5d7f53f99fcd5aa0b92cfb6569d99fa7c0010fedfb61a4a22b"
+}
