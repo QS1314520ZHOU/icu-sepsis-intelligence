@@ -177,16 +177,9 @@ public final class ResearchRow {
     for (Drug d : e.drugs) {
       if (d.start == null || !d.start.isBefore(b) || d.start.isBefore(e.t0.minus(Duration.ofHours(24)))) continue;
       if (d.items.stream().noneMatch(it -> Icu05Rules.isVasopressor(it.name, e.vasoDictionary))) continue;
-      if (!d.start.isBefore(a)) return 1;
-      Instant stop = null, lastAct = null;
-      for (Action ac : d.actions) {
-        if (ac.time == null) continue;
-        if (lastAct == null || ac.time.isAfter(lastAct)) lastAct = ac.time;
-        if (ac.action != null && Icu05Rules.STOP_ACTIONS.contains(ac.action.trim().toLowerCase(Locale.ROOT)) && (stop == null || ac.time.isBefore(stop))) stop = ac.time;
-      }
-      if (stop != null) { if (stop.isAfter(a)) return 1; continue; }
-      if (lastAct != null && !lastAct.isBefore(a)) return 1;
-      unknown = true;
+      Boolean on = Icu05Rules.vasopressorRunningDuring(d, a, b);
+      if (Boolean.TRUE.equals(on)) return 1;
+      if (on == null) unknown = true;
     }
     return unknown ? null : 0;
   }
@@ -212,7 +205,8 @@ public final class ResearchRow {
   static Double umol(Value v, double factor) {
     String u = v.unit == null ? "" : v.unit.toLowerCase(Locale.ROOT).replace("μ", "u").replace("µ", "u");
     if (u.contains("mg/dl")) return round(v.value * factor);
-    if (u.contains("umol") || u.contains("微摩尔")) return v.value;
+    // 院内 TBIL 实际 unit 可能是 micromol/L 或 umol/L；两者都是 μmol/L 量级
+    if (u.contains("umol") || u.contains("micromol") || u.contains("微摩尔") || u.contains("μmol")) return v.value;
     return null; // unknown unit is not guessed
   }
 

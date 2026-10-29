@@ -80,6 +80,64 @@ public final class Icu05Rules {
   static final List<String> COLLOID = List.of("白蛋白", "albumin", "羟乙基淀粉", "voluven", "明胶", "gelatin", "右旋糖酐", "dextran");
   public static final String CULTURE_REGEX = "血培养|痰培养|尿培养|细菌培养|真菌培养|分泌物培养|引流液培养|胸水培养|腹水培养|脑脊液培养|导管培养";
   public static final Set<String> STOP_ACTIONS = Set.of("stop", "pause", "cancel", "停止", "暂停", "取消", "停用");
+  /** Confirmed resume after pause (hospital drugActionList uses recovery). */
+  public static final Set<String> RESUME_ACTIONS = Set.of("recovery", "resume", "恢复", "继续");
+
+  /**
+   * Whether a vasopressor administration is running at time {@code at}, using the action sequence
+   * (start / pause / recovery / stop) rather than first-stop-wins.
+   *
+   * <p>Returns TRUE / FALSE / null (null = cannot tell: started earlier without action records).
+   */
+  public static Boolean vasopressorActiveAt(Drug d, Instant at) {
+    if (d == null || d.start == null || at == null) return null;
+    if (d.start.isAfter(at)) return Boolean.FALSE;
+    if (d.actions == null || d.actions.isEmpty()) return null;
+    List<Action> acts = new ArrayList<>(d.actions);
+    acts.sort(Comparator.comparing(a -> a.time == null ? d.start : a.time));
+    boolean on = true;
+    for (Action a : acts) {
+      Instant t = a.time == null ? d.start : a.time;
+      if (t.isAfter(at)) break;
+      String raw = a.action == null ? "" : a.action.trim().toLowerCase(Locale.ROOT);
+      if ("stop".equals(raw) || "cancel".equals(raw) || "停止".equals(raw) || "取消".equals(raw) || "停用".equals(raw))
+        on = false;
+      else if ("pause".equals(raw) || "暂停".equals(raw)) on = false;
+      else if (RESUME_ACTIONS.contains(raw)) on = true;
+      // start / add / minus / quickAdd keep state
+    }
+    return on;
+  }
+
+  /**
+   * Whether the infusion ran at any moment in [a, b): started inside the window, running at a by the
+   * start/pause/recovery/stop sequence, or resumed inside the window. null = cannot tell (started before a
+   * with no action records, or no stop ever recorded and no action since a — the pump may have ended silently).
+   */
+  public static Boolean vasopressorRunningDuring(Drug d, Instant a, Instant b) {
+    return vasopressorRunningDuring(d, a, b, true);
+  }
+
+  /** @param silentEndUnknown false = director gate: started, never stopped -> still running (as before). */
+  public static Boolean vasopressorRunningDuring(Drug d, Instant a, Instant b, boolean silentEndUnknown) {
+    if (d == null || d.start == null || a == null || b == null) return null;
+    if (!d.start.isBefore(b)) return Boolean.FALSE;
+    if (!d.start.isBefore(a)) return Boolean.TRUE;
+    if (d.actions == null || d.actions.isEmpty()) return null;
+    Boolean atA = vasopressorActiveAt(d, a);
+    boolean resumedInside = false, anyStop = false, actionSinceA = false;
+    for (Action ac : d.actions) {
+      if (ac.time == null) continue;
+      String raw = ac.action == null ? "" : ac.action.trim().toLowerCase(Locale.ROOT);
+      if (STOP_ACTIONS.contains(raw)) anyStop = true;
+      if (!ac.time.isBefore(a)) actionSinceA = true;
+      if (!ac.time.isBefore(a) && ac.time.isBefore(b) && RESUME_ACTIONS.contains(raw)) resumedInside = true;
+    }
+    if (resumedInside) return Boolean.TRUE;
+    if (Boolean.FALSE.equals(atA)) return Boolean.FALSE;
+    if (silentEndUnknown && Boolean.TRUE.equals(atA) && !anyStop && !actionSinceA) return null;
+    return atA;
+  }
 
   static String norm(String name) {
     if (name == null) return "";
@@ -300,23 +358,42 @@ public final class Icu05Rules {
 
   static Map<String, Object> vasopressor(String code, String label, Evidence e, Instant from, Instant to) {
     if (e.failed.contains("drugExe")) return item(code, label, null, null, "", "SOURCE_ERROR");
-    Instant t0 = e.t0; boolean unknown = false; String unknownName = null; Instant unknownTime = null;
-    List<Drug> sorted = e.drugs.stream().filter(d -> d.start != null).sorted(Comparator.comparing(d -> d.start)).collect(Collectors.toList());
+    Instant t0 = e.t0;
+    boolean unknown = false;
+    String unknownName = null;
+    Instant unknownTime = null;
+    List<Drug> sorted =
+        e.drugs.stream()
+            .filter(d -> d.start != null)
+            .sorted(Comparator.comparing(d -> d.start))
+            .collect(Collectors.toList());
     for (Drug d : sorted) {
       if (d.start.isBefore(from) || d.start.isAfter(to)) continue;
       for (DrugItem it : d.items) {
         if (!isVasopressor(it.name, e.vasoDictionary)) continue;
-        if (!d.start.isAfter(t0)) {
-          // Started before T0: only counts if still running (no stop/pause/cancel). No action list = unknown.
-          if (d.actions.isEmpty()) { unknown = true; if (unknownName == null) { unknownName = it.name; unknownTime = d.start; } continue; }
-          boolean stopped = d.actions.stream().anyMatch(a -> a.action != null && STOP_ACTIONS.contains(a.action.trim().toLowerCase(Locale.ROOT)));
-          if (stopped) continue;
-          return item(code, label, true, d.start, it.name + "（T0 前开始，未见停止）", null);
+        // Started after T0 inside the window: any use counts (director rule). Started at/before T0: must run after T0.
+        Boolean active = d.start.isAfter(t0) ? Boolean.TRUE : vasopressorRunningDuring(d, t0, to, false);
+        if (active == null) {
+          unknown = true;
+          if (unknownName == null) {
+            unknownName = it.name;
+            unknownTime = d.start;
+          }
+          continue;
         }
-        return item(code, label, true, d.start, it.name, null);
+        if (!active) continue;
+        String note = d.start.isAfter(t0) ? it.name : it.name + "（T0 前开始，按执行动作 T0 后仍在用）";
+        return item(code, label, true, d.start, note, null);
       }
     }
-    if (unknown) return item(code, label, null, unknownTime, unknownName + "（T0 前开始，无执行动作记录）", "VASO_STATUS_UNKNOWN");
+    if (unknown)
+      return item(
+          code,
+          label,
+          null,
+          unknownTime,
+          unknownName + "（T0 前开始，执行动作不足以判断是否仍在用）",
+          "VASO_STATUS_UNKNOWN");
     return item(code, label, false, null, "", null);
   }
 
