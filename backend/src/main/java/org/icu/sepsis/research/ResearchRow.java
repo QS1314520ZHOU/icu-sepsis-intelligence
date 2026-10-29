@@ -212,7 +212,8 @@ public final class ResearchRow {
   static Double umol(Value v, double factor) {
     String u = v.unit == null ? "" : v.unit.toLowerCase(Locale.ROOT).replace("μ", "u").replace("µ", "u");
     if (u.contains("mg/dl")) return round(v.value * factor);
-    if (u.contains("umol") || u.contains("微摩尔")) return v.value;
+    // 院内 TBIL 实际 unit 可能是 micromol/L 或 umol/L；两者都是 μmol/L 量级
+    if (u.contains("umol") || u.contains("micromol") || u.contains("微摩尔") || u.contains("μmol")) return v.value;
     return null; // unknown unit is not guessed
   }
 

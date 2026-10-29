@@ -18,7 +18,10 @@ import org.springframework.stereotype.Component;
 @ConditionalOnProperty(name = "app.source.mode", havingValue = "smartcare")
 public class ResearchSourceReader {
   public static final Map<String, List<String>> LAB_CODES = Map.of(
-      "PLT", List.of("PLT"), "TBIL", List.of("TBIL"), "CREA", List.of("CREA", "sCr", "Cr"));
+      "PLT", List.of("PLT"),
+      "TBIL", List.of("TBIL"),
+      // 本院 VI_ICU_EXAM_ITEM 肌酐主码为 sCr（umol/L）；CREA/Cr 作兼容回退
+      "CREA", List.of("sCr", "CREA", "Cr"));
   private final MongoTemplate smartcare, dataCenter;
 
   public ResearchSourceReader(@Qualifier("smartcareMongoTemplate") MongoTemplate smartcare,

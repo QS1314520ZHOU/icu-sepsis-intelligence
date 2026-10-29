@@ -184,12 +184,17 @@ public class Icu05SourceReader {
         drug.sourceId = "SmartCare.drugExe:" + d.get("_id");
         if (drug.start == null) continue;
         Object list = d.get("drugList");
+        // 父级 liquidAmountUnit 作默认容量单位（本院常见 ml）；子项 liquidUnit 缺省时视为已知 ml
+        String parentUnit = d.getString("liquidAmountUnit");
+        boolean parentUnitMl = parentUnit == null || parentUnit.isBlank() || "ml".equalsIgnoreCase(parentUnit.trim());
         if (list instanceof List) for (Object o : (List<?>) list) {
           if (!(o instanceof Document)) continue;
           Document it = (Document) o;
           DrugItem item = new DrugItem(it.getString("name"), num(it.get("liquidAmount")));
           Object unit = it.get("liquidUnit");
-          if (unit != null && !String.valueOf(unit).isBlank() && !String.valueOf(unit).trim().equalsIgnoreCase("ml")) item.liquidUnitKnown = false;
+          if (unit == null && !parentUnitMl) item.liquidUnitKnown = false;
+          else if (unit != null && !String.valueOf(unit).isBlank() && !String.valueOf(unit).trim().equalsIgnoreCase("ml"))
+            item.liquidUnitKnown = false;
           drug.items.add(item);
         }
         Object acts = d.get("drugActionList");
