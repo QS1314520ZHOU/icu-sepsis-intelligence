@@ -137,4 +137,49 @@ class Icu05RulesTest {
     assertFalse(Icu05Rules.isAntibiotic("头孢皮试剂", Set.of()));
     assertTrue(Icu05Rules.isAntibiotic("注射用头孢哌酮舒巴坦", Set.of()));
   }
+
+  @Test void vasoActive_pauseThenRecoveryStillOn() {
+    Drug d = new Drug();
+    d.start = at(0);
+    d.items.add(new DrugItem("*去甲肾上腺素注射液", 1.0));
+    d.actions.add(new Action(at(10), "start"));
+    d.actions.add(new Action(at(60), "pause"));
+    d.actions.add(new Action(at(90), "recovery"));
+    d.actions.add(new Action(at(200), "stop"));
+    assertEquals(Boolean.TRUE, Icu05Rules.vasopressorActiveAt(d, at(120)));
+    assertEquals(Boolean.FALSE, Icu05Rules.vasopressorActiveAt(d, at(70)));
+    assertEquals(Boolean.FALSE, Icu05Rules.vasopressorActiveAt(d, at(250)));
+  }
+
+  @Test void vasoActive_pauseWithoutRecoveryOff() {
+    Drug d = new Drug();
+    d.start = at(0);
+    d.items.add(new DrugItem("去甲肾上腺素", 1.0));
+    d.actions.add(new Action(at(5), "start"));
+    d.actions.add(new Action(at(40), "pause"));
+    assertEquals(Boolean.FALSE, Icu05Rules.vasopressorActiveAt(d, at(100)));
+  }
+
+  @Test void vasoActive_startOnlyUnknownIfNoActions() {
+    Drug d = new Drug();
+    d.start = at(-30);
+    d.items.add(new DrugItem("去甲肾上腺素", 1.0));
+    assertNull(Icu05Rules.vasopressorActiveAt(d, at(10)));
+    d.actions.add(new Action(at(-30), "start"));
+    assertEquals(Boolean.TRUE, Icu05Rules.vasopressorActiveAt(d, at(10)));
+  }
+
+  @Test void pauseThenRecoveryCountsAsShockVasopressor() {
+    Evidence e = full();
+    e.drugs.removeIf(d -> d.items.get(0).name.contains("去甲"));
+    Drug v = new Drug();
+    v.start = at(20);
+    v.items.add(new DrugItem("*去甲肾上腺素注射液", 50.0));
+    v.actions.add(new Action(at(20), "start"));
+    v.actions.add(new Action(at(40), "pause"));
+    v.actions.add(new Action(at(50), "recovery"));
+    e.drugs.add(v);
+    Map<String, Object> r = Icu05Rules.evaluate(e);
+    assertEquals(true, gate(r).get("isSepticShock"));
+  }
 }

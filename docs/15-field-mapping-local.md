@@ -91,3 +91,31 @@
 ## 5. 声明
 
 本报告为**数据对接与字段映射核对**，用于发现编码/单位/关联问题；**不是**临床验证、诊断能力评价或疗效评价。
+
+---
+
+## 6. 续核验（fix 分支后续提交）
+
+### T0（入科后第一条医嘱）
+- 近 30 天队列 n=156：距 `icuAdmissionTime` 中位数 **4.4 min**，Q1=0，Q3=15.7。
+- 首条医嘱以**转科/护理/记账**为主，几乎不是休克识别时刻。
+- 有升压药 51 例：首个升压药相对现有 T0 中位数 **+96.9 min**（Q1 +8.1，Q3 +273）；T0 前已有升压药仅 6 例。
+- **结论：T0 ≈ 入科瞬间，不是休克识别时间。是否改定义由主任定，代码未改阈值。**
+
+### 乳酸缺失
+- 近月 40 例：bGATemp.mrn+EXAM 12；仅 EXAM 25；全无 3。
+- DataCenter 乳酸 itemCode 主为 **LAC/LAC1**（勿用含 LDH 的宽正则）；时间字段仅 **authTime**。
+- 已改：ICU-05 读血气时，在 bGATemp 之外按 hisPid 补读 EXAM_ITEM 乳酸（LAC/LAC1），去重后并入序列。
+
+### recovery 动作
+- 序列证据：`start→pause→recovery→stop` 21；pause 后 recovery **42** 次（prior almost always pause）。
+- 已改：`vasopressorActiveAt` 按动作区间判断；pause→recovery 仍算在用。
+
+### 血培养时间字段
+- ZYYZ 仅有 orderTime/reviewTime（及 stop/cancel/plan）；**无标本采集时间**。维持 reviewTime 默认。
+
+### 回归
+- 后端 `mvn test`：Tests run **80**，Failures 0，Errors 0，Skipped 2（Mongo 集成按环境跳过）
+- 前端 `npm test`：**48** 通过；`ng build` 成功
+- `research/tests`：`unittest discover` **26** OK
+- `scripts/research-e2e.sh`：需本机 27117 合成库，本轮**未跑**（无该 mongod）

@@ -87,7 +87,7 @@ public class Icu05SourceReader {
     if (to.isAfter(asOf)) to = asOf;
     Date dFrom = Date.from(from), dTo = Date.from(to);
     loadDictionaries(e);
-    readBloodGas(e, mrn, dFrom, dTo);
+    readBloodGas(e, mrn, hisPid, dFrom, dTo);
     readGcs(e, hostPatientId, dFrom, dTo);
     readMap(e, hostPatientId, dFrom, dTo);
     if (withHeartRate) readHeartRate(e, hostPatientId, dFrom, dTo);
@@ -96,33 +96,82 @@ public class Icu05SourceReader {
     return e;
   }
 
-  private void readBloodGas(Evidence e, String mrn, Date from, Date to) {
-    if (blank(mrn)) { e.failed.add("bGATemp"); return; }
-    try {
-      Set<String> seen = new HashSet<>();
-      Document match = new Document("code", new Document("$in", List.of("param_bg_Lac", "param_bg_P/Fratio")))
-          .append("valid", "valid").append("time", new Document("$gte", from).append("$lte", to));
-      for (Document d : smartcare.getCollection("bGATemp").find(new Document("mrn", mrn).append("bedsides", new Document("$elemMatch", match)))
-          .projection(new Document("bedsides", 1)).limit(500)) {
-        Object raw = d.get("bedsides");
-        if (!(raw instanceof List)) continue;
-        for (Object o : (List<?>) raw) {
-          if (!(o instanceof Document)) continue;
-          Document b = (Document) o;
-          String code = b.getString("code");
-          if (!"valid".equals(b.get("valid"))) continue;
-          Instant t = toInstant(b.get("time"));
-          Double v = num(b.get("fVal"));
-          if (v == null) v = num(b.get("strVal"));
-          if (t == null || v == null || t.isBefore(from.toInstant()) || t.isAfter(to.toInstant())) continue;
-          String key = code + "|" + t + "|" + v;
-          if (!seen.add(key)) continue;
-          Point pt = new Point(t, v, null, "SmartCare.bGATemp:" + d.get("_id"));
-          if ("param_bg_Lac".equals(code)) e.lactate.add(pt);
-          else if ("param_bg_P/Fratio".equals(code)) e.pf.add(pt);
+  private void readBloodGas(Evidence e, String mrn, String hisPid, Date from, Date to) {
+    // Primary: SmartCare.bGATemp by mrn (director rule).
+    if (!blank(mrn)) {
+      try {
+        Set<String> seen = new HashSet<>();
+        Document match =
+            new Document("code", new Document("$in", List.of("param_bg_Lac", "param_bg_P/Fratio")))
+                .append("valid", "valid")
+                .append("time", new Document("$gte", from).append("$lte", to));
+        for (Document d :
+            smartcare
+                .getCollection("bGATemp")
+                .find(new Document("mrn", mrn).append("bedsides", new Document("$elemMatch", match)))
+                .projection(new Document("bedsides", 1))
+                .limit(500)) {
+          Object raw = d.get("bedsides");
+          if (!(raw instanceof List)) continue;
+          for (Object o : (List<?>) raw) {
+            if (!(o instanceof Document)) continue;
+            Document b = (Document) o;
+            String code = b.getString("code");
+            if (!"valid".equals(b.get("valid"))) continue;
+            Instant t = toInstant(b.get("time"));
+            Double v = num(b.get("fVal"));
+            if (v == null) v = num(b.get("strVal"));
+            if (t == null || v == null || t.isBefore(from.toInstant()) || t.isAfter(to.toInstant()))
+              continue;
+            String key = code + "|" + t + "|" + v;
+            if (!seen.add(key)) continue;
+            Point pt = new Point(t, v, null, "SmartCare.bGATemp:" + d.get("_id"));
+            if ("param_bg_Lac".equals(code)) e.lactate.add(pt);
+            else if ("param_bg_P/Fratio".equals(code)) e.pf.add(pt);
+          }
         }
+      } catch (RuntimeException ex) {
+        e.failed.add("bGATemp");
       }
-    } catch (RuntimeException ex) { e.failed.add("bGATemp"); }
+    } else {
+      // only mark bGATemp failed if we also cannot use lab fallback
+      // (mrn blank alone is not a source outage)
+    }
+    // Secondary lactate only: DataCenter EXAM_ITEM by hisPid when bGATemp has no coverage.
+    // authTime = report/audit time; itemCode LAC/LAC1 only (exclude LDH).
+    if (!blank(hisPid)) {
+      try {
+        for (Document d :
+            dataCenter
+                .getCollection("VI_ICU_EXAM_ITEM")
+                .find(
+                    new Document("hisPid", hisPid)
+                        .append("itemCode", new Document("$regex", "^(LAC|LAC[0-9]+)$"))
+                        .append("authTime", new Document("$gte", from).append("$lte", to)))
+                .projection(
+                    new Document("itemCode", 1)
+                        .append("result", 1)
+                        .append("unit", 1)
+                        .append("authTime", 1)
+                        .append("_id", 1))
+                .limit(400)) {
+          Double v = num(d.get("result"));
+          Instant t = toInstant(d.get("authTime"));
+          if (v == null || t == null) continue;
+          boolean dup =
+              e.lactate.stream()
+                  .anyMatch(
+                      p ->
+                          Math.abs(p.value - v) < 1e-9
+                              && Math.abs(Duration.between(p.time, t).toSeconds()) < 60);
+          if (dup) continue;
+          e.lactate.add(
+              new Point(t, v, null, "DataCenter.VI_ICU_EXAM_ITEM:" + d.get("_id")));
+        }
+      } catch (RuntimeException ex) {
+        e.failed.add("VI_ICU_EXAM_ITEM.lactate");
+      }
+    }
   }
 
   private void readGcs(Evidence e, String pid, Date from, Date to) {
