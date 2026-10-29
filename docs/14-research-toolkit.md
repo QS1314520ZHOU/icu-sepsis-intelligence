@@ -23,7 +23,10 @@ java -jar sepsis-intelligence-0.3.0.jar --spring.main.web-application-type=none 
 
 - 源库连接沿用 `SMARTCARE_MONGO_URI` / `DATACENTER_MONGO_URI`；业务库（预警处置）沿用 `MONGODB_URI`。导出不写任何库。
 - 非 Web 模式不启动接口与登录（`SecurityConfig` 仅 Web 模式加载），跑完自动退出；退出码 0 成功、2 失败。
-- 可选：`death-types`（默认 `死亡,非医嘱离院`，按 `patient.dischargedType` 判定 ICU 死亡）、`limit`、`after-hours`（默认 T0 后 30h）。
+- 死亡口径（按 `patient.dischargedType`，科室规定：**非医嘱离院只在质控时算死亡**）：
+  - `outcome.death` 科研/临床口径，`death-types` 默认 `死亡`，用于方向 3 的 AUROC、方向 4、方向 5；
+  - `outcome.deathQc` 质控口径，`qc-death-types` 默认 `死亡,非医嘱离院`，用于 APACHE II 标化病死率（SMR）与校准。
+- 其他可选：`limit`、`after-hours`（默认 T0 后 30h）。
 
 ### 去标识
 
@@ -65,7 +68,7 @@ cd research && python3 -m icu_research report --export /data/research-export --o
 
 ## 4. 首次真实运行前的核对清单
 
-1. `patient.dischargedType` 的实际取值，确认哪些代表 ICU 内死亡，必要时改 `death-types`。
+1. `patient.dischargedType` 的实际取值（已核对含 死亡/非医嘱离院/医嘱离院/转出）；死亡口径已按科室规定区分科研与质控。
 2. `VI_ICU_EXAM_ITEM` 中 PLT/TBIL/肌酐的 `itemCode` 与单位（当前 `PLT`、`TBIL`、`CREA/sCr/Cr`）。
 3. `score` 中 `sofa`、`apacheII` 的 `scoreType` 与 `apacheII.calDead.score` 是否为 0–1 概率。
 4. `bedside` 心率编码 `param_HR`；`drugExe.drugActionList` 停止动作的实际取值。

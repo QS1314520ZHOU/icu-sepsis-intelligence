@@ -14,7 +14,7 @@ import org.junit.jupiter.api.Test;
 
 class ResearchRowTest {
   static final Instant T0 = Instant.parse("2024-03-01T02:00:00Z");
-  static final Set<String> DEATH = Set.of("死亡", "非医嘱离院");
+  static final Set<String> DEATH = Set.of("死亡"), QC = Set.of("死亡", "非医嘱离院");
   static Instant at(int min) { return T0.plus(Duration.ofMinutes(min)); }
   static Drug drug(int min, String name, Double ml, Object... actions) {
     Drug d = new Drug(); d.start = at(min); d.items.add(new DrugItem(name, ml));
@@ -58,7 +58,7 @@ class ResearchRowTest {
   }
   static Map<String, Object> row() {
     Evidence e = evidence();
-    return ResearchRow.build(patient(), "ENC-1", e, Icu05Rules.evaluate(e), labs(), scores(), "test-salt-123456", DEATH);
+    return ResearchRow.build(patient(), "ENC-1", e, Icu05Rules.evaluate(e), labs(), scores(), "test-salt-123456", DEATH, QC);
   }
   @SuppressWarnings("unchecked") static Map<String, Object> m(Map<String, Object> r, String k) { return (Map<String, Object>) r.get(k); }
 
@@ -112,7 +112,7 @@ class ResearchRowTest {
     Evidence e = evidence();
     e.drugs.removeIf(d -> d.items.get(0).name.contains("去甲"));
     e.drugs.add(drug(35, "去甲肾上腺素", 50.0)); // no actions at all
-    Map<String, Object> r = ResearchRow.build(patient(), "ENC-1", e, Icu05Rules.evaluate(e), labs(), scores(), "test-salt-123456", DEATH);
+    Map<String, Object> r = ResearchRow.build(patient(), "ENC-1", e, Icu05Rules.evaluate(e), labs(), scores(), "test-salt-123456", DEATH, QC);
     List<Integer> vaso = (List<Integer>) m(r, "traj").get("vaso");
     assertEquals(1, vaso.get(0));
     assertNull(vaso.get(1));
@@ -140,7 +140,7 @@ class ResearchRowTest {
 
   @Test void noT0RowCarriesNoTiming() {
     Evidence e = evidence(); e.t0 = null;
-    Map<String, Object> r = ResearchRow.build(patient(), "ENC-2", e, Icu05Rules.evaluate(e), labs(), scores(), "test-salt-123456", DEATH);
+    Map<String, Object> r = ResearchRow.build(patient(), "ENC-2", e, Icu05Rules.evaluate(e), labs(), scores(), "test-salt-123456", DEATH, QC);
     assertEquals(false, r.get("t0Available"));
     assertFalse(r.containsKey("timing")); assertFalse(r.containsKey("traj"));
     assertTrue(r.containsKey("outcome"));
@@ -150,8 +150,18 @@ class ResearchRowTest {
     Evidence e = evidence();
     e.drugs.removeIf(d -> d.items.get(0).name.contains("去甲"));
     e.drugs.add(drug(35, "去甲肾上腺素", 50.0, 35, "start", 130, "pause", 250, "recovery", 400, "stop"));
-    Map<String, Object> r = ResearchRow.build(patient(), "ENC-1", e, Icu05Rules.evaluate(e), labs(), scores(), "test-salt-123456", DEATH);
+    Map<String, Object> r = ResearchRow.build(patient(), "ENC-1", e, Icu05Rules.evaluate(e), labs(), scores(), "test-salt-123456", DEATH, QC);
     // hours: 0 start, 1 on, 2 paused at 2:10 (ran part of hour), 3 off, 4 resumed 4:10, 5 on, 6 stopped 6:40, 7 off
     assertEquals(List.of(1, 1, 1, 0, 1, 1, 1, 0), ((List<Integer>) m(r, "traj").get("vaso")).subList(0, 8));
+  }
+
+  @Test void selfDischargeCountsAsDeathOnlyForQualityControl() {
+    Evidence e = evidence();
+    Document p = patient().append("dischargedType", "非医嘱离院");
+    Map<String, Object> o = m(ResearchRow.build(p, "ENC-1", e, Icu05Rules.evaluate(e), labs(), scores(), "test-salt-123456", DEATH, QC), "outcome");
+    assertEquals(false, o.get("death"));
+    assertEquals(true, o.get("deathQc"));
+    Map<String, Object> o2 = m(row(), "outcome");
+    assertEquals(true, o2.get("death")); assertEquals(true, o2.get("deathQc"));
   }
 }

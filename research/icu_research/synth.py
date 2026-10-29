@@ -31,6 +31,7 @@ def _item(value, reason=None, minute=None):
 
 def make(n=1200, seed=1, scenario="signal"):
     rng = np.random.default_rng(seed)
+    rng_dt = np.random.default_rng(seed + 7919)  # separate stream: discharge type does not shift other draws
     signal = scenario == "signal"
     cohort, alerts = [], []
     for i in range(n):
@@ -45,7 +46,7 @@ def make(n=1200, seed=1, scenario="signal"):
                "admissionType": "急诊" if rng.random() < 0.6 else "病房", "hospitalToIcuHours": round(float(rng.exponential(20)), 1),
                "t0Available": bool(t0), "icuToT0Min": int(rng.integers(0, 600)) if t0 else None}
         if not t0:
-            row.update({"outcome": {"dischargedType": "转出", "death": False, "icuLosHours": 48.0, "icuOutMinFromT0": None},
+            row.update({"outcome": {"dischargedType": "转出", "death": False, "deathQc": False, "icuLosHours": 48.0, "icuOutMinFromT0": None},
                         "icu05": {"status": "no_t0", "poolEligible": None, "windows": {}}, "quality": {"failedSources": []}})
             cohort.append(row)
             continue
@@ -81,6 +82,7 @@ def make(n=1200, seed=1, scenario="signal"):
         lp = (-2.0 + 0.03 * (age - 64) + 0.07 * (apache - 18) + 0.12 * (lac0 - 3) + [0, 0.6, 0.3][pheno]
               + ((0.5 if 60 < (abx or 0) <= 180 else 1.0 if (abx or 0) > 180 else 0) if signal else 0))
         death = bool(rng.random() < _sig(lp))
+        dtype = "死亡" if death else "非医嘱离院" if rng_dt.random() < 0.06 + 0.25 * float(_sig(lp)) else "转出"
         los = float(np.clip(rng.lognormal(np.log(96), 0.6), 4, 900))
         out_min = int(los * 60)
         if death and rng.random() < 0.08:
@@ -107,7 +109,7 @@ def make(n=1200, seed=1, scenario="signal"):
             state = "met" if all(v is True for v in vals) else "not_met" if any(v is False for v in vals) else "unknown"
             win[key_h] = {"state": state, "finish": {"met": True, "not_met": False}.get(state), "items": items}
         row.update({
-            "outcome": {"dischargedType": "死亡" if death else "转出", "death": death, "icuLosHours": round(los, 1), "icuOutMinFromT0": out_min},
+            "outcome": {"dischargedType": dtype, "death": death, "deathQc": death or dtype == "非医嘱离院", "icuLosHours": round(los, 1), "icuOutMinFromT0": out_min},
             "icu05": {"status": status, "poolEligible": status == "septic_shock", "isSepticShock": status == "septic_shock",
                       "hasInfection": status == "septic_shock", "hasOrgan": True, "gate": {}, "windows": win},
             "timing": {"abxFirstMin": None if abx is None else int(abx), "vasoFirstMin": vmin, "bloodCultureMin": int(rng.normal(20, 30)),

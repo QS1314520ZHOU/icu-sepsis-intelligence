@@ -42,6 +42,7 @@ def main(export_dir, truth_path, out_dir):
         chk("sex", r.get("sex"), exp["sex"])
         chk("t0Available", r.get("t0Available"), exp["t0Available"])
         chk("death", get(r, "outcome.death"), exp["death"])
+        chk("deathQc", get(r, "outcome.deathQc"), exp["deathQc"])
         if not exp["t0Available"]:
             continue
         chk("icuOutMinFromT0", get(r, "outcome.icuOutMinFromT0"), exp["icuOutMinFromT0"], 1)

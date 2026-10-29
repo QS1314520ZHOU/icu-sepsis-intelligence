@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from icu_research import report, synth
+from icu_research.io import get
 from icu_research.analyses import alerts, audit, phenotypes, prediction, scores, timing
 
 
@@ -39,6 +40,9 @@ class AnalysesTest(unittest.TestCase):
         self.assertEqual(r["status"], "ok")
         self.assertGreater(r["data"]["auroc"]["sofa2"]["auc"][0], 0.55)
         self.assertEqual(scores.run(c[:30])["status"], "insufficient")
+        self.assertGreater(r["data"]["deathsQc"], r["data"]["deaths"])  # QC adds 非医嘱离院
+        self.assertTrue(any(get(x, "outcome.dischargedType") == "非医嘱离院" and get(x, "outcome.death") is False
+                            and get(x, "outcome.deathQc") is True for x in c))
 
     def test_timing_recovers_planted_effect(self):
         c, _ = _Data.get("signal")

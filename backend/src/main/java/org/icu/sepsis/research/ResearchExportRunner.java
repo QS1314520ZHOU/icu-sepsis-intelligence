@@ -36,16 +36,17 @@ public class ResearchExportRunner implements CommandLineRunner {
   private final ResearchSourceReader extra;
   private final MongoTemplate business;
   private final ConfigurableApplicationContext ctx;
-  private final String from, to, out, salt, deathTypes;
+  private final String from, to, out, salt, deathTypes, qcDeathTypes;
   private final int limit, afterHours;
 
   public ResearchExportRunner(Icu05SourceReader icu05, ResearchSourceReader extra, MongoTemplate business, ConfigurableApplicationContext ctx,
       @Value("${app.research.export.from:}") String from, @Value("${app.research.export.to:}") String to,
       @Value("${app.research.export.out:research-export}") String out, @Value("${app.research.export.salt:}") String salt,
-      @Value("${app.research.export.death-types:死亡,非医嘱离院}") String deathTypes,
+      @Value("${app.research.export.death-types:死亡}") String deathTypes,
+      @Value("${app.research.export.qc-death-types:死亡,非医嘱离院}") String qcDeathTypes,
       @Value("${app.research.export.limit:100000}") int limit, @Value("${app.research.export.after-hours:30}") int afterHours) {
     this.icu05 = icu05; this.extra = extra; this.business = business; this.ctx = ctx;
-    this.from = from; this.to = to; this.out = out; this.salt = salt; this.deathTypes = deathTypes; this.limit = limit; this.afterHours = afterHours;
+    this.from = from; this.to = to; this.out = out; this.salt = salt; this.deathTypes = deathTypes; this.qcDeathTypes = qcDeathTypes; this.limit = limit; this.afterHours = afterHours;
   }
 
   static ObjectMapper mapper() {
@@ -66,6 +67,8 @@ public class ResearchExportRunner implements CommandLineRunner {
     Instant a = LocalDate.parse(from).atStartOfDay(zone).toInstant(), b = LocalDate.parse(to).atStartOfDay(zone).toInstant();
     Set<String> death = new HashSet<>();
     for (String s : deathTypes.split("[,，]")) if (!s.isBlank()) death.add(s.trim());
+    Set<String> qcDeath = new HashSet<>();
+    for (String s : qcDeathTypes.split("[,，]")) if (!s.isBlank()) qcDeath.add(s.trim());
     Path dir = Paths.get(out);
     Files.createDirectories(dir);
     ObjectMapper m = mapper();
@@ -86,7 +89,7 @@ public class ResearchExportRunner implements CommandLineRunner {
           List<Document> scores = e.icuAdmission == null ? List.of()
               : extra.scores(id, e.icuAdmission.minus(Duration.ofHours(6)), (t0 == null ? e.icuAdmission : t0).plus(Duration.ofHours(30)), f);
           e.failed.addAll(f);
-          Map<String, Object> row = ResearchRow.build(p, enc, e, result, labs, scores, salt, death);
+          Map<String, Object> row = ResearchRow.build(p, enc, e, result, labs, scores, salt, death, qcDeath);
           if (t0 != null) t0ByKey.put((String) row.get("stayKey"), t0);
           w.write(m.writeValueAsString(row)); w.newLine();
           rows++;
@@ -100,6 +103,7 @@ public class ResearchExportRunner implements CommandLineRunner {
     manifest.put("schema", ResearchRow.SCHEMA); manifest.put("exportedAt", asOf.toString()); manifest.put("from", from); manifest.put("to", to);
     manifest.put("stays", rows); manifest.put("staysWithoutT0", noT0); manifest.put("staysFailed", failed); manifest.put("alerts", alerts);
     manifest.put("sourceFailures", sourceFailures); manifest.put("ruleVersion", Icu05Rules.RULE_VERSION);
+    manifest.put("deathTypes", new TreeSet<>(death)); manifest.put("qcDeathTypes", new TreeSet<>(qcDeath));
     manifest.put("note", "只读导出；不含姓名、病案号、源记录 id；stayKey 为加盐哈希。");
     Files.writeString(dir.resolve("manifest.json"), m.writerWithDefaultPrettyPrinter().writeValueAsString(manifest), StandardCharsets.UTF_8);
     log.info("research export: {} stays, {} without T0, {} failed, {} alerts", rows, noT0, failed, alerts);
