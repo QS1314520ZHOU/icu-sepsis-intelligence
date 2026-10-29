@@ -119,3 +119,14 @@
 - 前端 `npm test`：**48** 通过；`ng build` 成功
 - `research/tests`：`unittest discover` **26** OK
 - `scripts/research-e2e.sh`：需本机 27117 合成库，本轮**未跑**（无该 mongod）
+
+## 审查修正（合并前）
+
+本地分支审查时发现并修正：
+
+1. **升压药门槛回退**：`7320f81` 把“T0 后开始使用”改成“窗口末仍在用”才算，T0 后用过又停、或无执行动作的升压药会被漏判。已恢复主任规则：T0 后在窗口内开始即算；T0 前开始的，按 start/pause/recovery/stop 序列判断 T0 后是否仍在用。
+2. **`ResearchRow.vasoState` 实际未共用区间逻辑**：仍是“遇到第一个暂停即停”。已改为调用 `Icu05Rules.vasopressorRunningDuring`（该小时内任一时刻在用即为 1；从未停止且此后无任何动作记为未知）。
+3. **乳酸补读**：原实现总是叠加 DataCenter 报告时间的乳酸。改为仅在 bGATemp 无乳酸时补读，并标记通道 `LAB_REPORT_TIME`（报告时间 ≠ 采样时间）。
+4. 删除误提交的 `*.patch` 与交付说明 txt。
+
+新增测试：T0 后开始又停止仍计入、T0 后无动作仍计入、窗口区间语义、逐小时暂停/恢复；端到端合成库加入 DataCenter 乳酸补读、micromol/L、暂停/恢复病例，逐字段比对 0 差异。

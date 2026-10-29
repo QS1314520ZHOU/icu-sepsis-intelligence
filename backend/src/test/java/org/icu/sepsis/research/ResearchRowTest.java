@@ -145,4 +145,13 @@ class ResearchRowTest {
     assertFalse(r.containsKey("timing")); assertFalse(r.containsKey("traj"));
     assertTrue(r.containsKey("outcome"));
   }
+
+  @Test @SuppressWarnings("unchecked") void pauseRecoveryHourlyState() {
+    Evidence e = evidence();
+    e.drugs.removeIf(d -> d.items.get(0).name.contains("去甲"));
+    e.drugs.add(drug(35, "去甲肾上腺素", 50.0, 35, "start", 130, "pause", 250, "recovery", 400, "stop"));
+    Map<String, Object> r = ResearchRow.build(patient(), "ENC-1", e, Icu05Rules.evaluate(e), labs(), scores(), "test-salt-123456", DEATH);
+    // hours: 0 start, 1 on, 2 paused at 2:10 (ran part of hour), 3 off, 4 resumed 4:10, 5 on, 6 stopped 6:40, 7 off
+    assertEquals(List.of(1, 1, 1, 0, 1, 1, 1, 0), ((List<Integer>) m(r, "traj").get("vaso")).subList(0, 8));
+  }
 }

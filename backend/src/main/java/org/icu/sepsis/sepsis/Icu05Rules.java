@@ -109,6 +109,36 @@ public final class Icu05Rules {
     return on;
   }
 
+  /**
+   * Whether the infusion ran at any moment in [a, b): started inside the window, running at a by the
+   * start/pause/recovery/stop sequence, or resumed inside the window. null = cannot tell (started before a
+   * with no action records, or no stop ever recorded and no action since a — the pump may have ended silently).
+   */
+  public static Boolean vasopressorRunningDuring(Drug d, Instant a, Instant b) {
+    return vasopressorRunningDuring(d, a, b, true);
+  }
+
+  /** @param silentEndUnknown false = director gate: started, never stopped -> still running (as before). */
+  public static Boolean vasopressorRunningDuring(Drug d, Instant a, Instant b, boolean silentEndUnknown) {
+    if (d == null || d.start == null || a == null || b == null) return null;
+    if (!d.start.isBefore(b)) return Boolean.FALSE;
+    if (!d.start.isBefore(a)) return Boolean.TRUE;
+    if (d.actions == null || d.actions.isEmpty()) return null;
+    Boolean atA = vasopressorActiveAt(d, a);
+    boolean resumedInside = false, anyStop = false, actionSinceA = false;
+    for (Action ac : d.actions) {
+      if (ac.time == null) continue;
+      String raw = ac.action == null ? "" : ac.action.trim().toLowerCase(Locale.ROOT);
+      if (STOP_ACTIONS.contains(raw)) anyStop = true;
+      if (!ac.time.isBefore(a)) actionSinceA = true;
+      if (!ac.time.isBefore(a) && ac.time.isBefore(b) && RESUME_ACTIONS.contains(raw)) resumedInside = true;
+    }
+    if (resumedInside) return Boolean.TRUE;
+    if (Boolean.FALSE.equals(atA)) return Boolean.FALSE;
+    if (silentEndUnknown && Boolean.TRUE.equals(atA) && !anyStop && !actionSinceA) return null;
+    return atA;
+  }
+
   static String norm(String name) {
     if (name == null) return "";
     return name.replaceAll("^[\\s*★☆#※\\-·•]+", "").trim().toLowerCase(Locale.ROOT);
@@ -341,7 +371,8 @@ public final class Icu05Rules {
       if (d.start.isBefore(from) || d.start.isAfter(to)) continue;
       for (DrugItem it : d.items) {
         if (!isVasopressor(it.name, e.vasoDictionary)) continue;
-        Boolean active = vasopressorActiveAt(d, to);
+        // Started after T0 inside the window: any use counts (director rule). Started at/before T0: must run after T0.
+        Boolean active = d.start.isAfter(t0) ? Boolean.TRUE : vasopressorRunningDuring(d, t0, to, false);
         if (active == null) {
           unknown = true;
           if (unknownName == null) {
@@ -351,10 +382,7 @@ public final class Icu05Rules {
           continue;
         }
         if (!active) continue;
-        String note =
-            d.start.isAfter(t0)
-                ? it.name
-                : it.name + "（T0 前开始，动作序列显示窗口末仍在用）";
+        String note = d.start.isAfter(t0) ? it.name : it.name + "（T0 前开始，按执行动作 T0 后仍在用）";
         return item(code, label, true, d.start, note, null);
       }
     }
@@ -364,7 +392,7 @@ public final class Icu05Rules {
           label,
           null,
           unknownTime,
-          unknownName + "（T0 前开始，无执行动作记录）",
+          unknownName + "（T0 前开始，执行动作不足以判断是否仍在用）",
           "VASO_STATUS_UNKNOWN");
     return item(code, label, false, null, "", null);
   }

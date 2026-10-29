@@ -133,13 +133,10 @@ public class Icu05SourceReader {
       } catch (RuntimeException ex) {
         e.failed.add("bGATemp");
       }
-    } else {
-      // only mark bGATemp failed if we also cannot use lab fallback
-      // (mrn blank alone is not a source outage)
     }
-    // Secondary lactate only: DataCenter EXAM_ITEM by hisPid when bGATemp has no coverage.
-    // authTime = report/audit time; itemCode LAC/LAC1 only (exclude LDH).
-    if (!blank(hisPid)) {
+    // Secondary lactate only: DataCenter EXAM_ITEM by hisPid, and only when bGATemp gave no lactate
+    // (authTime = report time, later than sampling, so the two are not mixed). itemCode LAC/LAC1 only (no LDH).
+    if (!blank(hisPid) && e.lactate.isEmpty()) {
       try {
         for (Document d :
             dataCenter
@@ -166,7 +163,7 @@ public class Icu05SourceReader {
                               && Math.abs(Duration.between(p.time, t).toSeconds()) < 60);
           if (dup) continue;
           e.lactate.add(
-              new Point(t, v, null, "DataCenter.VI_ICU_EXAM_ITEM:" + d.get("_id")));
+              new Point(t, v, "LAB_REPORT_TIME", "DataCenter.VI_ICU_EXAM_ITEM:" + d.get("_id")));
         }
       } catch (RuntimeException ex) {
         e.failed.add("VI_ICU_EXAM_ITEM.lactate");

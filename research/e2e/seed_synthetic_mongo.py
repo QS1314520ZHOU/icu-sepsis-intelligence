@@ -88,6 +88,11 @@ def main():
             if v is not None:
                 lac.append({"code": "param_bg_Lac", "valid": "valid", "time": at(h * 60 + 30), "fVal": v})
         lac.append({"code": "param_bg_P/Fratio", "valid": "valid", "time": at(60), "fVal": round(w["pfMin"], 1)})
+        if i % 5 == 1:  # lactate only in DataCenter (fallback path); P/F stays in bGATemp
+            for b in lac[:-1]:
+                EX.append({"hisPid": his, "itemCode": "LAC", "result": str(b["fVal"]), "unit": "mmol/L", "authTime": b["time"]})
+            EX.append({"hisPid": his, "itemCode": "LDH", "result": "300", "unit": "U/L", "authTime": at(30)})
+            lac = lac[-1:]
         BG.append({"mrn": mrn, "bedsides": lac})
         exp["lactateInitial"], exp["lactate"], exp["pfMin"] = tm["lactateInitial"], tr["lactate"], round(w["pfMin"], 1)
         if w["gcsMin"] is not None:
@@ -108,7 +113,10 @@ def main():
             items = [{"name": "去甲肾上腺素注射液", "liquidAmount": 50, "liquidUnit": "ml"}]
             if "vasopressin" in w["vasoAgents"]:
                 items.append({"name": "垂体后叶素注射液", "liquidAmount": 50, "liquidUnit": "ml"})
-            drug(v, items, [(v, "start"), (24 * 60 + 30, "调速")])
+            acts = [(v, "start"), (24 * 60 + 30, "调速")]
+            if i % 3 == 0:  # pause and resume inside the same hour: still running that hour
+                acts[1:1] = [(v + 5, "pause"), (v + 15, "recovery")]
+            drug(v, items, acts)
         exp["vasoFirstMin"], exp["vaso"], exp["vasoAgents"] = tm["vasoFirstMin"], tr["vaso"], sorted(w["vasoAgents"])
         f1 = tm["fluidMl1h"]
         drug(10, [{"name": "0.9%氯化钠注射液", "liquidAmount": f1, "liquidUnit": "ml"}], [(10, "start")])
@@ -121,6 +129,8 @@ def main():
         exp["fluidIncomplete3h"] = tm["fluidIncomplete3h"]
         EX.append({"hisPid": his, "itemCode": "PLT", "result": str(round(w["pltMin"], 1)), "unit": "10^9/L", "authTime": at(120)})
         EX.append({"hisPid": his, "itemCode": "TBIL", "result": str(round(w["tbilMaxUmol"] / 17.104, 2)), "unit": "mg/dL", "authTime": at(120)})
+        if i % 4 == 0:  # same value reported in micromol/L
+            EX[-1].update({"result": str(round(w["tbilMaxUmol"], 1)), "unit": "micromol/L"})
         EX.append({"hisPid": his, "itemCode": "sCr", "result": str(round(w["creaMaxUmol"], 1)), "unit": "μmol/L", "authTime": at(120)})
         exp["pltMin"], exp["tbilMaxUmol"], exp["creaMaxUmol"] = round(w["pltMin"], 1), round(w["tbilMaxUmol"], 1), round(w["creaMaxUmol"], 1)
         for al in alerts_by_key.get(r["stayKey"], []):
