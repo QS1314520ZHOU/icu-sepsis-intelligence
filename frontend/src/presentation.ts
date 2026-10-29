@@ -18,7 +18,7 @@ export const labels: Record<string, string> = {
   deferred: '暂缓待复评',
   closed: '已关闭',
   critical: '紧急筛查',
-  high: '优先复核',
+  high: '优先处理',
   required: '适用',
   conditional: '有条件适用',
   individualized: '个体化',

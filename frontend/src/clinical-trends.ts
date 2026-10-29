@@ -1,5 +1,6 @@
 import { CommonModule } from '@angular/common';
-import { Component, Input, OnChanges } from '@angular/core';
+import { Component, EventEmitter, Input, Output, OnChanges, SimpleChanges } from '@angular/core';
+import { UiIcon } from './ui-icon';
 import type { Observation } from './api';
 import { measuresFor, pointsFor, segments, stale, timeLabel, evidenceNote, Measure } from './trends';
 
@@ -17,12 +18,11 @@ interface Plot {
 @Component({
   selector: 'clinical-trends',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, UiIcon],
   template: ` <section class="card trend-section">
     <div class="section-head">
       <div>
-        <p class="eyebrow" *ngIf="!embedded">OBSERVED VITALS</p>
-        <h2>观测趋势</h2>
+        <h2><ui-icon name="chart"/>生命体征趋势<span class="caution-tag" *ngIf="hours > 24">含历史记录</span></h2>
       </div>
       <div class="segmented" role="group" aria-label="趋势时间范围">
         <button
@@ -31,32 +31,29 @@ interface Plot {
           [attr.aria-pressed]="hours === h"
           (click)="setHours(h)"
         >
-          {{ h }}h
+          {{ rangeLabel(h) }}
         </button>
       </div>
     </div>
-    <div class="chart-caption">
-      <span class="legend-line"></span>观测记录 · 非预测曲线
-      <span>{{ from | date: 'MM-dd HH:mm' }} — {{ end | date: 'MM-dd HH:mm' }}</span>
+    <div class="chart-caption"><span><ui-icon name="clock"/>{{ from | date:'MM-dd HH:mm' }} — {{ end | date:'MM-dd HH:mm' }}</span><span class="report-chip" *ngIf="contextCount">{{ contextCount }} 条候选报告不参与绘图</span><button class="text-button" *ngIf="embedded" (click)="openRecords.emit()">记录单 <ui-icon name="arrow"/></button></div>
+    <div class="read-limit" *ngIf="items.length >= 2000"><ui-icon name="info"/>读取量较大，当前结果可能截断；不代表所选时段完整数据。</div>
+    <div class="chart-loading" *ngIf="busy" role="status"><span class="spinner"></span>正在读取所选时段…</div>
+    <div class="trend-empty-summary" *ngIf="!hasPlottable && !busy">
+      <div class="missing-metrics"><div *ngFor="let p of plots"><span>{{ p.m.label }}</span><strong>—<small>{{ p.m.unit }}</small></strong><em>无可用记录</em></div></div>
+      <div class="empty-chart-action"><ui-icon name="empty"/><div><strong>近 {{ rangeLabel(hours) }}暂无可绘制记录</strong><p>缺项不代表正常，可扩大范围查找已有记录</p></div><div class="empty-chart-buttons"><button class="primary" (click)="expandRange()">{{ compact ? '查看历史记录' : hours < 168 ? '查看近 7 天' : hours < 720 ? '查看近 30 天' : '查看原始记录' }} <ui-icon name="arrow"/></button><button (click)="openRecords.emit()">查看记录单</button></div></div>
     </div>
-    <div class="missing" *ngIf="items.length >= 2000">已达读取上限，趋势可能不完整。</div>
-    <div class="trend-empty-summary" *ngIf="!hasPlottable">
-      <strong>当前时间窗未取得可绘制的观测</strong>
-      <p>缺失不代表正常。可切换时间窗，或到原始记录核对来源、单位及采样时间。</p>
-      <dl><ng-container *ngFor="let p of plots"><dt>{{ p.m.label }}</dt><dd>— {{ p.m.unit }}</dd></ng-container></dl>
-    </div>
-    <div class="trend-grid" *ngIf="hasPlottable">
+    <div class="trend-grid" *ngIf="hasPlottable && !busy">
       <article class="trend-tile" *ngFor="let p of plots">
         <div class="trend-title">
           <div>
-            <span>{{ p.m.label }}</span
-            ><small *ngIf="!embedded">{{ p.m.code }} · {{ p.m.unit }}</small>
+            <span>{{ p.m.label }}</span>
+            <small *ngIf="!embedded">{{ p.m.code }} · {{ p.m.unit }}</small>
           </div>
           <span class="tag" *ngIf="!p.last">无数据</span>
           <span class="tag warning" *ngIf="p.last && p.stale">过期</span>
         </div>
         <div class="trend-reading" >
-          {{ p.last?.value ?? '—' }}<small>{{ p.m.unit }}</small>
+          <strong>{{ p.last?.value ?? '—' }}</strong><small>{{ p.m.unit }}</small>
           <span *ngIf="p.last">{{ p.last.eventTime | date: 'MM-dd HH:mm' }}</span>
         </div>
         <svg
@@ -111,7 +108,7 @@ interface Plot {
         <div *ngIf="!p.points.length" class="chart-empty">该时间窗无观测</div>
         <div class="trend-foot">
           <span>{{ p.points.length }} 次观测<span *ngIf="p.excluded"> · {{ p.excluded }} 条未绘制</span></span>
-          <button *ngIf="p.last" (click)="choose(p.last)">核查数据点</button>
+          <button *ngIf="p.last" (click)="choose(p.last)">来源 <ui-icon name="arrow"/></button>
         </div>
       </article>
     </div>
@@ -132,9 +129,7 @@ interface Plot {
         <dt *ngIf="evidenceNote(selected)">证据限制</dt><dd *ngIf="evidenceNote(selected)">{{ evidenceNote(selected) }}</dd>
       </dl>
     </div>
-    <p class="trend-method-note">
-      有创 / 无创分图，不自动择优；住院归属未确认的报告不绘制。各图纵轴独立，勿跨图比较斜率；缺测不补值，间隔过长断线。点击数据点查看时间与来源。
-    </p>
+    <details class="trend-method-note"><summary><ui-icon name="info"/>图表说明</summary><p>有创 / 无创分图，不自动择优；住院归属未确认的报告不绘制。纵轴独立，勿跨图比较斜率；不插值，缺测断线。点选记录可查看时间与来源。</p></details>
   </section>`,
 })
 export class ClinicalTrends implements OnChanges {
@@ -142,6 +137,15 @@ export class ClinicalTrends implements OnChanges {
   @Input() asOf = '';
   @Input() embedded = false;
   @Input() availableHours = 168;
+  @Input() windowHours = 12;
+  @Input() compact = false;
+  @Input() busy = false;
+  @Output() requestRange = new EventEmitter<number>();
+  @Output() openHistory = new EventEmitter<void>();
+  @Output() openRecords = new EventEmitter<void>();
+  rangeLabel(h:number) { return h >= 72 ? (h / 24) + ' 天' : h + ' 小时'; }
+  get contextCount() { return this.items.filter(o => o.clinicalUse === 'context_only').length; }
+  expandRange() { if(this.compact) this.openHistory.emit(); else if(this.hours < 168) this.setHours(168); else if(this.hours < 720) this.setHours(720); else this.openRecords.emit(); }
   timeLabel = timeLabel; evidenceNote = evidenceNote;
   hours = 12;
   hourOptions = [6, 12, 24, 72, 168];
@@ -150,15 +154,16 @@ export class ClinicalTrends implements OnChanges {
   plots: Plot[] = [];
   selected: Observation | null = null;
   get hasPlottable() { return this.plots.some(p => p.points.length > 0); }
-  ngOnChanges() {
+  ngOnChanges(changes: SimpleChanges) {
     this.end = Date.parse(this.asOf) || Date.now();
-    this.hours = 12;
-    this.hourOptions = (this.embedded ? [6, 12, 24, 72, 168] : [6, 12, 24]).filter(h => h <= this.availableHours);
+    if (changes['windowHours']) this.hours = this.windowHours;
+    this.hourOptions = this.compact ? [6,12,24] : [6,12,24,72,168,720];
     this.refresh();
   }
   setHours(h: number) {
-    this.hours = h;
     this.selected = null;
+    if (h > this.availableHours) { this.requestRange.emit(h); return; }
+    this.hours = h;
     this.refresh();
   }
   choose(o: Observation) {

@@ -50,6 +50,14 @@
       "passed": true
     },
     {
+      "name": "separate source pressure channels render without silent priority",
+      "passed": true
+    },
+    {
+      "name": "unconfirmed lab report stays out of graph and completion",
+      "passed": true
+    },
+    {
       "name": "keyboard can open original records tab",
       "passed": true
     },

@@ -3,6 +3,7 @@ export const SMARTCARE_MESSAGE = {
   context: 'SmartCare',
   selectPatient: 'select-patient',
   navigate: 'SmartCareNavigate',
+  sepsisStatus: 'SmartCareSepsisStatus',
 } as const;
 
 export const DEFAULT_MODULE_ID = 'doctor-diagnosis-patient-review';
@@ -118,4 +119,32 @@ export function genderLabelOf(patient?: SmartCarePatient | null): string {
   if (raw === 'Male' || raw === 'M' || raw === '1' || raw === '男') return '男';
   if (raw === 'Female' || raw === 'F' || raw === '2' || raw === '女') return '女';
   return raw;
+}
+
+export interface SepsisStatusPayload {
+  patientId: string;
+  /** critical / abnormal / normal / unknown. unknown means data missing, never "low risk". */
+  level: string;
+  summary: string;
+  /** null = count could not be read; the host must not show it as 0. */
+  pendingAlerts: number | null;
+  pendingTasks: number | null;
+}
+
+/** Child → host: per-patient badge data so the host can show pending work without opening the iframe. */
+export function sendSepsisStatus(status: SepsisStatusPayload, targetOrigin: string): boolean {
+  if (!isIframe() || !targetOrigin || targetOrigin === '*' || !status.patientId) return false;
+  window.parent.postMessage(
+    {
+      type: SMARTCARE_MESSAGE.sepsisStatus,
+      version: 1,
+      patientId: status.patientId,
+      level: status.level,
+      summary: String(status.summary || '').slice(0, 120),
+      pendingAlerts: status.pendingAlerts,
+      pendingTasks: status.pendingTasks,
+    },
+    targetOrigin,
+  );
+  return true;
 }
