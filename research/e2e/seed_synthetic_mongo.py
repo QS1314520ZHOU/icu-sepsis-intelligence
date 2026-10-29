@@ -66,7 +66,8 @@ def main():
                   "weight": r["weightKg"], "status": "out", "icuAdmissionTime": icu, "admissionTime": icu - timedelta(hours=r["hospitalToIcuHours"]),
                   "admissionType": r["admissionType"], "dischargedType": o["dischargedType"], "icuDischargeTime": out_t,
                   "clinicalDiagnosis": "肺炎|脓毒症" if r["icu05"]["status"] in ("septic_shock", "suspected_review") else "术后"})
-        exp = {"ageYears": float(r["ageYears"]), "sex": r["sex"], "t0Available": r["t0Available"], "death": o["death"]}
+        exp = {"ageYears": float(r["ageYears"]), "sex": r["sex"], "t0Available": r["t0Available"], "death": o["death"],
+               "deathQc": o["deathQc"]}
         truth[key] = exp
         if not t0:
             continue

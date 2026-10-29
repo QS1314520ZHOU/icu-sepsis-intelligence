@@ -25,10 +25,13 @@ def run(cohort):
                 missing[k] += 1
         data.append({"y": int(get(r, "outcome.death")), "sofa": sofa.total(c1), "sofa2": sofa.total(c2),
                      "sofa2_partial": sofa.total(c2, 4), "sofaSource": get(r, "scores.sofaMax24"),
-                     "apache2": get(r, "scores.apache2First24"), "calDead": get(r, "scores.apache2CalDead")})
+                     "apache2": get(r, "scores.apache2First24"), "calDead": get(r, "scores.apache2CalDead"),
+                     "yQc": None if get(r, "outcome.deathQc") is None else int(get(r, "outcome.deathQc"))})
     out = {"n": len(rows), "deaths": sum(d["y"] for d in data), "componentMissing": {k: missing[k] / len(rows) for k in sofa.COMPONENTS},
            "flags": dict(flags), "auroc": {}, "compare": {}}
-    lines = [f"有结局病例 {len(rows)} 例，死亡 {out['deaths']} 例。"]
+    qc = sum(d["yQc"] or 0 for d in data)
+    out["deathsQc"] = qc
+    lines = [f"有结局病例 {len(rows)} 例，死亡 {out['deaths']} 例（科研口径，仅“死亡”；质控口径另含非医嘱离院，共 {qc} 例）。"]
     ok = False
     for name in ("sofa2", "sofa", "sofa2_partial", "sofaSource", "apache2"):
         sub = [d for d in data if d[name] is not None]
@@ -48,7 +51,10 @@ def run(cohort):
             if c:
                 out["compare"]["sofa2_vs_" + other] = {"n": len(sub), "auc1": c[0], "auc2": c[1], "diff": c[2], "p": c[3]}
                 lines.append(f"SOFA-2 对比 {label(other)}：差值 {c[2]:+.3f}，DeLong P={c[3]:.3g}（同一批 {len(sub)} 例）。")
-    sub = [d for d in data if d["calDead"] is not None]
+    # SMR is a quality-control indicator: uses the QC death definition (死亡 + 非医嘱离院).
+    sub = [d for d in data if d["calDead"] is not None and d["yQc"] is not None]
+    for d in sub:
+        d["y"], d["yResearch"] = d["yQc"], d["y"]
     ev = sum(d["y"] for d in sub)
     if ev >= MIN_EVENTS and len(sub) - ev >= MIN_EVENTS:
         cal = calibration([d["y"] for d in sub], [d["calDead"] for d in sub])
@@ -57,7 +63,7 @@ def run(cohort):
         cal["smr"] = smr
         cal["smrCI"] = (smr * math.exp(-1.96 / math.sqrt(ev)), smr * math.exp(1.96 / math.sqrt(ev))) if smr else None
         out["apacheCalibration"] = cal
-        lines.append(f"APACHE II 预计病死率：SMR {smr:.2f}，校准斜率 {cal['slope']:.2f}，Brier {cal['brier']:.3f}。")
+        lines.append(f"APACHE II 预计病死率（质控口径：死亡+非医嘱离院 {ev} 例）：SMR {smr:.2f}，校准斜率 {cal['slope']:.2f}，Brier {cal['brier']:.3f}。")
     if flags:
         lines.append("限制：" + "；".join(f"{FLAG[k]} {v} 例" for k, v in flags.items() if k in FLAG) + "。")
     return result("ok" if ok else "insufficient", lines, **out)

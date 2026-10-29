@@ -31,6 +31,16 @@ public final class ResearchRow {
   @SuppressWarnings("unchecked")
   public static Map<String, Object> build(Document patient, String encounterId, Evidence e, Map<String, Object> icu05,
       Map<String, List<Value>> labs, List<Document> scores, String salt, Set<String> deathTypes) {
+    return build(patient, encounterId, e, icu05, labs, scores, salt, deathTypes, deathTypes);
+  }
+
+  /**
+   * @param deathTypes   research/clinical outcome (default 死亡 only)
+   * @param qcDeathTypes quality-control outcome (default 死亡 + 非医嘱离院, per department rule: only QC counts 非医嘱离院)
+   */
+  @SuppressWarnings("unchecked")
+  public static Map<String, Object> build(Document patient, String encounterId, Evidence e, Map<String, Object> icu05,
+      Map<String, List<Value>> labs, List<Document> scores, String salt, Set<String> deathTypes, Set<String> qcDeathTypes) {
     Map<String, Object> r = new LinkedHashMap<>();
     r.put("schema", SCHEMA);
     r.put("stayKey", stayKey(salt, encounterId));
@@ -50,6 +60,7 @@ public final class ResearchRow {
     Instant icuOut = inst(patient.get("icuDischargeTime"));
     o.put("dischargedType", dt);
     o.put("death", dt == null || dt.isBlank() ? null : deathTypes.contains(dt.trim()));
+    o.put("deathQc", dt == null || dt.isBlank() ? null : qcDeathTypes.contains(dt.trim()));
     o.put("icuLosHours", icu == null || icuOut == null ? null : round(Duration.between(icu, icuOut).toMinutes() / 60.0));
     o.put("icuOutMinFromT0", t0 == null || icuOut == null ? null : Duration.between(t0, icuOut).toMinutes());
     r.put("outcome", o);
