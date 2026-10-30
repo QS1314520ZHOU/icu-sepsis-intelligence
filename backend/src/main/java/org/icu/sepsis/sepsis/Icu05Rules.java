@@ -238,6 +238,23 @@ public final class Icu05Rules {
     out.put("status", status);
     out.put("statusLabel", label);
     out.put("applicable", "septic_shock".equals(status) || "suspected_review".equals(status));
+
+    // Culture order timeline for UI (orders only; microbiology result reports not in source).
+    List<Map<String, Object>> cultureList = new ArrayList<>();
+    e.cultureOrders.stream()
+        .filter(o -> o.orderTime != null)
+        .sorted(Comparator.comparing((Order o) -> o.orderTime).reversed())
+        .limit(8)
+        .forEach(
+            o -> {
+              Map<String, Object> c = new LinkedHashMap<>();
+              c.put("name", o.name);
+              c.put("orderTime", o.orderTime);
+              c.put("reviewTime", o.reviewTime);
+              c.put("sourceId", o.sourceId);
+              cultureList.add(c);
+            });
+    out.put("cultureOrders", cultureList);
     List<Map<String, Object>> windows = new ArrayList<>();
     for (int h : new int[] {1, 3, 6}) windows.add(window(e, h));
     out.put("windows", windows);

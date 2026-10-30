@@ -36,28 +36,48 @@ public class SmartCareSourceReader {
   private static final Pattern LACTATE_ITEM =
       Pattern.compile("^(LAC\\d*|乳酸)$", Pattern.CASE_INSENSITIVE);
 
-  private static final Map<String, String> BEDSIDE_TO_PARAMETER = Map.of(
-      "param_HR", "HR",
-      "param_nibp_m", "MAP_NIBP",
-      "param_nibp_s", "SBP_NIBP",
-      "param_nibp_d", "DBP_NIBP",
-      "param_resp", "RR",
-      "param_spo2", "SPO2",
-      "param_T", "TEMP",
-      "param_ibp_m", "MAP_IBP",
-      "param_ibp_s", "SBP_IBP",
-      "param_ibp_d", "DBP_IBP");
+  private static final Map<String, String> BEDSIDE_TO_PARAMETER =
+      Map.ofEntries(
+          Map.entry("param_HR", "HR"),
+          Map.entry("param_nibp_m", "MAP_NIBP"),
+          Map.entry("param_nibp_s", "SBP_NIBP"),
+          Map.entry("param_nibp_d", "DBP_NIBP"),
+          Map.entry("param_resp", "RR"),
+          Map.entry("param_spo2", "SPO2"),
+          Map.entry("param_T", "TEMP"),
+          Map.entry("param_ibp_m", "MAP_IBP"),
+          Map.entry("param_ibp_s", "SBP_IBP"),
+          Map.entry("param_ibp_d", "DBP_IBP"),
+          Map.entry("param_score_gcs_obs", "GCS"),
+          Map.entry("param_niaoLiang", "URINE_OUTPUT"),
+          Map.entry("param_urine", "URINE_OUTPUT"));
 
-  private static final Map<String, String> PARAMETER_UNITS = Map.of(
-      "HR", "bpm",
-      "MAP", "mmHg",
-      "SBP", "mmHg",
-      "DBP", "mmHg",
-      "RR", "/min",
-      "SPO2", "%",
-      "TEMP", "°C",
-      "LACTATE", "mmol/L",
-      "GCS", "score");
+  private static final Map<String, String> PARAMETER_UNITS =
+      Map.ofEntries(
+          Map.entry("HR", "bpm"),
+          Map.entry("MAP", "mmHg"),
+          Map.entry("SBP", "mmHg"),
+          Map.entry("DBP", "mmHg"),
+          Map.entry("RR", "/min"),
+          Map.entry("SPO2", "%"),
+          Map.entry("TEMP", "°C"),
+          Map.entry("LACTATE", "mmol/L"),
+          Map.entry("GCS", "score"),
+          Map.entry("PF_RATIO", "mmHg"),
+          Map.entry("PLT", "10^9/L"),
+          Map.entry("TBIL", "μmol/L"),
+          Map.entry("CREA", "μmol/L"),
+          Map.entry("URINE_OUTPUT", "ml"));
+
+  /** DataCenter itemCode → parameter. Primary codes verified in field-mapping report. */
+  private static final Map<String, String> LAB_ITEM_TO_PARAMETER =
+      Map.ofEntries(
+          Map.entry("PLT", "PLT"),
+          Map.entry("platelet", "PLT"),
+          Map.entry("TBIL", "TBIL"),
+          Map.entry("sCr", "CREA"),
+          Map.entry("CREA", "CREA"),
+          Map.entry("Cr", "CREA"));
 
   private final MongoTemplate smartcare;
   private final MongoTemplate dataCenter;
@@ -124,8 +144,10 @@ public class SmartCareSourceReader {
     if (boundedFrom.isAfter(asOf)) return List.of();
     List<Observation> out = new ArrayList<>();
     out.addAll(bedsideObservations(hostPatientId, encounterId, department, boundedFrom, asOf));
+    out.addAll(bloodGasObservations(patient, hostPatientId, encounterId, department, boundedFrom, asOf));
     out.addAll(lactateObservations(patient, hostPatientId, department, boundedFrom, asOf));
     out.addAll(scoreObservations(hostPatientId, encounterId, department, boundedFrom, asOf));
+    out.addAll(labObservations(patient, hostPatientId, encounterId, department, boundedFrom, asOf));
     return out;
   }
 
@@ -152,17 +174,156 @@ public class SmartCareSourceReader {
       String parameter = BEDSIDE_TO_PARAMETER.get(code);
       if (parameter == null) continue;
       Double value = parseDouble(d.get("strVal"));
+      if (value == null && "GCS".equals(parameter)) value = parseGcs(d.get("strVal"));
       if (value == null) continue;
       Instant event = toInstant(d.get("time"));
       if (event == null) continue;
       Observation o = observation(hostPatientId, encounterId, department, parameter, value,
-          PARAMETER_UNITS.get(parameter.split("_")[0]), event, null,
+          unitFor(parameter), event, null,
           "SmartCare.bedside", String.valueOf(d.get("_id")));
       o.sourceParameterCode = code;
       o.measurementChannel = code.startsWith("param_nibp_") ? "NIBP" : code.startsWith("param_ibp_") ? "IBP" : null;
       rows.add(o);
     }
     return rows;
+  }
+
+  /** P/F from SmartCare.bGATemp bedsides (mrn link). Observed time, review use when encounter matches. */
+  private List<Observation> bloodGasObservations(
+      Document patient,
+      String hostPatientId,
+      String encounterId,
+      String department,
+      Instant from,
+      Instant asOf) {
+    String mrn = patient.getString("mrn");
+    if (mrn == null || mrn.isBlank()) return List.of();
+    List<Observation> rows = new ArrayList<>();
+    try {
+      Document match =
+          new Document("code", "param_bg_P/Fratio")
+              .append("valid", "valid")
+              .append("time", new Document("$gte", Date.from(from)).append("$lte", Date.from(asOf)));
+      for (Document d :
+          smartcare
+              .getCollection("bGATemp")
+              .find(new Document("mrn", mrn).append("bedsides", new Document("$elemMatch", match)))
+              .projection(new Document("bedsides", 1))
+              .limit(200)) {
+        Object raw = d.get("bedsides");
+        if (!(raw instanceof List)) continue;
+        for (Object o : (List<?>) raw) {
+          if (!(o instanceof Document)) continue;
+          Document b = (Document) o;
+          if (!"param_bg_P/Fratio".equals(b.getString("code"))) continue;
+          if (!"valid".equals(b.get("valid"))) continue;
+          Instant t = toInstant(b.get("time"));
+          Double v = parseDouble(b.get("fVal"));
+          if (v == null) v = parseDouble(b.get("strVal"));
+          if (t == null || v == null) continue;
+          Observation obs =
+              observation(
+                  hostPatientId,
+                  encounterId,
+                  department,
+                  "PF_RATIO",
+                  v,
+                  PARAMETER_UNITS.get("PF_RATIO"),
+                  t,
+                  null,
+                  "SmartCare.bGATemp",
+                  String.valueOf(d.get("_id")));
+          obs.sourceParameterCode = "param_bg_P/Fratio";
+          obs.timeBasis = "observed";
+          rows.add(obs);
+        }
+      }
+    } catch (RuntimeException ex) {
+      // leave empty; missing P/F is shown as missing, not fabricated
+    }
+    return rows;
+  }
+
+  /**
+   * SOFA lab factors from DataCenter.VI_ICU_EXAM_ITEM (PLT / TBIL / creatinine).
+   * Linked only by hisPid + authTime (report time). Same unconfirmed policy as lactate reports.
+   */
+  private List<Observation> labObservations(
+      Document patient,
+      String hostPatientId,
+      String encounterId,
+      String department,
+      Instant from,
+      Instant asOf) {
+    String hisPid = patient.getString("hisPid");
+    if (hisPid == null || hisPid.isBlank()) return List.of();
+    List<Observation> rows = new ArrayList<>();
+    try {
+      Query q =
+          Query.query(
+                  Criteria.where("hisPid")
+                      .is(hisPid)
+                      .and("itemCode")
+                      .in(LAB_ITEM_TO_PARAMETER.keySet())
+                      .and("authTime")
+                      .gte(Date.from(from))
+                      .lte(Date.from(asOf)))
+              .with(Sort.by(Sort.Direction.DESC, "authTime"))
+              .limit(400);
+      q.fields()
+          .include("itemCode")
+          .include("result")
+          .include("unit")
+          .include("authTime")
+          .include("resultStatus");
+      for (Document d : dataCenter.find(q, Document.class, "VI_ICU_EXAM_ITEM")) {
+        String itemCode = d.getString("itemCode");
+        String parameter = itemCode == null ? null : LAB_ITEM_TO_PARAMETER.get(itemCode);
+        if (parameter == null) continue;
+        Double value = parseDouble(d.get("result"));
+        if (value == null) continue;
+        Instant event = toInstant(d.get("authTime"));
+        if (event == null) continue;
+        Observation o =
+            observation(
+                hostPatientId,
+                encounterId,
+                department,
+                parameter,
+                value,
+                d.getString("unit"),
+                event,
+                null,
+                "DataCenter.VI_ICU_EXAM_ITEM",
+                String.valueOf(d.get("_id")));
+        o.sourceParameterCode = itemCode;
+        o.timeBasis = "reported";
+        o.reportedAt = event;
+        o.encounterLinkStatus = "unconfirmed";
+        o.clinicalUse = "context_only";
+        o.qualityStatus = "unverified";
+        o.sourceResultStatus =
+            d.get("resultStatus") == null ? null : String.valueOf(d.get("resultStatus"));
+        o.qualityNote =
+            "仅按 HIS 患者键找到的检验报告；本次住院关联与采样时间未确认，器官功能栏仅作核对参考。";
+        rows.add(o);
+      }
+    } catch (RuntimeException ex) {
+      // fail soft: show missing rather than fail whole clinical-data
+    }
+    return rows;
+  }
+
+  private static Double parseGcs(Object raw) {
+    return Icu05SourceReader.gcsValue(raw);
+  }
+
+  /** Prefer exact code, then strip _IBP/_NIBP channel suffix for shared base units. */
+  private static String unitFor(String parameter) {
+    String u = PARAMETER_UNITS.get(parameter);
+    if (u != null) return u;
+    String base = parameter.replaceFirst("_(IBP|NIBP)$", "");
+    return PARAMETER_UNITS.get(base);
   }
 
   private List<Observation> lactateObservations(

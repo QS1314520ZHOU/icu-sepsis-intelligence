@@ -12,10 +12,17 @@ export interface Icu05Gate {
   organ: Icu05Item[]; infection: Icu05Item[]; shock: Icu05Item[]; hasOrganDysfunction: boolean | null; hasInfection: boolean | null;
   isSepticShock: boolean | null; mapMin: number | null; status: string; statusLabel: string; reason: string | null; rule: string;
 }
+export interface Icu05CultureOrder {
+  name: string | null;
+  orderTime: string | null;
+  reviewTime: string | null;
+  sourceId?: string;
+}
 export interface Icu05Result {
   schemaVersion: number; patientId: string; encounterId: string; available: boolean; message: string; asOf: string;
   ruleVersion: string; ruleSource: string; status: string; statusLabel: string; applicable?: boolean;
   t0: string | null; t0OrderName: string | null; t0Source: string | null;
+  cultureOrders?: Icu05CultureOrder[];
   pool?: { eligible: boolean | null; icuWithin24h: boolean | null; admissionType: string | null; rule: string };
   gate: Icu05Gate | null; windows: Icu05Window[]; limitations?: string[];
 }

@@ -59,7 +59,8 @@ public class Errors {
         .error(
             "Unhandled failure type={}, trace={}",
             e.getClass().getSimpleName(),
-            org.slf4j.MDC.get("traceId"));
+            org.slf4j.MDC.get("traceId"),
+            e);
     return ResponseEntity.status(500)
         .body(new Envelope<>("INTERNAL_ERROR", "系统内部错误，请使用traceId联系管理员", null));
   }

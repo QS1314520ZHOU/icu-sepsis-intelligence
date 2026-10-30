@@ -13,6 +13,11 @@ const rules: Record<string, Rule> = {
   HR: { critLow: 40, critHigh: 130, low: 50, high: 100.0001, lowWord: '偏慢', highWord: '偏快' },
   TEMP: { critLow: 35, critHigh: 39.5, low: 36, high: 38.0001, lowWord: '偏低', highWord: '偏高' },
   SPO2: { critLow: 88, low: 92, lowWord: '偏低', highWord: '' },
+  // Display-only SOFA-style emphasis; not a diagnostic score.
+  PF_RATIO: { critLow: 100, low: 300, lowWord: '偏低', highWord: '' },
+  PLT: { critLow: 20, low: 100, lowWord: '偏低', highWord: '' },
+  TBIL: { critHigh: 120, high: 34, lowWord: '', highWord: '偏高' },
+  CREA: { critHigh: 353, high: 177, lowWord: '', highWord: '偏高' },
 };
 /** MAP_IBP / SBP_NIBP etc. share the base rule of their measurement. */
 export function baseCode(code: string): string { return code.replace(/_(IBP|NIBP)$/, ''); }

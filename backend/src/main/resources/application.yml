@@ -1,53 +1,102 @@
+# ==============================================================================
+# ICU Sepsis Intelligence · 后端主配置
+# 说明：
+#   1. 敏感项一律 ${ENV_VAR:默认值} 注入；仓库内不写真实密码、内网地址、API Key。
+#   2. 本地/院内部署：复制本文件后按现场填写，或使用 .runtime/*.env（已 gitignore）。
+#   3. 业务库必须是独立的 icu_sepsis_*；禁止写医院 SmartCare / DataCenter 源库。
+#   4. 本应用为开发验证版，不可直接用于患者诊疗。
+# ==============================================================================
+
+# -----------------------------------------------------------------------------
+# HTTP 服务
+# -----------------------------------------------------------------------------
 server:
+  # 默认只绑本机回环；容器/内网联调可设 0.0.0.0（配合防火墙与反向代理）。
   address: ${BIND_ADDRESS:127.0.0.1}
   port: ${PORT:8080}
   error:
+    # 错误响应不回显异常 message，避免内部细节泄漏。
     include-message: never
+
+# -----------------------------------------------------------------------------
+# Spring 基础
+# -----------------------------------------------------------------------------
 spring:
   data:
     mongodb:
+      # 业务库（评估/预警/任务只写这里）。
+      # 要求：icu_sepsis_* 前缀；演示模式库名以 _demo/_test 结尾；副本集（事务）。
+      # 示例：mongodb://user:pass@host:27027/icu_sepsis_dev?replicaSet=rs0
+      # 密码中 @ 在 URI 里写 %40。
       uri: ${MONGODB_URI:mongodb://127.0.0.1:27017/icu_sepsis_dev}
+      # 启动不自动建索引；由应用内 DatabaseSetup 创建，避免误改源库结构。
       auto-index-creation: false
   jackson:
     serialization:
       write-dates-as-timestamps: false
+
+# ==============================================================================
+# 业务配置（app.*）
+# ==============================================================================
 app:
+  # true=演示库+演示种子；false=真实源部署。
   demo: ${DEMO_MODE:false}
-  # demo: 只读演示库 icu_sepsis_*；smartcare: 只读医院 SmartCare/DataCenter + 业务写仍进 icu_sepsis_*
+
+  # demo | smartcare（只读医院源；业务写仍进 icu_sepsis_*）
   source:
     mode: ${CLINICAL_SOURCE_MODE:smartcare}
     connect-timeout-ms: ${SOURCE_CONNECT_TIMEOUT_MS:5000}
     socket-timeout-ms: ${SOURCE_SOCKET_TIMEOUT_MS:15000}
+
+    # ---- SmartCare 源库（只读）----
     smartcare:
-      uri: ${SMARTCARE_MONGO_URI:mongodb://192.168.31.185:27017/SmartCare}
-      # 仅 SmartCare；空 = 免密。不要写 DataCenter 账号到这里。
+      # 例：mongodb://host:27017/SmartCare?replicaSet=RS0
+      uri: ${SMARTCARE_MONGO_URI:}
+      # 空 = 免密。禁止填 DataCenter 账号。
       username: ${SMARTCARE_MONGO_USERNAME:}
       password: ${SMARTCARE_MONGO_PASSWORD:}
-      # 空则默认用 URI 里的库名 SmartCare
+      # 空则用 URI 库名；账号建在 admin 时改为 admin。
       auth-source: ${SMARTCARE_MONGO_AUTH_SOURCE:}
+
+    # ---- DataCenter 源库（只读，独立 client）----
     datacenter:
-      # 独立 client + 独立凭证，禁止复用 SmartCare/@Primary
-      uri: ${DATACENTER_MONGO_URI:mongodb://192.168.31.185:27017/DataCenter}
+      uri: ${DATACENTER_MONGO_URI:}
+      # 与 SmartCare 凭证独立。
       username: ${DATACENTER_MONGO_USERNAME:}
       password: ${DATACENTER_MONGO_PASSWORD:}
-      # 空则默认用 URI 里的库名 DataCenter（避免 authSource=SmartCause not authorized on DataCenter）
+      # 空则用 URI 库名 DataCenter。
       auth-source: ${DATACENTER_MONGO_AUTH_SOURCE:}
-  # 纯 iframe 接入不需要医院 SSO：宿主 SmartCareReady/SmartCare → /embed-api/host-context 即可
-  # ICU-05 感染性休克 Bundle（科室主任规则 v3）
-  icu05:
-    blood-culture-keywords: ${ICU05_BLOOD_CULTURE_KEYWORDS:血培养}
-    culture-time-field: ${ICU05_CULTURE_TIME_FIELD:reviewTime}
+
+  # 纯 iframe 无医院 SSO：宿主 SmartCareReady/SmartCare → /embed-api/host-context。
+  # origin 白名单：仅 协议+主机+端口，逗号分隔。
+  # 例：http://192.168.x.x:60000
   embed-parent-origins: ${EMBED_PARENT_ORIGINS:}
+
   embed:
+    # 院内网 HTTP 宿主允许嵌入时 true；有 HTTPS 应 false。
     allow-insecure-lan-origins: ${EMBED_ALLOW_INSECURE_LAN_ORIGINS:true}
+    # 生产必须 false（frame-ancestors * 仅联调临时用）。
     allow-any-frame-ancestor: ${EMBED_ALLOW_ANY_FRAME_ANCESTOR:false}
+
+  # 本地 Basic 角色密码（非 SSO）。启动强制：≥16 位且互不相同。
   doctor-password: ${DOCTOR_PASSWORD:}
   nurse-password: ${NURSE_PASSWORD:}
   quality-password: ${QUALITY_PASSWORD:}
+
+  # 授权科室标识（演示 DEMO-ICU；接入医院按实际科室编码）。
   department: ${AUTHORIZED_DEPARTMENT:DEMO-ICU}
-  # Hospital-intranet OpenAI-compatible model gateway. Off by default; the workbench works identically without it.
+
+  # ICU-05 感染性休克 Bundle（科室主任规则 v3）见 docs/13
+  icu05:
+    blood-culture-keywords: ${ICU05_BLOOD_CULTURE_KEYWORDS:血培养}
+    culture-time-field: ${ICU05_CULTURE_TIME_FIELD:reviewTime}
+
+  # AI 辅助（院内 OpenAI 兼容网关 + 指南检索）见 docs/16
+  # 密钥只从环境变量注入，不入库、不通过状态接口回传。
   ai:
     enabled: ${AI_ENABLED:false}
+    # 根地址不含 /v1；完整路径 = base-url + chat-path
+    # 例：http://192.168.x.x:22830
     base-url: ${AI_BASE_URL:}
     api-key: ${AI_API_KEY:}
     chat-path: ${AI_CHAT_PATH:/v1/chat/completions}
@@ -55,6 +104,7 @@ app:
     models:
       fast: ${AI_MODEL_FAST:}
       reasoning: ${AI_MODEL_REASONING:}
+      # 可选；不配则知识检索仅用 BM25。
       embedding: ${AI_MODEL_EMBEDDING:}
     connect-timeout-ms: ${AI_CONNECT_TIMEOUT_MS:3000}
     fast-timeout-ms: ${AI_FAST_TIMEOUT_MS:25000}
@@ -63,11 +113,14 @@ app:
     max-concurrent: ${AI_MAX_CONCURRENT:4}
     temperature: ${AI_TEMPERATURE:0.2}
     json-mode: ${AI_JSON_MODE:true}
+    # 仅隔离探测用；生产禁止 true。
     tls-insecure: ${AI_TLS_INSECURE:false}
     tls-ca-file: ${AI_TLS_CA_FILE:}
     store-prompt: ${AI_STORE_PROMPT:true}
     knowledge-dir: ${AI_KNOWLEDGE_DIR:}
     time-zone: ${AI_TIME_ZONE:Asia/Shanghai}
+
+  # 筛查/复核显示阈值（RuleConfig）。规则自动判定，不是诊断。
   rules:
     version: draft-demo-v1
     approval: DRAFT_DEMO_ONLY
@@ -77,9 +130,11 @@ app:
     fresh-minutes: 120
     lab-fresh-minutes: 360
     review-deadline-minutes: 60
+
 logging:
   level:
     org.mongodb.driver: WARN
+
 springdoc:
   swagger-ui:
     path: /api-docs

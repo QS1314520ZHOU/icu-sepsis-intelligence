@@ -83,7 +83,7 @@ const units: Record<string, string> = { MAP: 'mmHg', SBP: 'mmHg', LACTATE: 'mmol
             <td class="sx-o-value"><button class="text-button" *ngIf="o.evidence" (click)="selected = o.evidence">{{ o.value }}</button><span *ngIf="!o.evidence">{{ o.value }}</span></td>
             <td class="sx-o-note">{{ o.note }}</td>
           </tr>
-          <tr class="sx-infection" [attr.data-level]="infectionHit ? 'abnormal' : 'none'"><th scope="row">感染</th><td class="sx-o-item">诊断 / 培养</td><td class="sx-o-value" colspan="2">{{ infectionHit ? '诊断含感染相关描述' : '未取得感染证据' }}<small> · 培养结果未接入</small></td></tr>
+          <tr class="sx-infection" [attr.data-level]="infectionHit ? 'abnormal' : 'none'"><th scope="row">感染</th><td class="sx-o-item">诊断 / 培养</td><td class="sx-o-value" colspan="2">{{ infectionHit ? '诊断含感染相关描述' : '未取得感染证据' }}<small> · {{ cultureNote }}</small></td></tr>
         </tbody></table>
       </section>
       <ai-assist-card *ngIf="canAssist" [patientId]="patientId" [encounterId]="encounterId" [configured]="!!data?.ai?.configured" [icu05Available]="!!icu05?.available"/>
@@ -117,6 +117,7 @@ export class SepsisPanel implements OnChanges, OnDestroy {
   loading = false; error = ''; observationsError = ''; alertsError = false; tasksError = false;
   asOf = ''; updatedAt = ''; selected: Evidence | null = null; showTrends = false;
   tiles: Tile[] = []; bundle: BundleRow[] = []; organs: OrganRow[] = []; limits: string[] = [];
+  cultureNote = '微生物培养结果源未接入';
   sofa: Observation | null = null; sofaDelta: number | null = null;
   headline = ''; headDetail = ''; headLevel: Level | 'unknown' = 'unknown';
   private generation = 0;
@@ -236,18 +237,117 @@ export class SepsisPanel implements OnChanges, OnDestroy {
       { key: 'REASSESS', name: '容量 / 灌注再评估', state: 'none', text: '未取得记录', time: null, hint: '', tip: note('REASSESS') },
     ];
   }
+  /** Latest observation for a code from clinical-data (includes lab reports). */
+  private latestObs(code: string): Observation | null {
+    let best: Observation | null = null;
+    for (const o of this.observations) {
+      if (o.parameterCode !== code || o.value == null) continue;
+      if (!best || Date.parse(o.eventTime) > Date.parse(best.eventTime)) best = o;
+    }
+    return best;
+  }
+
   private organRows(d: ClinicalReview, latest: Map<string, Evidence>): OrganRow[] {
     const maps = this.tiles.filter(t => baseCode(t.code) === 'MAP' && t.value !== null);
     const worstMap = maps.sort((a, b) => levelRank[a.level] - levelRank[b.level])[0];
-    const gcs = latest.get('GCS'), rr = latest.get('RR'), spo2 = latest.get('SPO2');
+    const gcsEv = latest.get('GCS');
+    const gcsObs = this.latestObs('GCS');
+    const gcsValue = gcsEv?.value ?? gcsObs?.value ?? null;
+    let gcsEvid: Evidence | null = gcsEv || null;
+    if (!gcsEvid && gcsObs && gcsObs.value != null) {
+      gcsEvid = {
+        code: 'GCS',
+        value: gcsObs.value,
+        unit: gcsObs.unit || 'score',
+        eventTime: gcsObs.eventTime,
+        sourceSystem: gcsObs.sourceSystem,
+        sourceRecordId: gcsObs.sourceRecordId,
+        sourceParameterCode: gcsObs.sourceParameterCode,
+      };
+    }
+    const rr = latest.get('RR'), spo2 = latest.get('SPO2');
     const vaso = d.vasopressorActive === true ? '升压药在用' : d.vasopressorActive === false ? '升压药未用' : '升压药无记录';
+
+    const pf = this.latestObs('PF_RATIO');
+    const plt = this.latestObs('PLT');
+    const tbil = this.latestObs('TBIL');
+    const crea = this.latestObs('CREA');
+    const urine = this.latestObs('URINE_OUTPUT');
+    const pfNote =
+      '参考：' +
+      (rr ? '呼吸 ' + rr.value : '呼吸 —') +
+      ' · ' +
+      (spo2 ? 'SpO₂ ' + spo2.value + '%' : 'SpO₂ —');
+
+    const organ = (
+      system: string,
+      item: string,
+      obs: Observation | null,
+      fallback: string,
+      note: string
+    ): OrganRow => {
+      if (!obs || obs.value == null)
+        return { system, item, value: fallback, level: 'none', note, evidence: null };
+      const lv = level(obs.parameterCode, obs.value);
+      const ev: Evidence = {
+        code: obs.parameterCode,
+        value: obs.value as number,
+        unit: obs.unit || '',
+        eventTime: obs.eventTime,
+        sourceSystem: obs.sourceSystem,
+        sourceRecordId: obs.sourceRecordId,
+        sourceParameterCode: obs.sourceParameterCode,
+        encounterLinkStatus: obs.encounterLinkStatus,
+        clinicalUse: obs.clinicalUse,
+        qualityNote: obs.qualityNote,
+        timeBasis: obs.timeBasis,
+      };
+      return {
+        system,
+        item,
+        value: String(obs.value) + (obs.unit ? ' ' + obs.unit : ''),
+        level: lv,
+        note: (obs.clinicalUse === 'context_only' ? '报告 · 归属未确认 · ' : '') + note,
+        evidence: ev,
+      };
+    };
+
+    const cultureOrders = this.icu05?.cultureOrders || [];
+    const latestCulture = cultureOrders[0];
+    const cultureNote = latestCulture
+      ? '送检医嘱：' + (latestCulture.name || '培养') + (latestCulture.orderTime ? ' · ' + this.ago(latestCulture.orderTime) : '') + '；培养报告源未接入'
+      : this.icu05?.available
+        ? '窗口内未见培养送检医嘱；培养报告源未接入'
+        : '微生物培养报告源未接入';
+    this.cultureNote = cultureNote;
+
+    const renalNote = urine && urine.value != null
+      ? '尿量单次记录 ' + urine.value + (urine.unit || ' ml') + ' · 采样间隔数小时，非连续每小时'
+      : '尿量源未接入或近 24h 无记录';
+
     return [
-      { system: '循环', item: 'MAP / 升压药', value: maps.length ? maps.map(m => (shortName[m.code] || 'MAP') + ' ' + m.value).join('，') : '—', level: worstMap?.level || 'none', note: vaso, evidence: worstMap?.evidence || null },
-      { system: '中枢神经', item: 'GCS', value: gcs ? gcs.value + ' 分' : '—', level: level('GCS', gcs?.value), note: gcs ? '需结合镇静状态' : '未取得', evidence: gcs || null },
-      { system: '呼吸', item: 'PaO₂/FiO₂', value: '未接入', level: 'none', note: '参考：' + (rr ? '呼吸 ' + rr.value : '呼吸 —') + ' · ' + (spo2 ? 'SpO₂ ' + spo2.value + '%' : 'SpO₂ —'), evidence: null },
-      { system: '凝血', item: '血小板', value: '未接入', level: 'none', note: '', evidence: null },
-      { system: '肝脏', item: '胆红素', value: '未接入', level: 'none', note: '', evidence: null },
-      { system: '肾脏', item: '肌酐 / 尿量', value: '未接入', level: 'none', note: '', evidence: null },
+      {
+        system: '循环',
+        item: 'MAP / 升压药',
+        value: maps.length
+          ? maps.map(m => (shortName[m.code] || 'MAP') + ' ' + m.value).join('，')
+          : '—',
+        level: worstMap?.level || 'none',
+        note: vaso + ' · 剂量换算未接入',
+        evidence: worstMap?.evidence || null,
+      },
+      {
+        system: '中枢神经',
+        item: 'GCS',
+        value: gcsValue != null ? gcsValue + ' 分' : '—',
+        level: level('GCS', gcsValue),
+        note: gcsValue != null ? '需结合镇静状态' : '未取得',
+        evidence: gcsEvid,
+      },
+      organ('呼吸', 'PaO₂/FiO₂', pf, '—', pfNote),
+      organ('凝血', '血小板', plt, '—', ''),
+      organ('肝脏', '胆红素', tbil, '—', ''),
+      organ('肾脏', '肌酐 / 尿量', crea, urine ? urine.value + ' ml 尿量' : '—', renalNote),
     ];
   }
 }
