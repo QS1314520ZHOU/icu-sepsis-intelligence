@@ -89,7 +89,7 @@ interface HostPatientSession extends Session {
           (openAlerts)="setView('alerts')"
         />
         <ng-container *ngIf="view === 'alerts'">
-          <patient-alerts [embedded]="true" (openEvidence)="openRecords()" (changed)="refreshStatus()" />
+          <patient-alerts [embedded]="true" [patientId]="p.id" (openEvidence)="openRecords()" (changed)="refreshStatus()" />
           <div id="icu-tasks"><patient-bundles [embedded]="true" (openEvidence)="openRecords()" (changed)="refreshStatus()" /></div>
         </ng-container>
       </section>

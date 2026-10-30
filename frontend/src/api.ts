@@ -77,6 +77,13 @@ export interface Alert extends Base {
   reason: string;
   acknowledgedAt: string | null;
   ruleVersion: string;
+  /** Screening alerts: suspected_shock | infection_abnormal; source bedside | icu05. */
+  kind?: string | null;
+  source?: string | null;
+  trigger?: string | null;
+  patientLabel?: string | null;
+  bed?: string | null;
+  lastSeenAt?: string | null;
 }
 export interface Task extends Base {
   itemName: string;

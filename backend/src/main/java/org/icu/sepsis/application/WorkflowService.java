@@ -47,7 +47,8 @@ public class WorkflowService {
           throw ApiException.conflict("当前状态不能确认筛查");
         a.status = "confirmed";
         if (a.acknowledgedAt == null) a.acknowledgedAt = now;
-        createTask(a, actor, req.reason, now);
+        // Draft demo task only for simulated patients; real patients: confirmation is recorded on the alert itself.
+        if (store.patient(a.patientId).simulated) createTask(a, actor, req.reason, now);
         break;
       case "reject":
         if (!Set.of("pending", "acknowledged", "deferred").contains(a.status))

@@ -8,6 +8,7 @@ import org.springframework.data.mongodb.MongoDatabaseFactory;
 import org.springframework.data.mongodb.MongoTransactionManager;
 
 @SpringBootApplication
+@org.springframework.scheduling.annotation.EnableScheduling
 public class SepsisApplication {
   public static void main(String[] args) {
     if (org.icu.sepsis.research.toolkit.ResearchCli.handles(args)) System.exit(org.icu.sepsis.research.toolkit.ResearchCli.run(args));

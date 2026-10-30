@@ -69,7 +69,9 @@ public final class Domain {
   @Document("sepsis_alert_event")
   public static class Alert extends Base {
     public String assessmentId, status, ruleVersion, severity, activeKey, reason;
-    public Instant acknowledgedAt, closedAt;
+    /** Screening alerts: kind = suspected_shock | infection_abnormal; source = bedside | icu05. */
+    public String kind, source, patientLabel, bed, trigger;
+    public Instant acknowledgedAt, closedAt, lastSeenAt;
   }
 
   @Document("sepsis_bundle_task")

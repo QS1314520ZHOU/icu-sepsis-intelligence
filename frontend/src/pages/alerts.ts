@@ -9,11 +9,11 @@ import { text } from '../presentation';
   selector: 'patient-alerts',
   standalone: true,
   imports: [CommonModule, FormsModule, RouterLink, UiIcon],
-  template: `<header class="embedded-section-head" *ngIf="embedded"><h1><ui-icon name="bell"/>预警处理</h1><button (click)="load()" [disabled]="busy"><ui-icon name="refresh"/>刷新</button></header><div class="pagehead">
+  template: `<header class="embedded-section-head" *ngIf="embedded"><h1><ui-icon name="bell"/>预警处理</h1><div class="al-scope" role="group" aria-label="预警范围"><button type="button" [class.on]="scope === 'patient'" [attr.aria-pressed]="scope === 'patient'" (click)="setScope('patient')">本患者</button><button type="button" [class.on]="scope === 'department'" [attr.aria-pressed]="scope === 'department'" (click)="setScope('department')">全科室</button></div><button (click)="load()" [disabled]="busy"><ui-icon name="refresh"/>刷新</button></header><div class="pagehead">
       <div>
         <p class="eyebrow">ALERT REVIEW CENTER</p>
         <h1>预警处置中心</h1>
-        <p class="muted">确认表示复核筛查结果，不代表自动确诊。</p>
+        <p class="muted">床旁筛查或 ICU-05 门控判定为“疑似休克”或“感染 + 异常”时自动生成；确认表示复核筛查结果，不代表确诊。</p>
       </div>
       <button (click)="load()" [disabled]="busy">刷新</button>
     </div>
@@ -31,16 +31,17 @@ import { text } from '../presentation';
         ><span class="muted">共 {{ total }} 条</span>
       </div>
       <p class="error" role="alert" *ngIf="error">{{ error }}</p>
-      <div class="work-empty" *ngIf="!alerts.length && !busy && !error"><ui-icon name="bell"/><strong>{{ status === 'pending' ? '暂无待处理预警' : '当前筛选下没有预警' }}</strong><button *ngIf="embedded" (click)="openEvidence.emit()">查看记录 <ui-icon name="arrow"/></button></div>
+      <div class="work-empty" *ngIf="!alerts.length && !busy && !error"><ui-icon name="bell"/><strong>{{ status === 'pending' ? '暂无待处理预警' : '当前筛选下没有预警' }}</strong><small class="muted">疑似休克（需要升压药，或 乳酸≥2 且 MAP&lt;65）或 感染线索 + 异常指标时自动生成</small><button *ngIf="embedded" (click)="openEvidence.emit()">查看记录 <ui-icon name="arrow"/></button></div>
       <article class="alertrow" *ngFor="let a of alerts">
         <div>
-          <span class="tag" [class.danger]="a.severity === 'critical'">{{ text(a.severity) }}</span
-          ><strong>{{ embedded ? '当前患者预警' : a.patientId }}</strong
-          ><small>{{ a.createdAt | date: 'MM-dd HH:mm:ss' }} · {{ a.ruleVersion }}</small>
+          <span class="tag" [class.danger]="a.severity === 'critical'">{{ kindLabel(a) }}</span
+          ><strong>{{ who(a) }}</strong
+          ><small>{{ a.createdAt | date: 'MM-dd HH:mm' }}<ng-container *ngIf="a.lastSeenAt && a.lastSeenAt !== a.createdAt"> · 最近仍触发 {{ a.lastSeenAt | date: 'MM-dd HH:mm' }}</ng-container> · {{ sourceLabel(a) }}</small>
         </div>
         <div>
           <strong>{{ text(a.status) }}</strong>
-          <p>{{ a.reason }}</p>
+          <p class="al-trigger" *ngIf="a.trigger">{{ a.trigger }}</p>
+          <p *ngIf="!a.trigger || a.reason !== a.trigger">{{ a.trigger ? '处理说明：' : '' }}{{ a.reason }}</p>
           <a
             [routerLink]="embedded ? null : ['/patients', a.patientId]"
             (click)="embedded && openEvidence.emit()"
@@ -51,10 +52,10 @@ import { text } from '../presentation';
           >
         </div>
         <div class="actions">
-          <button (click)="showHistory(a)">历史</button
+          <button *ngIf="mine(a)" (click)="showHistory(a)">历史</button
           ><button
             *ngIf="
-              api.has('DOCTOR') &&
+              api.has('DOCTOR') && mine(a) &&
               ['pending', 'acknowledged', 'deferred', 'confirmed'].includes(a.status)
             "
             class="primary"
@@ -85,7 +86,7 @@ import { text } from '../presentation';
           <label
             >处置动作<select name="action" [(ngModel)]="action">
               <option *ngIf="selected.status !== 'confirmed'" value="confirm">
-                确认筛查并创建演示复评任务
+                {{ selected.simulated ? '确认筛查并创建演示复评任务' : '确认筛查（已复核）' }}
               </option>
               <option *ngIf="selected.status !== 'confirmed'" value="reject">驳回</option>
               <option *ngIf="['pending', 'acknowledged'].includes(selected.status)" value="defer">
@@ -116,6 +117,9 @@ import { text } from '../presentation';
 })
 export class Alerts implements OnInit {
   @Input() embedded = false;
+  /** Current patient in the embedded workspace; other patients' alerts are listed read-only. */
+  @Input() patientId: string | null = null;
+  scope: 'patient' | 'department' = 'patient';
   @Output() openEvidence = new EventEmitter<void>();
   @Output() changed = new EventEmitter<void>();
   api = inject(Api);
@@ -140,6 +144,31 @@ export class Alerts implements OnInit {
   page = 0;
   total = 0;
   text = text;
+  setScope(s: 'patient' | 'department') {
+    if (this.scope === s) return;
+    this.scope = s;
+    this.page = 0;
+    this.records = [];
+    void this.load();
+  }
+  mine(a: Alert) {
+    return !this.embedded || !this.patientId || a.patientId === this.patientId;
+  }
+  who(a: Alert) {
+    if (this.embedded && this.mine(a) && this.scope === 'patient') return '当前患者';
+    const name = [a.bed ? a.bed + '床' : '', a.patientLabel || ''].filter(Boolean).join(' ');
+    return (name || a.patientId) + (this.embedded && this.mine(a) ? '（当前）' : '');
+  }
+  kindLabel(a: Alert) {
+    if (a.kind === 'suspected_shock') return '疑似休克';
+    if (a.kind === 'infection_abnormal') return '感染 + 异常';
+    return text(a.severity);
+  }
+  sourceLabel(a: Alert) {
+    if (a.source === 'icu05') return 'ICU-05 门控';
+    if (a.source === 'bedside') return '床旁筛查';
+    return a.ruleVersion;
+  }
   ngOnInit() {
     this.status = this.route.snapshot.queryParamMap.get('status') || (this.embedded ? 'pending' : '');
     void this.load();
@@ -149,7 +178,7 @@ export class Alerts implements OnInit {
     this.busy = true;
     try {
       const p = await this.api.get<Page<Alert>>(
-        '/alerts?status=' + this.status + '&page=' + this.page,
+        '/alerts?status=' + this.status + '&page=' + this.page + (this.scope === 'department' ? '&scope=department' : ''),
       );
       this.alerts = p.items;
       this.total = p.total;

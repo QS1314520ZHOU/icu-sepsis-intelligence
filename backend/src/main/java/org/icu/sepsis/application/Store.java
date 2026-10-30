@@ -38,6 +38,12 @@ public class Store {
     return Criteria.where("department").is(department);
   }
 
+  /** Department-wide criteria, ignoring a patient-level embed grant (ward list views). */
+  public Criteria departmentScope() {
+    org.icu.sepsis.embed.EmbedAccess.Grant g = org.icu.sepsis.embed.EmbedAccess.current();
+    return Criteria.where("department").is(g != null && g.department != null ? g.department : department);
+  }
+
   public Patient patient(String id) {
     Patient p = db.findById(id, Patient.class);
     if (p == null) throw ApiException.notFound();
@@ -151,6 +157,20 @@ public class Store {
     a.action = action;
     a.actor = actor;
     a.reason = reason;
+    a.traceId = org.slf4j.MDC.get("traceId");
+    db.insert(a);
+  }
+
+  /** History + audit for system-initiated writes (background sweep has no request grant). */
+  public void recordSystem(Base b, Patient p, String type, String action, String actor, String reason, Instant now) {
+    History h = new History();
+    init(h, p, now);
+    h.entityType = type; h.entityId = b.id; h.action = action; h.actor = actor; h.reason = reason;
+    h.before = Map.of(); h.after = state(b);
+    db.insert(h);
+    Audit a = new Audit();
+    init(a, p, now);
+    a.entityType = type; a.entityId = b.id; a.action = action; a.actor = actor; a.reason = reason;
     a.traceId = org.slf4j.MDC.get("traceId");
     db.insert(a);
   }

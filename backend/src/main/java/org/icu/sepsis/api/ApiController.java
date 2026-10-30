@@ -27,6 +27,7 @@ public class ApiController {
   private final RiskModelProvider model;
   private final org.icu.sepsis.sepsis.SepsisAssessmentService sepsis;
   private final org.icu.sepsis.sepsis.Icu05Service icu05;
+  private final org.icu.sepsis.alerting.ScreeningAlertService screening;
 
   public ApiController(
       Store st,
@@ -36,7 +37,8 @@ public class ApiController {
       ClinicalDataProvider d,
       RiskModelProvider m,
       org.icu.sepsis.sepsis.SepsisAssessmentService sepsisSvc,
-      org.icu.sepsis.sepsis.Icu05Service icu05Svc) {
+      org.icu.sepsis.sepsis.Icu05Service icu05Svc,
+      org.icu.sepsis.alerting.ScreeningAlertService screeningSvc) {
     s = st;
     q = qs;
     assessments = a;
@@ -45,6 +47,7 @@ public class ApiController {
     model = m;
     sepsis = sepsisSvc;
     icu05 = icu05Svc;
+    screening = screeningSvc;
   }
 
   @GetMapping("/me")
@@ -123,14 +126,18 @@ public class ApiController {
   @GetMapping("/patients/{id}/sepsis-assessment")
   public Envelope<?> sepsisAssessment(@PathVariable String id) {
     Patient p = s.patient(id);
-    return Envelope.ok(sepsis.assess(p, Instant.now()));
+    Map<String, Object> review = sepsis.assess(p, Instant.now());
+    screening.onReview(p, review);
+    return Envelope.ok(review);
   }
 
   /** ICU-05 septic-shock bundle timeline per the director's rule set; read-only, tri-state, not a diagnosis. */
   @GetMapping("/patients/{id}/icu05-bundle")
   public Envelope<?> icu05Bundle(@PathVariable String id) {
     Patient p = s.patient(id);
-    return Envelope.ok(icu05.evaluate(p, Instant.now()));
+    Map<String, Object> bundle = icu05.evaluate(p, Instant.now());
+    screening.onIcu05(p, bundle);
+    return Envelope.ok(bundle);
   }
 
   @GetMapping("/risk-assessments/{id}")
@@ -141,9 +148,11 @@ public class ApiController {
   @GetMapping("/alerts")
   public Envelope<?> alerts(
       @RequestParam(required = false) String status,
+      @RequestParam(required = false) String scope,
       @RequestParam(defaultValue = "0") @Min(0) int page,
       @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
-    Criteria c = q.scope();
+    // scope=department: the whole ward's alerts (read-only list) even inside a patient-scoped iframe.
+    Criteria c = "department".equals(scope) ? s.departmentScope() : q.scope();
     if (status != null && !status.isBlank()) c.and("status").is(status);
     return Envelope.ok(q.page(c, Alert.class, page, size, Views::alert));
   }
