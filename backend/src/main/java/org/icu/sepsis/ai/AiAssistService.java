@@ -103,7 +103,13 @@ public class AiAssistService {
       throw new ApiException(HttpStatus.BAD_REQUEST, "BAD_KIND", "kind 仅支持 summary / icu05");
     Instant now = Instant.now();
     Map<String, Object> review = sepsis.assess(p, now);
-    Map<String, Object> bundle = icu05.evaluate(p, now);
+    Map<String, Object> bundle;
+    try {
+      bundle = icu05.evaluate(p, now);
+    } catch (RuntimeException e) {
+      // The explanation must never fail because one source is unreadable; the gap is stated as a fact instead.
+      bundle = Map.of("available", false, "message", "ICU-05 来源读取失败，本次不纳入");
+    }
     List<Fact> facts = context.build(review, bundle, now, "icu05".equals(kind));
     List<KnowledgeBase.Chunk> chunks = retrieve(kind, facts);
     Map<String, String> kref = new LinkedHashMap<>();

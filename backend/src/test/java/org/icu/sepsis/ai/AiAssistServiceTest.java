@@ -231,6 +231,13 @@ class AiAssistServiceTest {
     assertThrows(ApiException.class, () -> svc.feedback("ai-2", "accept", null, null, "doctor"));
   }
 
+  @Test void icu05SourceFailureIsStatedNotThrown() {
+    doThrow(new IllegalStateException("source down")).when(icu05).evaluate(any(), any());
+    Map<String, Object> r = service(props(false, url(), "", "", "", 2000, 4)).brief(patient(), "icu05", "doctor");
+    assertEquals("disabled", r.get("status"));
+    assertTrue(r.get("facts").toString().contains("ICU-05 来源读取失败"));
+  }
+
   @Test void rejectsUnknownKind() {
     assertThrows(ApiException.class, () -> service(props(false, url(), "", "", "", 2000, 4)).brief(patient(), "orders", "doctor"));
   }
