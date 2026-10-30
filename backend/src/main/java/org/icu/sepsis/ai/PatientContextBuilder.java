@@ -126,7 +126,57 @@ public class PatientContextBuilder {
     return s.toString();
   }
 
-  private void add(List<Fact> out, String cat, String text, Instant t) {
+  static final List<String> TREND_CODES = List.of("MAP_IBP", "MAP_NIBP", "MAP", "SBP_IBP", "SBP_NIBP", "HR", "RR", "SPO2", "TEMP", "GCS",
+      "LACTATE", "PF_RATIO", "CREA", "PLT", "TBIL");
+  static final Map<String, String> TREND_NAMES = Map.of("PF_RATIO", "氧合指数 P/F", "CREA", "肌酐", "PLT", "血小板", "TBIL", "总胆红素",
+      "URINE_OUTPUT", "尿量");
+
+  /** Appends one 【趋势】 fact per parameter: count, first→latest, min/max with time, last-6h mean vs earlier mean; urine totals. */
+  public void trends(List<Fact> out, List<org.icu.sepsis.domain.Domain.Observation> rows, Instant now) {
+    Map<String, List<org.icu.sepsis.domain.Domain.Observation>> by = new LinkedHashMap<>();
+    for (org.icu.sepsis.domain.Domain.Observation o : rows) {
+      if (o == null || o.value == null || o.eventTime == null || o.eventTime.isAfter(now) || o.parameterCode == null) continue;
+      if ("context_only".equals(o.clinicalUse) || (o.qualityStatus != null && !"valid".equals(o.qualityStatus))) continue;
+      by.computeIfAbsent(o.parameterCode, k -> new ArrayList<>()).add(o);
+    }
+    int n = 0;
+    for (String code : TREND_CODES) {
+      List<org.icu.sepsis.domain.Domain.Observation> l = by.get(code);
+      if (l == null || l.size() < 2) continue;
+      l.sort(Comparator.comparing(o -> o.eventTime));
+      org.icu.sepsis.domain.Domain.Observation first = l.get(0), last = l.get(l.size() - 1), lo = first, hi = first;
+      double recent = 0, earlier = 0; int nr = 0, ne = 0;
+      Instant cut = now.minus(Duration.ofHours(6));
+      for (org.icu.sepsis.domain.Domain.Observation o : l) {
+        if (o.value < lo.value) lo = o;
+        if (o.value > hi.value) hi = o;
+        if (o.eventTime.isBefore(cut)) { earlier += o.value; ne++; } else { recent += o.value; nr++; }
+      }
+      String name = NAMES.getOrDefault(code, TREND_NAMES.getOrDefault(code, code));
+      String unit = last.unit == null ? "" : " " + last.unit;
+      StringBuilder s = new StringBuilder(name).append(" 近 24h ").append(l.size()).append(" 次：首次 ").append(num(first.value))
+          .append("（").append(fmt.format(first.eventTime)).append("）→ 最近 ").append(num(last.value)).append(unit)
+          .append("（").append(fmt.format(last.eventTime)).append("），最低 ").append(num(lo.value)).append("（").append(fmt.format(lo.eventTime))
+          .append("），最高 ").append(num(hi.value)).append("（").append(fmt.format(hi.eventTime)).append("）");
+      if (nr > 0 && ne > 0) s.append("；近 6h 均值 ").append(num(recent / nr)).append("，此前均值 ").append(num(earlier / ne));
+      add(out, "趋势", s.toString(), last.eventTime);
+      if (++n >= 12) break;
+    }
+    List<org.icu.sepsis.domain.Domain.Observation> urine = by.get("URINE_OUTPUT");
+    if (urine != null && !urine.isEmpty()) {
+      double total = 0, six = 0;
+      Set<String> seen = new HashSet<>();
+      for (org.icu.sepsis.domain.Domain.Observation o : urine) {
+        if (!seen.add(o.eventTime + "|" + o.value)) continue;
+        total += o.value;
+        if (!o.eventTime.isBefore(now.minus(Duration.ofHours(6)))) six += o.value;
+      }
+      add(out, "趋势", "尿量 近 24h 累计 " + num(total) + " ml，其中近 6h " + num(six) + " ml（按记录累加，未校正体重）", null);
+    }
+    if (n == 0 && urine == null) add(out, "趋势", "近 24 小时可用于趋势的重复记录不足（每项至少 2 次）", null);
+  }
+
+  void add(List<Fact> out, String cat, String text, Instant t) {
     Fact f = new Fact(); f.id = "E" + (out.size() + 1); f.category = cat; f.text = scrub(text); f.time = t; out.add(f);
   }
   /** Defensive: long digit runs (MRN / phone / ID numbers) never go to the model, even inside free text. */

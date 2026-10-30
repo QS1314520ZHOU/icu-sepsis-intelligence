@@ -41,6 +41,10 @@ public class ScreeningAlertService {
   private final boolean enabled;
   private final int scanDays, rejectSuppressHours, closeSuppressMinutes;
 
+  private org.springframework.beans.factory.ObjectProvider<org.icu.sepsis.ai.AiAssistService> ai;
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setAi(org.springframework.beans.factory.ObjectProvider<org.icu.sepsis.ai.AiAssistService> ai) { this.ai = ai; }
+
   public ScreeningAlertService(Store store, SepsisAssessmentService sepsis, Icu05Service icu05, Clock clock,
       @Value("${app.alerts.auto:true}") boolean enabled,
       @Value("${app.alerts.scan-days:30}") int scanDays,
@@ -156,6 +160,11 @@ public class ScreeningAlertService {
         store.db.insert(a);
         store.recordSystem(a, p, "alert", "created", "system", h.reason, now);
         created++;
+        // Background AI explanation (no-op when no model is configured); never blocks or fails the alert.
+        try {
+          org.icu.sepsis.ai.AiAssistService svc = ai == null ? null : ai.getIfAvailable();
+          if (svc != null) svc.explainAlertAsync(a);
+        } catch (RuntimeException ignored) { }
       }
     } catch (RuntimeException e) {
       log.warn("screening alert for {} failed: {}", p.id, e.toString());

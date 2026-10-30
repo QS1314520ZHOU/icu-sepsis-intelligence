@@ -5,10 +5,12 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { Alert, Api, errorMessage, History, Page } from '../api';
 import { text } from '../presentation';
+import { AiBriefView } from '../ai-brief-view';
+import { AiBrief } from '../ai-assist';
 @Component({
   selector: 'patient-alerts',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, UiIcon],
+  imports: [CommonModule, FormsModule, RouterLink, UiIcon, AiBriefView],
   template: `<header class="embedded-section-head" *ngIf="embedded"><h1><ui-icon name="bell"/>预警处理</h1><div class="al-scope" role="group" aria-label="预警范围"><button type="button" [class.on]="scope === 'patient'" [attr.aria-pressed]="scope === 'patient'" (click)="setScope('patient')">本患者</button><button type="button" [class.on]="scope === 'department'" [attr.aria-pressed]="scope === 'department'" (click)="setScope('department')">全科室</button></div><button (click)="load()" [disabled]="busy"><ui-icon name="refresh"/>刷新</button></header><div class="pagehead">
       <div>
         <p class="eyebrow">ALERT REVIEW CENTER</p>
@@ -31,6 +33,12 @@ import { text } from '../presentation';
         ><span class="muted">共 {{ total }} 条</span>
       </div>
       <p class="error" role="alert" *ngIf="error">{{ error }}</p>
+      <div class="al-ward" *ngIf="scope === 'department' || !embedded">
+        <button type="button" (click)="wardBrief()" [disabled]="wardBusy">{{ wardBusy ? '生成中…' : 'AI 科室优先级' }}</button>
+        <small class="muted"> 按未结束预警排序建议优先查看的患者（发送给模型时患者以编号代替）</small>
+        <p class="review-inline-error" *ngIf="wardError">{{ wardError }}</p>
+        <ai-brief-view *ngIf="ward" [brief]="ward" [single]="true" />
+      </div>
       <div class="work-empty" *ngIf="!alerts.length && !busy && !error"><ui-icon name="bell"/><strong>{{ status === 'pending' ? '暂无待处理预警' : '当前筛选下没有预警' }}</strong><small class="muted">疑似休克（需要升压药，或 乳酸≥2 且 MAP&lt;65）或 感染线索 + 异常指标时自动生成</small><button *ngIf="embedded" (click)="openEvidence.emit()">查看记录 <ui-icon name="arrow"/></button></div>
       <article class="alertrow" *ngFor="let a of alerts">
         <div>
@@ -49,7 +57,13 @@ import { text } from '../presentation';
             [attr.tabindex]="embedded ? 0 : null"
             [attr.role]="embedded ? 'button' : null"
             >查看依据</a
-          >
+          ><button type="button" class="text-button al-ai-btn" *ngIf="mine(a)" (click)="toggleAi(a)">{{ aiOpen[a.id] ? '收起 AI 解读' : 'AI 解读' }}</button>
+          <div class="al-ai" *ngIf="aiOpen[a.id]">
+            <p class="ai-status" *ngIf="aiBusy[a.id]">生成中…</p>
+            <p class="review-inline-error" *ngIf="aiError[a.id]">{{ aiError[a.id] }}</p>
+            <ai-brief-view *ngIf="aiBrief[a.id] as b" [brief]="b" [single]="true" />
+            <button type="button" class="text-button" *ngIf="aiBrief[a.id] && !aiBusy[a.id]" (click)="runAi(a)">重新生成</button>
+          </div>
         </div>
         <div class="actions">
           <button *ngIf="mine(a)" (click)="showHistory(a)">历史</button
@@ -144,6 +158,35 @@ export class Alerts implements OnInit {
   page = 0;
   total = 0;
   text = text;
+  aiOpen: Record<string, boolean> = {};
+  aiBusy: Record<string, boolean> = {};
+  aiError: Record<string, string> = {};
+  aiBrief: Record<string, AiBrief | null> = {};
+  ward: AiBrief | null = null; wardBusy = false; wardError = '';
+  /** Shows the explanation generated when the alert was raised; generates one on demand if there is none. */
+  async toggleAi(a: Alert) {
+    this.aiOpen[a.id] = !this.aiOpen[a.id];
+    if (!this.aiOpen[a.id] || this.aiBrief[a.id] || this.aiBusy[a.id]) return;
+    this.aiBusy[a.id] = true; this.aiError[a.id] = '';
+    try {
+      const stored = await this.api.get<AiBrief | null>('/alerts/' + a.id + '/ai');
+      if (stored && stored.status === 'ok') this.aiBrief[a.id] = stored;
+      else { this.aiBusy[a.id] = false; await this.runAi(a); return; }
+    } catch (e) { this.aiError[a.id] = 'AI 解读读取失败：' + errorMessage(e); }
+    this.aiBusy[a.id] = false;
+  }
+  async runAi(a: Alert) {
+    this.aiBusy[a.id] = true; this.aiError[a.id] = '';
+    try { this.aiBrief[a.id] = await this.api.post<AiBrief>('/alerts/' + a.id + '/ai', {}); }
+    catch (e) { this.aiError[a.id] = 'AI 解读失败：' + errorMessage(e); }
+    finally { this.aiBusy[a.id] = false; }
+  }
+  async wardBrief() {
+    this.wardBusy = true; this.wardError = '';
+    try { this.ward = await this.api.post<AiBrief>('/ai/ward-brief', {}); }
+    catch (e) { this.wardError = 'AI 科室优先级生成失败：' + errorMessage(e); }
+    finally { this.wardBusy = false; }
+  }
   setScope(s: 'patient' | 'department') {
     if (this.scope === s) return;
     this.scope = s;

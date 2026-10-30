@@ -17,7 +17,11 @@ import org.springframework.web.bind.annotation.*;
 @Validated
 public class AiController {
   public static class BriefRequest {
-    @NotBlank @Pattern(regexp = "summary|icu05") public String kind = "summary";
+    @NotBlank @Pattern(regexp = "summary|icu05|trend|handover|note|family") public String kind = "summary";
+  }
+  public static class AskRequest {
+    @NotBlank @Size(max = 300) public String question;
+    @Size(max = 4) public java.util.List<java.util.Map<String, String>> history = new java.util.ArrayList<>();
   }
   public static class FeedbackRequest {
     @NotBlank @Pattern(regexp = "accept|reject|edit") public String verdict;
@@ -37,6 +41,41 @@ public class AiController {
   @PreAuthorize("hasAnyRole('DOCTOR','NURSE')")
   public Envelope<?> brief(@PathVariable String id, @Valid @RequestBody BriefRequest r, Authentication a) {
     return Envelope.ok(ai.brief(s.patient(id), r.kind, a.getName()));
+  }
+
+  @PostMapping("/patients/{id}/ai/ask")
+  @PreAuthorize("hasAnyRole('DOCTOR','NURSE')")
+  public Envelope<?> ask(@PathVariable String id, @Valid @RequestBody AskRequest r, Authentication a) {
+    return Envelope.ok(ai.ask(s.patient(id), r.question, r.history, a.getName()));
+  }
+
+  /** Latest stored explanation of an alert (generated automatically when the alert was raised), or null. */
+  @GetMapping("/alerts/{id}/ai")
+  public Envelope<?> alertAi(@PathVariable String id) {
+    org.icu.sepsis.domain.Domain.Alert al = s.get(id, org.icu.sepsis.domain.Domain.Alert.class);
+    return Envelope.ok(ai.alertExplanation(al.id));
+  }
+
+  @PostMapping("/alerts/{id}/ai")
+  @PreAuthorize("hasAnyRole('DOCTOR','NURSE')")
+  public Envelope<?> alertAiRun(@PathVariable String id, Authentication a) {
+    return Envelope.ok(ai.explainAlert(s.get(id, org.icu.sepsis.domain.Domain.Alert.class), a.getName()));
+  }
+
+  /** Ward prioritisation over all open alerts of the department (patients pseudonymised to the model). */
+  @PostMapping("/ai/ward-brief")
+  @PreAuthorize("hasAnyRole('DOCTOR','NURSE')")
+  public Envelope<?> ward(Authentication a) {
+    org.springframework.data.mongodb.core.query.Criteria c = s.departmentScope()
+        .and("status").in(java.util.List.of("pending", "acknowledged", "deferred", "confirmed"));
+    java.util.List<org.icu.sepsis.domain.Domain.Alert> open = s.db.find(
+        org.springframework.data.mongodb.core.query.Query.query(c)
+            .with(org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.DESC, "createdAt")).limit(30),
+        org.icu.sepsis.domain.Domain.Alert.class);
+    org.icu.sepsis.domain.Domain.Patient ward = new org.icu.sepsis.domain.Domain.Patient();
+    ward.id = "ward"; ward.encounterId = "ward";
+    ward.department = String.valueOf(s.departmentScope().getCriteriaObject().get("department"));
+    return Envelope.ok(ai.ward(open, ward, a.getName()));
   }
 
   @PostMapping("/ai/interactions/{id}/feedback")

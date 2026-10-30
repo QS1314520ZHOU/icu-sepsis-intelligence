@@ -272,4 +272,80 @@ class AiAssistServiceTest {
     assertEquals("failed", kb2.vectorStatus());
     assertFalse(kb2.search("去甲肾上腺素 一线", 3).isEmpty(), "lexical retrieval keeps working");
   }
+
+  // ---------------------------------------------------------------- v2 kinds
+  AiAssistService full(AiProperties p) {
+    LlmClient llm = new LlmClient(p, JSON);
+    KnowledgeBase kb = new KnowledgeBase(p, llm, JSON);
+    RuleConfig cfg = new RuleConfig();
+    @SuppressWarnings("unchecked") ObjectProvider<SmartCareSourceReader> reader = mock(ObjectProvider.class);
+    @SuppressWarnings("unchecked") ObjectProvider<AiProperties> ap = mock(ObjectProvider.class);
+    SepsisAssessmentService sepsis = new SepsisAssessmentService(provider, new ClinicalRules(cfg), cfg, reader, "demo", ap);
+    return new AiAssistService(p, llm, kb, new PatientContextBuilder(p), sepsis, icu05, store, JSON, provider);
+  }
+  void trendData() {
+    List<Observation> rows = new ArrayList<>();
+    double[] maps = {78, 72, 66, 61, 58};
+    for (int i = 0; i < maps.length; i++) rows.add(obs("MAP_IBP", maps[i], "mmHg", now.minus(Duration.ofHours(10 - 2 * i)).minus(Duration.ofMinutes(12))));
+    rows.add(obs("LACTATE", 2.1, "mmol/L", now.minus(Duration.ofHours(9))));
+    rows.add(obs("LACTATE", 4.6, "mmol/L", now.minus(Duration.ofMinutes(30))));
+    when(provider.observations(anyString(), anyString(), any(), any())).thenReturn(rows);
+  }
+
+  @Test void trendKindAddsTrendFactsAndOwnLayout() {
+    trendData();
+    String answer = "{\"changes\":[{\"text\":\"有创 MAP 由 78 降至 58 mmHg\",\"refs\":[\"E1\"]}],\"concerns\":[{\"text\":\"乳酸 2.1 升至 4.6\",\"refs\":[\"E2\"],\"urgency\":\"high\"}],\"uncertainties\":[]}";
+    models.put("fast-m", r -> ok(answer));
+    Map<String, Object> r = full(props(true, url(), "fast-m", "", "", 2000, 4)).brief(patient(), "trend", "doctor");
+    assertEquals("ok", r.get("status"));
+    String facts = r.get("facts").toString();
+    assertTrue(facts.contains("平均动脉压（有创） 近 24h 5 次") && facts.contains("最低 58"), facts);
+    assertEquals(1, ((List<?>) r.get("changes")).size());
+    assertEquals("high", ((Map<?, ?>) ((List<?>) r.get("concerns")).get(0)).get("urgency"));
+    assertEquals(List.of("changes", "concerns", "uncertainties"),
+        ((List<?>) r.get("layout")).stream().map(x -> ((Map<?, ?>) x).get("key")).collect(java.util.stream.Collectors.toList()));
+    assertTrue(requests.get(0).path("messages").toString().contains("changes"));
+  }
+
+  @Test void handoverInventedNumberIsDropped() {
+    trendData();
+    String answer = "{\"situation\":[{\"text\":\"有创 MAP 58 mmHg\",\"refs\":[\"E1\"]},{\"text\":\"心率 150 次/分\",\"refs\":[\"E1\"]}],\"background\":[],\"assessment\":[],\"recommendation\":[],\"uncertainties\":[]}";
+    models.put("fast-m", r -> ok(answer));
+    Map<String, Object> r = full(props(true, url(), "fast-m", "", "", 2000, 4)).brief(patient(), "handover", "doctor");
+    assertEquals(1, ((List<?>) r.get("situation")).size());
+    assertEquals(1, r.get("droppedCount"));
+  }
+
+  @Test void askPutsQuestionInPromptAndScrubsIds() {
+    models.put("fast-m", r -> ok("{\"answer\":[{\"text\":\"当前数据中没有血培养记录\",\"refs\":[\"E1\"]}],\"uncertainties\":[]}"));
+    Map<String, Object> r = full(props(true, url(), "fast-m", "", "", 2000, 4)).ask(patient(), "血培养送了吗？住院号 1234567890", List.of(), "doctor");
+    assertEquals("ok", r.get("status"));
+    String prompt = requests.get(0).path("messages").toString();
+    assertTrue(prompt.contains("血培养送了吗"));
+    assertFalse(prompt.contains("1234567890"));
+    assertThrows(ApiException.class, () -> full(props(false, url(), "", "", "", 2000, 4)).ask(patient(), " ", List.of(), "doctor"));
+  }
+
+  @Test void alertExplanationIncludesTriggerFactFirst() {
+    Alert a = new Alert(); a.id = "al-1"; a.patientId = patient().id; a.encounterId = patient().encounterId; a.severity = "critical";
+    a.trigger = "床旁筛查疑似休克：乳酸 4.6 mmol/L 且 平均动脉压（有创） 58 mmHg";
+    Map<String, Object> r = full(props(false, url(), "", "", "", 2000, 4)).explainAlert(a, "system");
+    Map<?, ?> f1 = (Map<?, ?>) ((List<?>) r.get("facts")).get(0);
+    assertEquals("E1", f1.get("id"));
+    assertTrue(f1.get("text").toString().contains("紧急预警"));
+    assertEquals("al-1", r.get("alertId"));
+  }
+
+  @Test void wardBriefPseudonymisesPatients() {
+    models.put("fast-m", r -> ok("{\"priority\":[{\"text\":\"P1 疑似休克，优先查看\",\"refs\":[\"E1\"],\"urgency\":\"high\"}],\"pattern\":[],\"uncertainties\":[]}"));
+    Alert a = new Alert(); a.patientId = "p-1"; a.encounterId = "e-1"; a.severity = "critical"; a.status = "pending";
+    a.trigger = "床旁筛查疑似休克：正在使用升压药"; a.bed = "05"; a.patientLabel = "李四"; a.createdAt = now.minus(Duration.ofHours(3));
+    Patient ward = new Patient(); ward.id = "ward"; ward.encounterId = "ward"; ward.department = "TEST";
+    Map<String, Object> r = full(props(true, url(), "fast-m", "", "", 2000, 4)).ward(List.of(a), ward, "doctor");
+    assertEquals("ok", r.get("status"));
+    assertEquals(Map.of("P1", "05床 李四"), r.get("patients"));
+    String prompt = requests.get(0).path("messages").toString();
+    assertFalse(prompt.contains("李四") || prompt.contains("05床"));
+    assertTrue(prompt.contains("P1 紧急"));
+  }
 }

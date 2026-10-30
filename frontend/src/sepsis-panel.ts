@@ -5,7 +5,7 @@ import { Api, Alert, Page, Task, Observation, errorMessage } from './api';
 import { UiIcon } from './ui-icon';
 import { ClinicalTrends } from './clinical-trends';
 import { ClinicalReview, Evidence, featureLabel, matchesPatient, sourceLabel } from './clinical-review';
-import { Level, ago, baseCode, direction, hoursSince, level, levelRank } from './clinical-flags';
+import { Level, ago, baseCode, direction, hoursSince, level, levelRank, reference } from './clinical-flags';
 import { Measure, measures, pointsFor } from './trends';
 import { Icu05Card, Icu05Result } from './icu05-card';
 import { AiAssistCard } from './ai-assist-card';
@@ -184,7 +184,7 @@ const units: Record<string, string> = { MAP: 'mmHg', SBP: 'mmHg', LACTATE: 'mmol
     <details class="sx-limits" *ngIf="limits.length" aria-label="数据限制"><summary><ui-icon name="info"/>数据限制 {{ limits.length }} 项</summary><ul><li *ngFor="let l of limits">{{ l }}</li></ul>
       <div class="review-table-wrap" *ngIf="data?.contextEvidence?.length"><table><thead><tr><th>未确认归属的报告</th><th>报告值</th><th>报告时间</th><th></th></tr></thead><tbody><tr *ngFor="let e of data!.contextEvidence"><td>{{ featureName(e.code) }}</td><td>{{ e.value }} {{ e.unit || '' }}</td><td>{{ e.eventTime | date:'MM-dd HH:mm' }}</td><td><button class="text-button" (click)="selected=e">来源</button></td></tr></tbody></table></div>
     </details>
-    <section class="review-evidence-detail" *ngIf="selected" aria-label="来源记录"><div class="review-card-title"><h2><ui-icon name="file"/>{{ selected.label || featureName(selected.code) }}</h2><button (click)="selected=null">关闭</button></div><div class="evidence-reading">{{ selected.value }}<small>{{ selected.unit || '单位未知' }}</small></div><dl><dt>{{ selected.timeBasis==='reported' ? '报告 / 审核时间' : '观测时间' }}</dt><dd>{{ selected.eventTime | date:'yyyy-MM-dd HH:mm:ss' }}</dd><dt>来源</dt><dd>{{ sourceName(selected.sourceSystem) }}</dd><dt>来源记录</dt><dd>{{ selected.sourceRecordId || '未标注' }}</dd><dt *ngIf="selected.sourceParameterCode">源指标</dt><dd *ngIf="selected.sourceParameterCode">{{ selected.sourceParameterCode }}</dd></dl><p class="context-warning" *ngIf="selected.qualityNote">{{ selected.qualityNote }}</p></section>
+    <section class="review-evidence-detail" *ngIf="selected" aria-label="指标详情"><div class="review-card-title"><h2><ui-icon name="file"/>{{ selected.label || featureName(selected.code) }}</h2><button (click)="selected=null">关闭</button></div><div class="evidence-reading">{{ selected.value }}<small>{{ selected.unit || '单位未知' }}</small><span class="ev-word" *ngIf="evWord(selected) as w" [attr.data-level]="evLevel(selected)">{{ w }}</span></div><dl><dt>{{ selected.timeBasis==='reported' ? '报告时间' : '记录时间' }}</dt><dd>{{ selected.eventTime | date:'MM-dd HH:mm' }}<span class="muted"> · {{ evAgo(selected) }}</span></dd><dt>来源</dt><dd>{{ sourceName(selected.sourceSystem) }}<ng-container *ngIf="channelName(selected) as c"> · {{ c }}</ng-container></dd><ng-container *ngIf="evRef(selected) as r"><dt>参考</dt><dd>{{ r }}</dd></ng-container></dl><ng-container *ngIf="evStats(selected) as st"><p class="ev-stats">近 24 小时 {{ st.n }} 次 · 最低 <b>{{ st.min }}</b>（{{ st.minAt | date:'HH:mm' }}）· 最高 <b>{{ st.max }}</b>（{{ st.maxAt | date:'HH:mm' }}）<ng-container *ngIf="st.n > 1"> · 首次 {{ st.first }} → 最近 {{ st.last }}</ng-container></p><table class="ev-recent"><thead><tr><th>时间</th><th>数值</th></tr></thead><tbody><tr *ngFor="let o of st.recent"><td>{{ o.eventTime | date:'MM-dd HH:mm' }}</td><td [attr.data-level]="evLevel(o)">{{ o.value }}</td></tr></tbody></table></ng-container><p class="context-warning" *ngIf="selected.qualityNote">{{ selected.qualityNote }}</p><details class="ev-tech" *ngIf="selected.sourceRecordId || selected.sourceParameterCode"><summary>追溯信息（供信息科核对原始记录）</summary><p *ngIf="selected.sourceRecordId">记录号 {{ selected.sourceRecordId }}</p><p *ngIf="selected.sourceParameterCode">源字段 {{ selected.sourceParameterCode }}</p></details></section>
   </section>`,
 })
 export class SepsisPanel implements OnChanges, OnDestroy {
@@ -219,6 +219,23 @@ export class SepsisPanel implements OnChanges, OnDestroy {
   headline = ''; headDetail = ''; headLevel: Level | 'unknown' = 'unknown';
   private generation = 0;
   featureName = featureLabel;
+  evRef(e: Evidence) { return reference(e.code); }
+  evLevel(e: { code?: string; parameterCode?: string; value: number | null }) { return level((e.code || (e as Observation).parameterCode || '') as string, e.value); }
+  evWord(e: Evidence) { const d = direction(e.code, e.value); return d || (level(e.code, e.value) === 'normal' && reference(e.code) ? '正常' : ''); }
+  evAgo(e: Evidence) { return ago(e.eventTime, Date.now()); }
+  channelName(e: Evidence) { const c = e.measurementChannel || (/_IBP$/.test(e.code) ? 'IBP' : /_NIBP$/.test(e.code) ? 'NIBP' : ''); return c === 'IBP' ? '有创测量' : c === 'NIBP' ? '无创测量' : ''; }
+  /** 24h summary of the same parameter from the already-loaded observations (no extra request). */
+  evStats(e: Evidence) {
+    const asOf = Date.now(), from = asOf - 24 * 3600000;
+    const pts = this.observations.filter(o => o.parameterCode === e.code && o.value != null && o.clinicalUse !== 'context_only'
+      && (!o.qualityStatus || o.qualityStatus === 'valid') && Date.parse(o.eventTime) >= from && Date.parse(o.eventTime) <= asOf)
+      .sort((a, b) => Date.parse(a.eventTime) - Date.parse(b.eventTime));
+    if (!pts.length) return null;
+    let lo = pts[0], hi = pts[0];
+    for (const o of pts) { if (o.value! < lo.value!) lo = o; if (o.value! > hi.value!) hi = o; }
+    return { n: pts.length, min: lo.value, minAt: lo.eventTime, max: hi.value, maxAt: hi.eventTime, first: pts[0].value, last: pts.at(-1)!.value,
+      recent: pts.slice(-8).reverse() };
+  }
   sourceName = sourceLabel;
   abs = Math.abs;
   get nurseFirst() { return this.api.has('NURSE') && !this.api.has('DOCTOR'); }

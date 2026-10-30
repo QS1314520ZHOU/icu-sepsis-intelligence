@@ -70,6 +70,10 @@
       "passed": true
     },
     {
+      "name": "evidence drawer shows clinical context, database fields folded",
+      "passed": true
+    },
+    {
       "name": "records open as a time-column flowsheet with flagged cells",
       "passed": true
     },
@@ -95,6 +99,10 @@
     },
     {
       "name": "AI assist is on-demand and every shown statement links to evidence",
+      "passed": true
+    },
+    {
+      "name": "AI handover is copyable and free questions are answered with evidence",
       "passed": true
     },
     {

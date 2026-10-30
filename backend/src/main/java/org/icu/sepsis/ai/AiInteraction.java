@@ -7,6 +7,11 @@ import org.springframework.data.mongodb.core.mapping.Document;
 /** Audit record of one model call; prompts hold only the de-identified facts. Lives in the icu_sepsis_* DB. */
 @Document("sepsis_ai_interaction")
 public class AiInteraction extends Base {
+  public String alertId, question;
+  public java.time.Instant generatedAt;
+  public int droppedKept;
+  public List<Map<String, Object>> facts;
+  public List<Map<String, Object>> knowledgeFull = new ArrayList<>();
   public String kind, status, errorKind, model, modelRole, actor, traceId, promptHash, rawResponse;
   public boolean fallbackUsed;
   public Long latencyMs;
