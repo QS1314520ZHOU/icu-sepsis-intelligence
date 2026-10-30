@@ -10,6 +10,7 @@ import org.springframework.data.mongodb.MongoTransactionManager;
 @SpringBootApplication
 public class SepsisApplication {
   public static void main(String[] args) {
+    if (org.icu.sepsis.research.toolkit.ResearchCli.handles(args)) System.exit(org.icu.sepsis.research.toolkit.ResearchCli.run(args));
     SpringApplication.run(SepsisApplication.class, args);
   }
 

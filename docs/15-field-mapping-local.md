@@ -117,7 +117,7 @@
 ### 回归
 - 后端 `mvn test`：Tests run **80**，Failures 0，Errors 0，Skipped 2（Mongo 集成按环境跳过）
 - 前端 `npm test`：**48** 通过；`ng build` 成功
-- `research/tests`：`unittest discover` **26** OK
+- `research/tests`：`unittest discover` **26** OK（当时为 Python 版；现已移植为 Java，见 docs/14）
 - `scripts/research-e2e.sh`：需本机 27117 合成库，本轮**未跑**（无该 mongod）
 
 ## 审查修正（合并前）

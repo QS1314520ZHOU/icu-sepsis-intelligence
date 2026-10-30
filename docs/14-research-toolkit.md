@@ -7,8 +7,8 @@
 | 部分 | 位置 | 作用 |
 |---|---|---|
 | 导出器（Java，离线） | `backend/.../research/ResearchExportRunner.java`、`ResearchRow.java`、`integration/ResearchSourceReader.java` | 只读 SmartCare / DataCenter / 本应用业务库，每个 ICU 住院一行 JSON |
-| 分析包（Python） | `research/icu_research/` | 六个方向的统计分析，生成 `results.json` 与中文 `report.md` |
-| 端到端校验 | `scripts/research-e2e.sh`、`research/e2e/` | 本机合成 Mongo → 导出 → 逐字段比对 → 报告 |
+| 分析包（Java，离线命令） | `backend/.../research/toolkit/`（`Stats`、`Sofa`、`Audit`、`AlertsAnalysis`、`Scores`、`Timing`、`Phenotypes`、`Prediction`、`Report`） | 六个方向的统计分析，生成 `results.json` 与中文 `report.md`；与导出器同在一个 jar，不需要 Python |
+| 端到端校验 | `scripts/research-e2e.sh`、`toolkit/E2eSeed.java`、`E2eVerify.java` | 本机合成 Mongo → 导出 → 逐字段比对 → 报告 |
 
 ## 2. 导出（只读）
 
@@ -32,7 +32,7 @@ java -jar sepsis-intelligence-0.3.0.jar --spring.main.web-application-type=none 
 
 - 不导出姓名、病案号、hisPid、患者/源记录 id、绝对时间；`stayKey` = SHA-256(盐|住院标识) 前 20 位；操作人同样加盐哈希。
 - 时间全部为相对 T0 的分钟；仅保留入科月份、预警发生的小时与星期（用于班次分析）。
-- Python 读入时再次拦截 `name/mrn/hisPid/patientId/sourceRecordId/_id` 等字段。
+- 分析命令读入时再次拦截 `name/mrn/hisPid/patientId/sourceRecordId/_id` 等字段。
 - 盐值丢失后无法回连病例；需回连时由信息科按院内流程保管盐值。
 
 ### 每行内容（schema `icu-research-cohort/1`）
@@ -46,7 +46,8 @@ T0−6h～T0+24h 最差值（P/F、GCS、MAP、PLT、TBIL、Cr、升压药种类
 ## 3. 分析
 
 ```bash
-cd research && python3 -m icu_research report --export /data/research-export --out /data/research-report
+java -jar sepsis-intelligence-0.3.0.jar research-report --export /data/research-export --out /data/research-report
+# 合成数据（仅测试）：java -jar sepsis-intelligence-0.3.0.jar research-synth --out /tmp/synth [--n 1200 --seed 1 --scenario signal|null]
 ```
 
 | 方向 | 方法 | 最低样本 |
@@ -76,7 +77,8 @@ cd research && python3 -m icu_research report --export /data/research-export --o
 
 ## 5. 验证（全部为合成数据）
 
-- Python 单元测试 26 项：统计函数对照已知值；SOFA 分档；拒绝含标识字段；各方向在植入效应数据上找回效应（抗菌药 >3h OR≈2.7 的 CI 覆盖真值、零效应场景 CI 跨 1；3 个分型；预测在有信号时优于无信号和 MAP<65 规则），小样本返回“样本不足”。
+- Java 单元测试 28 项（`StatsTest`、`SofaIoTest`、`AnalysesTest`）：统计函数对照已知值；SOFA 分档；拒绝含标识字段；各方向在植入效应数据上找回效应（抗菌药 >3h OR≈2.7 的 CI 覆盖真值、零效应场景 CI 跨 1；3 个分型；预测在有信号时优于无信号和 MAP<65 规则），小样本返回“样本不足”。
+- 由原 Python 版移植：同一份合成导出上，两版报告的方向一至四全部数值一致（差异 <1e-6）；方向五分型结果一致（仅聚类编号顺序不同、k=4/5 的轮廓系数在第 4 位小数不同）；方向六仅自助法 CI 因随机数生成器不同而相差约 0.001。合成数据生成器也换了随机数流，具体合成数字与旧版不同。
 - Java `ResearchRowTest` 8 项：无标识、加盐键、相对时间、补液不完整、升压药 1/0/未知、单位换算与未知单位置空。
 - 端到端：本机 MongoDB 写入 500 例合成 SmartCare/DataCenter/业务记录 → 打包 jar 导出 → 与真值逐字段比对 0 差异（含 24h 轨迹）、标识未泄露、模拟预警被跳过 → 六个方向报告均完成。
-  `PYTHONPATH=<pymongo> JAR=release/sepsis-intelligence-0.3.0.jar scripts/research-e2e.sh`
+  `JAR=release/sepsis-intelligence-0.3.0.jar scripts/research-e2e.sh`（只需 Java 与本机 mongod）
