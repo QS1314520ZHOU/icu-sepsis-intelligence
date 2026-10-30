@@ -90,12 +90,16 @@ public class LlmClient {
   }
 
   public Reply chat(String model, List<Message> messages, int timeoutMs, boolean jsonMode) {
+    return chat(model, messages, timeoutMs, jsonMode, p.maxTokens);
+  }
+
+  public Reply chat(String model, List<Message> messages, int timeoutMs, boolean jsonMode, int maxTokens) {
     ObjectNode body = json.createObjectNode();
     body.put("model", model);
     ArrayNode arr = body.putArray("messages");
     for (Message m : messages) arr.addObject().put("role", m.role).put("content", m.content);
     body.put("temperature", p.temperature);
-    body.put("max_tokens", p.maxTokens);
+    body.put("max_tokens", Math.max(1, maxTokens));
     body.put("stream", false);
     if (jsonMode) body.putObject("response_format").put("type", "json_object");
     long start = System.nanoTime();

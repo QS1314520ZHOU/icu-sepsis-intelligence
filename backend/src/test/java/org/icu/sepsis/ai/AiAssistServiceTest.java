@@ -348,4 +348,33 @@ class AiAssistServiceTest {
     assertFalse(prompt.contains("李四") || prompt.contains("05床"));
     assertTrue(prompt.contains("P1 紧急"));
   }
+
+  @Test void sectionKeysNeverCollideWithResponseFields() {
+    for (AiAssistService.Spec sp : AiAssistService.SPECS.values())
+      for (AiAssistService.Section sec : sp.sections) assertFalse(AiAssistService.RESERVED.contains(sec.key), sp.kind + ":" + sec.key);
+  }
+
+  @Test void familyKeepsOkStatus() {
+    trendData();
+    models.put("fast-m", r -> ok("{\"current\":[{\"text\":\"血压偏低，正在密切观察\",\"refs\":[\"E1\"]}],\"focus\":[],\"notes\":[],\"uncertainties\":[]}"));
+    Map<String, Object> r = full(props(true, url(), "fast-m", "", "", 2000, 4)).brief(patient(), "family", "doctor");
+    assertEquals("ok", r.get("status"));
+    assertEquals(1, ((List<?>) r.get("current")).size());
+  }
+
+  @Test void truncatedNoteIsRepairedAndUsesLargerBudget() {
+    trendData();
+    models.put("fast-m", r -> ok("{\"record\":[{\"text\":\"有创 MAP 由 78 降至 58 mmHg\",\"refs\":[\"E1\"]},{\"text\":\"乳酸 4.6 mmol/L\",\"refs\":[\"E2\"]}],\"analysis\":[{\"text\":\"低血压伴乳酸升"));
+    Map<String, Object> r = full(props(true, url(), "fast-m", "", "", 2000, 4)).brief(patient(), "note", "doctor");
+    assertEquals("ok", r.get("status"), String.valueOf(r.get("message")));
+    assertEquals(2, ((List<?>) r.get("record")).size());
+    assertTrue(requests.get(0).path("max_tokens").asInt() >= 3000);
+  }
+
+  @Test void invalidOutputExplainsWhy() {
+    models.put("fast-m", r -> ok("{\"summary\":[{\"text\":\"心率 150\",\"refs\":[\"E1\"]}]}"));
+    Map<String, Object> r = full(props(true, url(), "fast-m", "", "", 2000, 4)).brief(patient(), "summary", "doctor");
+    assertEquals("invalid_output", r.get("status"));
+    assertTrue(String.valueOf(r.get("message")).contains("数值不在依据中 1 条"), String.valueOf(r.get("message")));
+  }
 }
