@@ -211,8 +211,10 @@ public final class Icu05Rules {
     // ---- shock K1 / K2 ----
     Point lacInitial = initialLactate(e.lactate, t0, e.asOf);
     Boolean k1v = e.failed.contains("bGATemp") ? null : lacInitial == null ? null : lacInitial.value >= 2;
-    Map<String, Object> k1 = item("K1", "乳酸 ≥2", k1v, lacInitial == null ? null : lacInitial.time,
+    Map<String, Object> k1 = item("K1", "乳酸", k1v, lacInitial == null ? null : lacInitial.time,
         lacInitial == null ? "" : fmt(lacInitial.value) + " mmol/L", lacInitial == null ? "DATA_MISSING_LAC" : null);
+    // Threshold is not shown in the label; UI colours by value (true = meets ≥2).
+    k1.put("threshold", "≥2 mmol/L");
     Map<String, Object> k2 = new LinkedHashMap<>(s4); k2.put("code", "K2"); k2.put("label", "需要升压药");
     Boolean k2v = (Boolean) s4.get("value");
     Double mapMin = (Double) s3.get("number");
@@ -366,7 +368,11 @@ public final class Icu05Rules {
     }
     if (hours == 1) {
       Boolean v = count > 0;
-      return item("C3", "1h 内开始补液", v, firstTime, count > 0 ? count + " 条晶体/胶体执行" : "", v ? null : "FLUID_MISSING");
+      String detail =
+          count == 0
+              ? ""
+              : (sum > 0 ? fmt(sum) + " ml" : count + " 条晶体/胶体执行");
+      return item("C3", "1h 内开始补液", v, firstTime, detail, v ? null : "FLUID_MISSING");
     }
     Boolean v = sum >= FLUID_THRESHOLD_ML ? Boolean.TRUE : incomplete ? null : Boolean.FALSE;
     String detail = count == 0 ? "" : "累计 " + fmt(sum) + " ml" + (incomplete ? "（部分记录无量）" : "");

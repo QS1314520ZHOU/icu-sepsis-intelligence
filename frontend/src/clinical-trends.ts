@@ -20,6 +20,8 @@ interface Plot {
 
 interface HoverTip {
   o: Observation;
+  /** Which plot (metric code) owns this hover — only that tile shows the tip. */
+  plotCode: string;
   /** SVG viewBox coords for positioning the tip. */
   cx: number;
   cy: number;
@@ -52,7 +54,7 @@ interface HoverTip {
     <div class="chart-loading" *ngIf="busy" role="status"><span class="spinner"></span>正在读取所选时段…</div>
     <div class="trend-empty-summary" *ngIf="!hasPlottable && !busy">
       <div class="missing-metrics"><div *ngFor="let p of plots"><span>{{ p.m.label }}</span><strong>—<small>{{ p.m.unit }}</small></strong><em>无可用记录</em></div></div>
-      <div class="empty-chart-action"><ui-icon name="empty"/><div><strong>近 {{ rangeLabel(hours) }}暂无可绘制记录</strong><p>缺项不代表正常，可扩大范围查找已有记录</p></div><div class="empty-chart-buttons"><button class="primary" (click)="expandRange()">{{ compact ? '查看历史记录' : hours < 168 ? '查看近 7 天' : hours < 720 ? '查看近 30 天' : '查看原始记录' }} <ui-icon name="arrow"/></button><button (click)="openRecords.emit()">查看记录单</button></div></div>
+      <div class="empty-chart-action"><ui-icon name="empty"/><div><strong>近 {{ rangeLabel(hours) }}暂无可绘制记录</strong><p>可扩大时间范围查找已有记录</p></div><div class="empty-chart-buttons"><button class="primary" (click)="expandRange()">{{ compact ? '查看历史记录' : hours < 168 ? '查看近 7 天' : hours < 720 ? '查看近 30 天' : '查看原始记录' }} <ui-icon name="arrow"/></button><button (click)="openRecords.emit()">查看记录单</button></div></div>
     </div>
     <div class="trend-grid" *ngIf="hasPlottable && !busy">
       <article class="trend-tile" *ngFor="let p of plots" (pointerleave)="hideTip()">
@@ -118,10 +120,10 @@ interface HoverTip {
           </svg>
           <div
             class="point-tip"
-            *ngIf="hover"
+            *ngIf="hover && hover.plotCode === p.m.code"
             [style.left.%]="tipLeft(hover)"
             [style.top]="tipTop(hover)"
-            [attr.data-color]="hover.color"
+            [style.--tip-color]="hover.color"
             role="status"
           >
             <b>{{ fmtValue(hover.o) }}</b>
@@ -135,7 +137,7 @@ interface HoverTip {
         </div>
       </article>
     </div>
-    <details class="trend-method-note"><summary><ui-icon name="info"/>图表说明</summary><p>有创 / 无创分图，不自动择优；住院归属未确认的报告不绘制。纵轴独立，勿跨图比较斜率；不插值，缺测断线。悬停数据点可查看时间与数值（东八区）。</p></details>
+    <details class="trend-method-note"><summary><ui-icon name="info"/>图表说明</summary><p>有创 / 无创分图；纵轴独立；不插值，缺测断线。悬停查看时间与数值（东八区）。</p></details>
   </section>`,
 })
 export class ClinicalTrends implements OnChanges {
@@ -182,6 +184,7 @@ export class ClinicalTrends implements OnChanges {
   showTip(o: Observation, p: Plot) {
     this.hover = {
       o,
+      plotCode: p.m.code,
       cx: this.x(o),
       cy: this.y(o, p),
       color: p.m.color,

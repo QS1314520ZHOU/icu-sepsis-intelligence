@@ -6,6 +6,7 @@ import { ActivatedRoute, RouterLink } from '@angular/router';
 import { Api, Assessment, errorMessage, Observation, Page, Patient } from '../api';
 import { ClinicalTrends } from '../clinical-trends';
 import { label, evidenceNote, timeLabel } from '../trends';
+import { sourceLabel } from '../clinical-review';
 import { riskText, text } from '../presentation';
 import { Level, level } from '../clinical-flags';
 interface SheetCol { key: string; start: number; dayStart: boolean; }
@@ -132,7 +133,7 @@ const sheetOrder = ['MAP_IBP','SBP_IBP','DBP_IBP','MAP_NIBP','SBP_NIBP','DBP_NIB
                 <td>{{ o.text || (o.value ?? '—') }} {{ o.unit }}</td>
                 <td>{{ o.eventTime | date: 'MM-dd HH:mm' }}<small>{{ o.timeBasis === 'reported' ? '报告 / 审核；采样未知' : '观测时间' }}</small></td>
                 <td>
-                  {{ o.sourceSystem }}<button class="source-link" (click)="selectedRecord=o">查看来源</button>
+                  {{ sourceLabel(o.sourceSystem) }}<button class="source-link" (click)="selectedRecord=o">查看来源</button>
                 </td>
               </tr>
             </tbody>
@@ -204,7 +205,7 @@ const sheetOrder = ['MAP_IBP','SBP_IBP','DBP_IBP','MAP_NIBP','SBP_NIBP','DBP_NIB
       </button>
       <div class="empty" *ngIf="!history.length">暂无历史评估</div>
     </section></details>
-    <section class="record-source-drawer" *ngIf="selectedRecord"><div class="section-head"><h2><ui-icon name="file"/>{{ label(selectedRecord.parameterCode) }}</h2><button (click)="selectedRecord=null">关闭</button></div><div class="evidence-reading">{{ selectedRecord.value ?? '—' }}<small>{{ selectedRecord.unit }}</small></div><dl><dt>{{ timeLabel(selectedRecord.timeBasis) }}</dt><dd>{{ selectedRecord.eventTime | date:'yyyy-MM-dd HH:mm:ss' }}</dd><dt>来源系统</dt><dd>{{ selectedRecord.sourceSystem }}</dd><dt>来源记录</dt><dd>{{ selectedRecord.sourceRecordId }}</dd><dt>源指标</dt><dd>{{ selectedRecord.sourceParameterCode || selectedRecord.parameterCode }}</dd></dl><p class="context-warning" *ngIf="evidenceNote(selectedRecord)">{{ evidenceNote(selectedRecord) }}</p></section>`,
+    <section class="record-source-drawer" *ngIf="selectedRecord"><div class="section-head"><h2><ui-icon name="file"/>{{ label(selectedRecord.parameterCode) }}</h2><button (click)="selectedRecord=null">关闭</button></div><div class="evidence-reading">{{ selectedRecord.value ?? '—' }}<small>{{ selectedRecord.unit }}</small></div><dl><dt>{{ timeLabel(selectedRecord.timeBasis) }}</dt><dd>{{ selectedRecord.eventTime | date:'yyyy-MM-dd HH:mm:ss' }}</dd><dt>来源</dt><dd>{{ sourceLabel(selectedRecord.sourceSystem) }}</dd><dt>来源记录</dt><dd>{{ selectedRecord.sourceRecordId }}</dd><dt>源指标</dt><dd>{{ selectedRecord.sourceParameterCode || selectedRecord.parameterCode }}</dd></dl><p class="context-warning" *ngIf="evidenceNote(selectedRecord)">{{ evidenceNote(selectedRecord) }}</p></section>`,
 })
 export class Detail implements OnInit, OnDestroy {
   @Input() embedded = false;
@@ -226,7 +227,7 @@ export class Detail implements OnInit, OnDestroy {
   recordPage = 0; recordCode = ''; selectedHours=12; loadedHours=24;
   loadingRecords=false; recordsError=''; selectedRecord:Observation|null=null;
   private generation=0;
-  evidenceNote=evidenceNote; timeLabel=timeLabel;
+  evidenceNote=evidenceNote; timeLabel=timeLabel; sourceLabel=sourceLabel;
   get windowRows() {
     const end=Date.parse(this.asOf), start=end-this.selectedHours*3600000;
     return this.observations.filter(o=>Number.isFinite(end) && Date.parse(o.eventTime)>=start && Date.parse(o.eventTime)<=end);

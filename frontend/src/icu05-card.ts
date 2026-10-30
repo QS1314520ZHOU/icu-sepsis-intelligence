@@ -3,7 +3,11 @@ import { Component, Input, OnChanges } from '@angular/core';
 import { UiIcon } from './ui-icon';
 
 /** ICU-05 septic-shock bundle timeline (department director rule set). Tri-state: true / false / null. */
-export interface Icu05Item { code: string; label: string; value: boolean | null; time: string | null; detail: string; reason: string | null; }
+export interface Icu05Item {
+  code: string; label: string; value: boolean | null; time: string | null; detail: string; reason: string | null;
+  /** Optional display threshold (not shown in body text; used in tooltip only). */
+  threshold?: string;
+}
 export interface Icu05Window {
   key: string; hours: number; deadline: string; closed: boolean; finish: boolean | null;
   state: 'met' | 'not_met' | 'unknown' | 'in_progress'; finishPath: string; reasons: string[]; items: Icu05Item[];
@@ -52,9 +56,9 @@ interface Row { code: string; name: string; cells: (Cell | null)[]; }
     </div>
     <p class="i5-msg" *ngIf="!data.t0">{{ data.message || '未取得 T0，不做 Bundle 判定' }}</p>
     <div class="i5-gate" *ngIf="data.gate as g">
-      <span><em>休克</em><ng-container *ngFor="let i of g.shock; let last = last"><i [attr.data-v]="v(i.value)" [title]="tip(i)">{{ i.label }} {{ i.detail ? short(i.detail) : sym(i.value) }}</i></ng-container></span>
+      <span><em>休克</em><ng-container *ngFor="let i of g.shock"><i [attr.data-v]="v(i.value)" [title]="tip(i)">{{ gateText(i) }}</i></ng-container></span>
       <span><em>感染</em><i *ngFor="let i of g.infection" [attr.data-v]="v(i.value)" [title]="tip(i)">{{ infName[i.code] }} {{ sym(i.value) }}</i></span>
-      <span><em>器官</em><i *ngFor="let i of g.organ" [attr.data-v]="v(i.value)" [title]="tip(i)">{{ organName[i.code] }} {{ i.detail ? short(i.detail) : sym(i.value) }}</i></span>
+      <span><em>器官</em><i *ngFor="let i of g.organ" [attr.data-v]="v(i.value)" [title]="tip(i)">{{ organText(i) }}</i></span>
     </div>
     <ng-container *ngIf="data.windows.length">
       <details class="i5-na" *ngIf="!applicable" ><summary>未达纳入条件，时窗结果仅供参考</summary><ng-container *ngTemplateOutlet="grid"/></details>
@@ -94,6 +98,15 @@ export class Icu05Card implements OnChanges {
     if (!i) return null;
     const trigger = TRIGGERS.has(code);
     const tip = [i.label, i.detail, i.reason ? icu05Reason[i.reason] || i.reason : ''].filter(Boolean).join(' · ');
+    // 补液：格内写出具体量；仅未达标打红 ×，达标写量 + ✓，量不全不打 ×
+    if (code === 'C3') {
+      const vol = (i.detail || '').trim();
+      if (i.value === true) return { mark: vol || '✓', tone: 'done', time: i.time, tip };
+      if (i.value === false) return { mark: (vol ? vol + ' ' : '') + '×', tone: 'fail', time: i.time, tip };
+      if (vol) return { mark: vol, tone: i.reason === 'FLUID_AMOUNT_INCOMPLETE' ? 'flag' : 'quiet', time: i.time, tip };
+      if (!w.closed) return { mark: '待', tone: 'wait', time: null, tip: tip + ' · 时窗未结束' };
+      return { mark: '—', tone: 'none', time: null, tip };
+    }
     if (i.value === true) return trigger ? { mark: '异常', tone: 'flag', time: i.time, tip } : { mark: '✓', tone: 'done', time: i.time, tip };
     if (i.value === false) return trigger ? { mark: '未触发', tone: 'quiet', time: i.time, tip } : { mark: '×', tone: 'fail', time: i.time, tip };
     if (!w.closed && !trigger) return { mark: '待', tone: 'wait', time: null, tip: tip + ' · 时窗未结束' };
@@ -106,8 +119,28 @@ export class Icu05Card implements OnChanges {
     return '无法判定';
   }
   windowTip(w: Icu05Window) { return w.reasons.filter(r => r !== 'MAP_NOT_MET').map(r => icu05Reason[r] || r).join('、'); }
-  tip(i: Icu05Item) { return [i.label, i.detail, i.reason ? icu05Reason[i.reason] || i.reason : ''].filter(Boolean).join(' · '); }
+  tip(i: Icu05Item) {
+    return [i.label, i.threshold ? '阈值 ' + i.threshold : '', i.detail, i.reason ? icu05Reason[i.reason] || i.reason : '']
+      .filter(Boolean)
+      .join(' · ');
+  }
+  /** Shock gate: show measured value only; colour comes from data-v (meets / not / unknown). */
+  gateText(i: Icu05Item): string {
+    if (i.detail) return i.label + ' ' + this.short(i.detail);
+    if (i.label === '需要升压药' || i.code === 'K2') return i.label + ' ' + this.sym(i.value);
+    return i.label + ' ' + this.sym(i.value);
+  }
+  /** Organ row: keep full vasopressor drug name; other items may shorten. */
+  organText(i: Icu05Item): string {
+    const name = this.organName[i.code] || i.label;
+    if (!i.detail) return name + ' ' + this.sym(i.value);
+    // 升压药：写全药名（去掉 T0 前开始的长注释，保留药名本身）
+    if (i.code === 'S4' || i.code === 'K2') {
+      return name + ' ' + i.detail.replace(/（T0 前开始.*$/, '').trim();
+    }
+    return name + ' ' + this.short(i.detail);
+  }
   v(x: boolean | null) { return x === true ? 'y' : x === false ? 'n' : 'u'; }
   sym(x: boolean | null) { return x === true ? '✓' : x === false ? '×' : '—'; }
-  short(s: string) { return s.replace(/^最低 /, '').replace(/（T0 前开始.*$/, '').slice(0, 14); }
+  short(s: string) { return s.replace(/^最低 /, '').replace(/（T0 前开始.*$/, '').slice(0, 18); }
 }

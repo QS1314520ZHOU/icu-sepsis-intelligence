@@ -23,8 +23,30 @@ export interface ClinicalReview {
 }
 const names: Record<string,string> = {MAP:'平均动脉压',SBP:'收缩压',RR:'呼吸频率',GCS:'意识评分',LACTATE:'乳酸',
   MAP_IBP:'平均动脉压（有创）',MAP_NIBP:'平均动脉压（无创）',SBP_IBP:'收缩压（有创）',SBP_NIBP:'收缩压（无创）',DBP_IBP:'舒张压（有创）',DBP_NIBP:'舒张压（无创）',
-  PF_RATIO:'氧合指数 P/F',PLT:'血小板',TBIL:'总胆红素',CREA:'肌酐',URINE_OUTPUT:'尿量'};
+  PF_RATIO:'氧合指数 P/F',PLT:'血小板',TBIL:'总胆红素',CREA:'肌酐',URINE_OUTPUT:'尿量',
+  HR:'心率',TEMP:'体温',SPO2:'SpO₂',INFECTION_EVIDENCE:'感染证据'};
 export function featureLabel(code: string): string { return names[code] || code; }
+
+/** Friendly source labels — never show raw Mongo collection paths (SmartCare.bedside) in clinical UI. */
+const sourceNames: Record<string, string> = {
+  'SmartCare.bedside': '床旁监护记录',
+  'SmartCare.score': '评分记录',
+  'SmartCare.bGATemp': '床旁血气',
+  'SmartCare.drugExe': '给药执行记录',
+  'SmartCare.patient': '患者档案',
+  'SmartCare.configDrug': '药品字典',
+  'DataCenter.VI_ICU_EXAM_ITEM': '检验报告',
+  'DataCenter.VI_ICU_EXAM': '检验申请',
+  'DataCenter.VI_ICU_ZYYZ': '医嘱记录',
+  MOCK_ONLY: '模拟数据',
+  MOCK_MANUAL: '模拟录入',
+  SYNTHETIC: '模拟数据',
+};
+export function sourceLabel(sourceSystem: string | null | undefined): string {
+  if (!sourceSystem) return '未标注';
+  return sourceNames[sourceSystem] || sourceSystem;
+}
+
 export function yesNoUnknown(value: boolean | null | undefined): string {
   return value === true ? '有记录' : value === false ? '记录为无' : '未取得有效记录';
 }

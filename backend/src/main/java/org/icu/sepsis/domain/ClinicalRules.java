@@ -65,6 +65,14 @@ public class ClinicalRules {
         return "bpm".equals(o.unit) && o.value >= 10 && o.value <= 300;
       case "RR":
         return "/min".equals(o.unit) && o.value >= 1 && o.value <= 100;
+      case "TEMP":
+        return ("°C".equals(o.unit) || "C".equals(o.unit) || "℃".equals(o.unit))
+            && o.value >= 30
+            && o.value <= 45;
+      case "SPO2":
+        return ("%".equals(o.unit) || o.unit == null || o.unit.isBlank())
+            && o.value >= 0
+            && o.value <= 100;
       case "MAP":
       case "SBP":
       case "MAP_IBP":
@@ -106,8 +114,16 @@ public class ClinicalRules {
       a.conflictingEvidence.add("PRESSURE_CHANNEL_SELECTION_REQUIRED");
     }
     a.infectionVerdict = infection(a.evidence);
-    for (String c : List.of("MAP", "SBP", "RR", "GCS", "LACTATE", "VASOPRESSOR_ACTIVE"))
-      if (!latest.containsKey(c)) a.missingFeatures.add(c);
+    boolean hasMap = latest.containsKey("MAP") || latest.keySet().stream().anyMatch(c -> c.startsWith("MAP_"));
+    boolean hasSbp = latest.containsKey("SBP") || latest.keySet().stream().anyMatch(c -> c.startsWith("SBP_"));
+    boolean hasLactate =
+        latest.containsKey("LACTATE")
+            || input.stream().anyMatch(o -> "LACTATE".equals(o.parameterCode) && o.value != null);
+    if (!hasMap) a.missingFeatures.add("MAP");
+    if (!hasSbp) a.missingFeatures.add("SBP");
+    if (!latest.containsKey("RR")) a.missingFeatures.add("RR");
+    if (!latest.containsKey("GCS")) a.missingFeatures.add("GCS");
+    if (!hasLactate) a.missingFeatures.add("LACTATE");
     if ("unknown".equals(a.infectionVerdict)) a.missingFeatures.add("INFECTION_EVIDENCE");
     a.dataQualityStatus = a.missingFeatures.isEmpty() ? "sufficient_for_demo_screen" : "incomplete";
     Double map = value(latest, "MAP"),

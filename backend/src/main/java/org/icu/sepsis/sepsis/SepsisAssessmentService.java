@@ -47,8 +47,32 @@ public class SepsisAssessmentService {
     List<String> sourceWarnings = new ArrayList<>();
     if (channelPressure) sourceWarnings.add("有创与无创血压分通道展示，尚未确认院内择优规则；不自动合成为单一血压输入，qSOFA 血压项待核对。");
     if ("smartcare".equals(mode)) sourceWarnings.add("源记录入库时间未确认，不能据此进行历史时点回放；乳酸报告的采样时间、结果状态及本次住院关联未确认，候选报告仅供原始记录核对。");
-    List<String> missing=new ArrayList<>();
-    for(String code:List.of("MAP","SBP","RR","GCS","LACTATE")) if(!latest.containsKey(code)) missing.add(code);
+    // Missing = no usable value for screening. Channel MAP/SBP counts as present; a report-only
+    // lactate (context_only) is not "absent" — it is unconfirmed and must not be listed as 缺.
+    boolean hasMap = latest.containsKey("MAP") || latest.keySet().stream().anyMatch(c -> c.startsWith("MAP_"));
+    boolean hasSbp = latest.containsKey("SBP") || latest.keySet().stream().anyMatch(c -> c.startsWith("SBP_"));
+    boolean hasLactateValid = latest.containsKey("LACTATE");
+    boolean hasLactateReport =
+        rows.stream().anyMatch(o -> "LACTATE".equals(o.parameterCode) && o.value != null);
+    List<String> missing = new ArrayList<>();
+    if (!hasMap) missing.add("MAP");
+    if (!hasSbp) missing.add("SBP");
+    if (!latest.containsKey("RR")) missing.add("RR");
+    if (!latest.containsKey("GCS")) missing.add("GCS");
+    if (!hasLactateValid && !hasLactateReport) missing.add("LACTATE");
+    // Display-level gaps the overview tiles also show as empty (not all feed qSOFA).
+    for (String code : List.of("HR", "TEMP", "SPO2")) {
+      boolean present =
+          latest.containsKey(code)
+              || rows.stream()
+                  .anyMatch(
+                      o ->
+                          code.equals(o.parameterCode)
+                              && o.value != null
+                              && !"context_only".equals(o.clinicalUse));
+      if (!present) missing.add(code);
+    }
+    if (hasLactateReport && !hasLactateValid) missing.add("LACTATE_UNCONFIRMED");
     List<Map<String,Object>> findings=new ArrayList<>();
     abnormal(findings,latest,"MAP","平均动脉压",config.getMapLow(),true,"低于当前核对阈值");
     abnormal(findings,latest,"SBP","收缩压",config.getSbpLow(),true,"低于当前核对阈值");

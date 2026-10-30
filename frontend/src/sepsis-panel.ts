@@ -1,13 +1,15 @@
 import { CommonModule } from '@angular/common';
 import { Component, EventEmitter, Input, Output, OnChanges, OnDestroy, inject } from '@angular/core';
+import { FormsModule } from '@angular/forms';
 import { Api, Alert, Page, Task, Observation, errorMessage } from './api';
 import { UiIcon } from './ui-icon';
 import { ClinicalTrends } from './clinical-trends';
-import { ClinicalReview, Evidence, featureLabel, matchesPatient } from './clinical-review';
+import { ClinicalReview, Evidence, featureLabel, matchesPatient, sourceLabel } from './clinical-review';
 import { Level, ago, baseCode, direction, hoursSince, level, levelRank } from './clinical-flags';
 import { Measure, measures, pointsFor } from './trends';
 import { Icu05Card, Icu05Result } from './icu05-card';
 import { AiAssistCard } from './ai-assist-card';
+import { computeSofa, SofaKind, SofaManualInput, SofaResult, CompKey } from './sofa';
 
 export interface SepsisStatus {
   patientId: string; level: Level | 'unknown'; summary: string;
@@ -25,7 +27,7 @@ const tileName: Record<string, string> = { MAP: '平均动脉压', MAP_IBP: '平
 const units: Record<string, string> = { MAP: 'mmHg', SBP: 'mmHg', LACTATE: 'mmol/L', RR: '次/分', GCS: '分', HR: '次/分', TEMP: '°C', SPO2: '%' };
 
 @Component({
-  selector: 'sepsis-panel', standalone: true, imports: [CommonModule, ClinicalTrends, UiIcon, Icu05Card, AiAssistCard],
+  selector: 'sepsis-panel', standalone: true, imports: [CommonModule, FormsModule, ClinicalTrends, UiIcon, Icu05Card, AiAssistCard],
   template: `<section class="clinical-review sx-overview" aria-label="患者脓毒症概览" [attr.aria-busy]="loading" [class.nurse-first]="nurseFirst">
     <header class="sx-head" [attr.data-level]="headLevel">
       <div class="sx-head-main">
@@ -58,7 +60,7 @@ const units: Record<string, string> = { MAP: 'mmHg', SBP: 'mmHg', LACTATE: 'mmol
       </button>
     </section>
     <div class="sx-empty-bar" *ngIf="data?.available && !hasAnyValue">
-      <ui-icon name="empty"/><span>近 24 小时未取得有效观测，缺项不代表正常</span>
+      <ui-icon name="empty"/><span>近 24 小时未取得有效观测</span>
       <button class="primary" (click)="openTrends.emit()">查看历史记录</button><button (click)="openEvidence.emit()">记录单</button>
     </div>
 
@@ -76,7 +78,71 @@ const units: Record<string, string> = { MAP: 'mmHg', SBP: 'mmHg', LACTATE: 'mmol
         </tbody></table>
       </section>
       <section class="review-card sx-organ" aria-label="器官功能">
-        <div class="review-card-title"><h2><ui-icon name="activity"/>器官功能</h2><span class="sx-chip" *ngIf="sofa" [attr.data-level]="sofaDelta !== null && sofaDelta >= 2 ? 'critical' : null">SOFA <b>{{ sofa.value }}</b><small *ngIf="sofaDelta !== null">24h {{ sofaDelta >= 0 ? '+' : '' }}{{ sofaDelta }}</small><small>{{ sofa.eventTime | date:'HH:mm' }}</small></span><span class="sx-chip" *ngIf="!sofa">SOFA <small>宿主未评分</small></span></div>
+        <div class="review-card-title">
+          <h2><ui-icon name="activity"/>器官功能</h2>
+          <span class="sx-sofa-chips">
+            <button type="button" class="sx-chip sofa-chip" [class.on]="sofaOpen" (click)="sofaOpen = !sofaOpen"
+              [title]="sofaClassic?.note || ''">
+              SOFA <b>{{ sofaClassic?.total ?? '—' }}</b>
+              <small *ngIf="sofaClassic && sofaClassic.total !== null">{{ sofaClassic.scored }}/6 项</small>
+              <small *ngIf="sofaClassic && sofaClassic.total === null">缺项</small>
+            </button>
+            <button type="button" class="sx-chip sofa-chip" [class.on]="sofaOpen && sofaKind === 'sofa2'"
+              (click)="toggleSofaKind('sofa2')">
+              SOFA-2 <b>{{ sofa2?.total ?? '—' }}</b>
+            </button>
+            <span class="sx-chip" *ngIf="sofa" title="宿主系统已录入评分">宿主 <b>{{ sofa.value }}</b>
+              <small *ngIf="sofaDelta !== null">24h {{ sofaDelta >= 0 ? '+' : '' }}{{ sofaDelta }}</small>
+            </span>
+            <span class="sx-chip" *ngIf="!sofa">宿主未评分</span>
+          </span>
+        </div>
+        <div class="sofa-panel" *ngIf="sofaOpen && sofaView">
+          <div class="sofa-panel-head">
+            <div class="segmented sofa-tabs">
+              <button type="button" [class.selected]="sofaKind === 'classic'" (click)="toggleSofaKind('classic')">经典 SOFA</button>
+              <button type="button" [class.selected]="sofaKind === 'sofa2'" (click)="toggleSofaKind('sofa2')">SOFA-2</button>
+            </div>
+            <span class="sofa-total">合计 <b>{{ sofaView.total ?? '—' }}</b>
+              <small *ngIf="sofaView.total === null">（≥4 项才有总分）</small>
+            </span>
+          </div>
+          <p class="sofa-note">{{ sofaView.note }}</p>
+          <ul class="sofa-comps">
+            <li *ngFor="let c of sofaView.components" [attr.data-score]="c.score" [class.missing]="c.score === null">
+              <div class="sofa-comp-row">
+                <span class="sofa-comp-name">{{ c.label }}</span>
+                <span class="sofa-comp-score">{{ c.score ?? '—' }}</span>
+                <span class="sofa-comp-val" *ngIf="c.value !== null">{{ c.value }} {{ c.unit }}</span>
+                <span class="sofa-comp-val muted" *ngIf="c.value === null">无数据</span>
+                <button type="button" class="text-button sofa-edit-btn" (click)="toggleSofaEdit(c.key)">
+                  {{ sofaEditKey === c.key ? '收起' : c.score === null ? '补齐' : '改值' }}
+                </button>
+              </div>
+              <div class="sofa-comp-meta">
+                <span>{{ c.inputLabel }}</span>
+                <span *ngIf="c.source === 'manual'" class="tag">手动</span>
+                <span *ngIf="c.flags.includes('vaso_dose_unknown')">剂量未接入</span>
+                <span *ngIf="c.flags.includes('resp_support_unknown')">通气信息缺</span>
+                <span class="muted">{{ c.sourceNote }}</span>
+              </div>
+              <div class="sofa-edit-box" *ngIf="sofaEditKey === c.key">
+                <label>
+                  输入 {{ c.inputLabel }}（{{ manualUnit(c) }}）
+                  <input type="number" step="any" [(ngModel)]="sofaManual[c.key]" name="sofa-{{ c.key }}" />
+                </label>
+                <div class="sofa-edit-actions">
+                  <button type="button" class="primary" (click)="applySofaManual()">试算</button>
+                  <button type="button" (click)="clearSofaManual(c.key)">清除</button>
+                </div>
+                <p class="sofa-manual-hint">仅本地试算，不写入源库、不改变规则判定。</p>
+              </div>
+            </li>
+          </ul>
+          <p class="sofa-flags" *ngIf="sofaView.flags.length">
+            <span *ngFor="let f of sofaView.flags" class="tag">{{ sofaFlagLabel(f) }}</span>
+          </p>
+        </div>
         <table class="sx-table"><tbody>
           <tr *ngFor="let o of organs" [attr.data-level]="o.level">
             <th scope="row">{{ o.system }}</th><td class="sx-o-item">{{ o.item }}</td>
@@ -90,13 +156,13 @@ const units: Record<string, string> = { MAP: 'mmHg', SBP: 'mmHg', LACTATE: 'mmol
     </div>
 
     <details class="review-card sx-fold" *ngIf="data?.available" (toggle)="showTrends = $any($event.target).open">
-      <summary><ui-icon name="chart"/>生命体征趋势<small>与宿主床旁记录同源</small></summary>
+      <summary><ui-icon name="chart"/>生命体征趋势</summary>
       <clinical-trends *ngIf="showTrends" [items]="observations" [asOf]="asOf" [embedded]="true" [availableHours]="24" [compact]="true" [busy]="loading" (openRecords)="openEvidence.emit()" (openHistory)="openTrends.emit()"/>
     </details>
     <details class="sx-limits" *ngIf="limits.length" aria-label="数据限制"><summary><ui-icon name="info"/>数据限制 {{ limits.length }} 项</summary><ul><li *ngFor="let l of limits">{{ l }}</li></ul>
       <div class="review-table-wrap" *ngIf="data?.contextEvidence?.length"><table><thead><tr><th>未确认归属的报告</th><th>报告值</th><th>报告时间</th><th></th></tr></thead><tbody><tr *ngFor="let e of data!.contextEvidence"><td>{{ featureName(e.code) }}</td><td>{{ e.value }} {{ e.unit || '' }}</td><td>{{ e.eventTime | date:'MM-dd HH:mm' }}</td><td><button class="text-button" (click)="selected=e">来源</button></td></tr></tbody></table></div>
     </details>
-    <section class="review-evidence-detail" *ngIf="selected" aria-label="来源记录"><div class="review-card-title"><h2><ui-icon name="file"/>{{ selected.label || featureName(selected.code) }}</h2><button (click)="selected=null">关闭</button></div><div class="evidence-reading">{{ selected.value }}<small>{{ selected.unit || '单位未知' }}</small></div><dl><dt>{{ selected.timeBasis==='reported' ? '报告 / 审核时间' : '观测时间' }}</dt><dd>{{ selected.eventTime | date:'yyyy-MM-dd HH:mm:ss' }}</dd><dt>来源系统</dt><dd>{{ selected.sourceSystem || '未标注' }}</dd><dt>来源记录</dt><dd>{{ selected.sourceRecordId || '未标注' }}</dd><dt *ngIf="selected.sourceParameterCode">源指标</dt><dd *ngIf="selected.sourceParameterCode">{{ selected.sourceParameterCode }}</dd></dl><p class="context-warning" *ngIf="selected.qualityNote">{{ selected.qualityNote }}</p></section>
+    <section class="review-evidence-detail" *ngIf="selected" aria-label="来源记录"><div class="review-card-title"><h2><ui-icon name="file"/>{{ selected.label || featureName(selected.code) }}</h2><button (click)="selected=null">关闭</button></div><div class="evidence-reading">{{ selected.value }}<small>{{ selected.unit || '单位未知' }}</small></div><dl><dt>{{ selected.timeBasis==='reported' ? '报告 / 审核时间' : '观测时间' }}</dt><dd>{{ selected.eventTime | date:'yyyy-MM-dd HH:mm:ss' }}</dd><dt>来源</dt><dd>{{ sourceName(selected.sourceSystem) }}</dd><dt>来源记录</dt><dd>{{ selected.sourceRecordId || '未标注' }}</dd><dt *ngIf="selected.sourceParameterCode">源指标</dt><dd *ngIf="selected.sourceParameterCode">{{ selected.sourceParameterCode }}</dd></dl><p class="context-warning" *ngIf="selected.qualityNote">{{ selected.qualityNote }}</p></section>
   </section>`,
 })
 export class SepsisPanel implements OnChanges, OnDestroy {
@@ -119,9 +185,19 @@ export class SepsisPanel implements OnChanges, OnDestroy {
   tiles: Tile[] = []; bundle: BundleRow[] = []; organs: OrganRow[] = []; limits: string[] = [];
   cultureNote = '微生物培养结果源未接入';
   sofa: Observation | null = null; sofaDelta: number | null = null;
+  sofaOpen = false;
+  sofaKind: SofaKind = 'classic';
+  sofaClassic: SofaResult | null = null;
+  sofa2: SofaResult | null = null;
+  sofaEditKey: CompKey | null = null;
+  sofaManual: SofaManualInput = {};
+  get sofaView(): SofaResult | null {
+    return this.sofaKind === 'sofa2' ? this.sofa2 : this.sofaClassic;
+  }
   headline = ''; headDetail = ''; headLevel: Level | 'unknown' = 'unknown';
   private generation = 0;
   featureName = featureLabel;
+  sourceName = sourceLabel;
   abs = Math.abs;
   get nurseFirst() { return this.api.has('NURSE') && !this.api.has('DOCTOR'); }
   get hasAnyValue() { return this.tiles.some(t => t.value !== null); }
@@ -164,6 +240,7 @@ export class SepsisPanel implements OnChanges, OnDestroy {
     const d = this.data, asOf = Date.parse(this.asOf) || Date.now();
     if (!d || !d.available) {
       this.tiles = []; this.bundle = []; this.organs = []; this.limits = d?.sourceWarnings || []; this.sofa = null; this.sofaDelta = null;
+      this.sofaClassic = null; this.sofa2 = null; this.sofaEditKey = null; this.sofaManual = {};
       this.headLevel = 'unknown'; this.headline = d || this.error ? '数据暂不可用' : '正在读取'; this.headDetail = d || this.error ? '不能据此判断病情' : ''; return;
     }
     const latest = new Map<string, Evidence>();
@@ -180,29 +257,107 @@ export class SepsisPanel implements OnChanges, OnDestroy {
       this.headline = flagged.slice(0, 4).map(t => `${shortName[t.code] || t.label} ${t.value} ${t.word}`.trim()).join(' · ');
     } else if (d.missingFeatures.length) { this.headLevel = 'unknown'; this.headline = '关键数据不全'; }
     else { this.headLevel = 'normal'; this.headline = '主要指标未超出提示阈值'; }
-    const missing = d.missingFeatures.map(featureLabel);
-    this.headDetail = missing.length ? '缺：' + missing.join('、') + '（缺项不代表正常）' : flagged.length > 4 ? '另有 ' + (flagged.length - 4) + ' 项异常' : '';
+    const missing = d.missingFeatures.map((code) => {
+      if (code === 'LACTATE_UNCONFIRMED') return '乳酸（未确认）';
+      if (code === 'INFECTION_EVIDENCE') return '感染证据';
+      return featureLabel(code);
+    });
+    this.headDetail = missing.length ? '缺：' + missing.join('、') : flagged.length > 4 ? '另有 ' + (flagged.length - 4) + ' 项异常' : '';
     this.bundle = this.bundleRows(d, latest, candidates, asOf);
     this.organs = this.organRows(d, latest);
     const sofa = this.series('SOFA', 'score', 0, 24, asOf);
     this.sofa = sofa.at(-1) || null;
     this.sofaDelta = sofa.length > 1 ? (sofa.at(-1)!.value! - sofa[0].value!) : null;
-    this.limits = [...(d.sourceWarnings || []), ...(d.contextEvidence?.length ? ['未确认住院归属的检验报告仅列出，不参与提示和集束化判断。'] : []),
-      d.ai?.configured ? '提示颜色为显示阈值，不构成诊断；预测模型未配置；AI 辅助解释按需生成，需医生核对原始记录。'
-        : '提示颜色为显示阈值，不构成诊断；预测模型与 AI 辅助未配置。'];
+    this.recomputeSofa();
+    this.limits = [...(d.sourceWarnings || []), ...(d.contextEvidence?.length ? ['未确认住院归属的报告仅列出，不参与判断。'] : []),
+      d.ai?.configured ? '阈值着色仅供显示；AI 需医生核对。' : '阈值着色仅供显示。'];
   }
+
+  private recomputeSofa() {
+    const asOf = Date.parse(this.asOf) || Date.now();
+    this.sofaClassic = computeSofa(this.observations, asOf, 'classic', this.sofaManual);
+    this.sofa2 = computeSofa(this.observations, asOf, 'sofa2', this.sofaManual);
+  }
+
+  toggleSofaKind(kind: SofaKind) {
+    this.sofaKind = kind;
+    this.sofaOpen = true;
+  }
+  toggleSofaEdit(key: CompKey) {
+    this.sofaEditKey = this.sofaEditKey === key ? null : key;
+  }
+  applySofaManual() {
+    this.recomputeSofa();
+  }
+  clearSofaManual(key: CompKey) {
+    delete this.sofaManual[key];
+    this.recomputeSofa();
+  }
+  manualUnit(c: { key: CompKey; unit: string }): string {
+    if (c.key === 'liver' || c.key === 'renal') return 'μmol/L';
+    if (c.key === 'coag') return '10^9/L';
+    if (c.key === 'resp') return 'mmHg (P/F)';
+    if (c.key === 'cns') return '分 (GCS)';
+    if (c.key === 'cardio') return 'mmHg (MAP)';
+    return c.unit || '数值';
+  }
+  sofaFlagLabel(f: string): string {
+    const m: Record<string, string> = {
+      vaso_dose_unknown: '升压药剂量未接入',
+      resp_support_unknown: '机械通气信息缺失',
+      urine_not_used: '尿量未纳入',
+    };
+    return m[f] || f;
+  }
+
   private tile(code: string, latest: Map<string, Evidence>, candidates: Map<string, Evidence>, asOf: number, sbpCode?: string): Tile {
-    const e = latest.get(code) || null, base = baseCode(code);
+    let e = latest.get(code) || null;
+    // Assessment latestEvidence can lag or filter codes; fall back to the newest clinical-data point so vitals with real readings still show.
+    if (!e) {
+      const obs = this.latestObs(code);
+      if (obs && obs.value != null && obs.clinicalUse !== 'context_only' && obs.encounterLinkStatus !== 'unconfirmed') {
+        e = {
+          code: obs.parameterCode,
+          value: obs.value,
+          unit: obs.unit || '',
+          eventTime: obs.eventTime,
+          sourceSystem: obs.sourceSystem,
+          sourceRecordId: obs.sourceRecordId,
+          sourceParameterCode: obs.sourceParameterCode,
+          clinicalUse: obs.clinicalUse,
+          encounterLinkStatus: obs.encounterLinkStatus,
+          timeBasis: obs.timeBasis,
+        };
+      }
+    }
+    const base = baseCode(code);
     const unit = units[base] || e?.unit || '';
     const pts = this.series(code, e?.unit || measures.find(m => m.code === base)?.unit || '', -1e9, 1e9, asOf, 12);
     const value = e ? e.value : null;
     const prev = pts.length > 1 ? pts[pts.length - 2].value : null;
     let sub = '';
-    if (sbpCode) { const s = latest.get(sbpCode); sub = '收缩压 ' + (s ? s.value : '—'); }
+    if (sbpCode) { const s = latest.get(sbpCode) || this.evidenceFromObs(sbpCode); sub = '收缩压 ' + (s ? s.value : '—'); }
     if (base === 'MAP') sub += (sub ? ' · ' : '') + '升压药 ' + (this.data?.vasopressorActive === true ? '在用' : this.data?.vasopressorActive === false ? '未用' : '无记录');
     const delta = value !== null && prev !== null && e && pts.at(-1)?.eventTime === e.eventTime ? Math.round((value - prev) * 10) / 10 : null;
     return { code, label: tileName[code] || featureLabel(code), unit, value, time: e?.eventTime || null, level: level(code, value), word: value === null ? '' : direction(code, value),
       delta, spark: this.sparkPath(pts), sub, evidence: e, candidate: e ? null : candidates.get(code) || null };
+  }
+
+  private evidenceFromObs(code: string): Evidence | null {
+    const obs = this.latestObs(code);
+    if (!obs || obs.value == null) return null;
+    return {
+      code: obs.parameterCode,
+      value: obs.value,
+      unit: obs.unit || '',
+      eventTime: obs.eventTime,
+      sourceSystem: obs.sourceSystem,
+      sourceRecordId: obs.sourceRecordId,
+      sourceParameterCode: obs.sourceParameterCode,
+      clinicalUse: obs.clinicalUse,
+      encounterLinkStatus: obs.encounterLinkStatus,
+      timeBasis: obs.timeBasis,
+    };
   }
   private series(code: string, unit: string, min: number, max: number, asOf: number, hours = 24): Observation[] {
     if (!unit) return [];
@@ -247,6 +402,27 @@ export class SepsisPanel implements OnChanges, OnDestroy {
     return best;
   }
 
+  /**
+   * Sum urine increments in the loaded 24h window.
+   * Source param_niaoLiang is a period total in ml (nursing interval), not a running rate.
+   * Units other than ml are ignored for the sum (never invent conversions).
+   */
+  private urineTotal24h(): { total: number; count: number; latest: Observation | null } {
+    let total = 0;
+    let count = 0;
+    let latest: Observation | null = null;
+    for (const o of this.observations) {
+      if (o.parameterCode !== 'URINE_OUTPUT' || o.value == null) continue;
+      const unit = (o.unit || 'ml').trim().toLowerCase();
+      if (unit && unit !== 'ml' && unit !== '毫升') continue;
+      total += o.value;
+      count += 1;
+      if (!latest || Date.parse(o.eventTime) > Date.parse(latest.eventTime)) latest = o;
+    }
+    // Round to 1 decimal to avoid float noise from summing.
+    return { total: Math.round(total * 10) / 10, count, latest };
+  }
+
   private organRows(d: ClinicalReview, latest: Map<string, Evidence>): OrganRow[] {
     const maps = this.tiles.filter(t => baseCode(t.code) === 'MAP' && t.value !== null);
     const worstMap = maps.sort((a, b) => levelRank[a.level] - levelRank[b.level])[0];
@@ -272,7 +448,8 @@ export class SepsisPanel implements OnChanges, OnDestroy {
     const plt = this.latestObs('PLT');
     const tbil = this.latestObs('TBIL');
     const crea = this.latestObs('CREA');
-    const urine = this.latestObs('URINE_OUTPUT');
+    // 尿量：源 param_niaoLiang 为区间增量（ml），按近 24h 求和；不把最新一条 0 当作总量。
+    const urineAgg = this.urineTotal24h();
     const pfNote =
       '参考：' +
       (rr ? '呼吸 ' + rr.value : '呼吸 —') +
@@ -321,18 +498,18 @@ export class SepsisPanel implements OnChanges, OnDestroy {
         : '微生物培养报告源未接入';
     this.cultureNote = cultureNote;
 
-    const renalNote = urine && urine.value != null
-      ? '尿量单次记录 ' + urine.value + (urine.unit || ' ml') + ' · 采样间隔数小时，非连续每小时'
-      : '尿量源未接入或近 24h 无记录';
+    const renalNote = urineAgg.count > 0
+      ? `近 24h 尿量累计（${urineAgg.count} 条区间记录求和）· 源间隔约数小时，非逐小时曲线`
+      : '近 24h 无尿量记录（不代表无尿）';
+    const urineText = urineAgg.count > 0
+      ? `尿量 24h 累计 ${urineAgg.total} ml`
+      : '';
     const renalValue = crea && crea.value != null
-      ? String(crea.value) + (crea.unit ? ' ' + crea.unit : '') +
-        (urine && urine.value != null ? ' · 尿量 ' + urine.value + (urine.unit || ' ml') : '')
-      : urine && urine.value != null
-        ? '尿量 ' + urine.value + (urine.unit || ' ml')
-        : '—';
+      ? String(crea.value) + (crea.unit ? ' ' + crea.unit : '') + (urineText ? ' · ' + urineText : '')
+      : urineText || '—';
     const renalRow: OrganRow = crea && crea.value != null
       ? organ('肾脏', '肌酐 / 尿量', crea, renalValue, renalNote)
-      : urine && urine.value != null
+      : urineAgg.count > 0 && urineAgg.latest
         ? {
             system: '肾脏',
             item: '肌酐 / 尿量',
@@ -341,18 +518,20 @@ export class SepsisPanel implements OnChanges, OnDestroy {
             note: renalNote,
             evidence: {
               code: 'URINE_OUTPUT',
-              value: urine.value as number,
-              unit: urine.unit || 'ml',
-              eventTime: urine.eventTime,
-              sourceSystem: urine.sourceSystem,
-              sourceRecordId: urine.sourceRecordId,
-              sourceParameterCode: urine.sourceParameterCode,
-              clinicalUse: urine.clinicalUse,
-              qualityNote: urine.qualityNote,
-              timeBasis: urine.timeBasis,
+              value: urineAgg.total,
+              unit: 'ml/24h',
+              eventTime: urineAgg.latest.eventTime,
+              sourceSystem: urineAgg.latest.sourceSystem,
+              sourceRecordId: urineAgg.latest.sourceRecordId,
+              sourceParameterCode: urineAgg.latest.sourceParameterCode,
+              clinicalUse: urineAgg.latest.clinicalUse,
+              qualityNote:
+                '近 24h 内 ' + urineAgg.count + ' 条 param_niaoLiang 区间增量求和；证据时间取最近一条记录时间。' +
+                (urineAgg.latest.qualityNote || ''),
+              timeBasis: urineAgg.latest.timeBasis,
             },
           }
-        : { system: '肾脏', item: '肌酐 / 尿量', value: '—', level: 'none', note: renalNote, evidence: null };
+        : { system: '肾脏', item: '肌酐 / 尿量', value: renalValue, level: 'none', note: renalNote, evidence: null };
 
     return [
       {
