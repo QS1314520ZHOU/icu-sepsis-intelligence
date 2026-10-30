@@ -45,6 +45,12 @@ function icu05(id){
   pool:{eligible:true,icuWithin24h:true,admissionType:'入院',rule:'入院 24h 内进 ICU，且入科类型为 入院 / 手术入院 / 外院'},gate,windows,
   limitations:['乳酸、氧合指数取 SmartCare 血气（bGATemp），按病案号关联，动/静脉标本未区分。','血培养取医嘱审核时间（reviewTime），不等于实际采血时间。']};
 }
+function aiExtra(b,kind){
+ const L={ask:[['answer','回答'],['uncertainties','不确定']],alert:[['why','触发依据'],['verify','需核对（排除误报）'],['next','可考虑的下一步']],ward:[['priority','建议优先查看'],['pattern','共性问题']],handover:[['situation','S 现状'],['background','B 背景'],['assessment','A 评估'],['recommendation','R 交班关注']]}[kind];
+ b.layout=L.map(([key,title])=>({key,title,allowNoRef:key==='uncertainties',urgency:['next','priority','recommendation'].includes(key)}));
+ const t={ask:'当前数据中未见血培养实际采样记录，需核对检验系统',alert:'有创 MAP 58 mmHg 低于 65',ward:'P1 疑似休克且待审核，建议优先查看',handover:'有创 MAP 58 mmHg，乳酸待复测'}[kind];
+ b[L[0][0]]=aiMode==='ok'?[{text:t,refs:['E2'],urgency:'high'}]:[];if(kind==='ward'){b.patients={P1:'02床 模拟患者B'};b.patientId=null;b.encounterId=null;}
+ return b;}
 function aiBrief(id,kind){
  const facts=[{id:'E1',category:'核对',text:'规则核对状态：存在待复核异常（只读证据核对，非诊断）',time:null},{id:'E2',category:'观测',text:'平均动脉压 58 mmHg，记录时间 2 分钟前，来源 SYNTHETIC',time:stamp},{id:'E3',category:'ICU-05 1h',text:'1h B3 先培养后抗菌：否，抗菌药早于或同时于血培养',time:null}];
  const knowledge=[{ref:'K1',id:'ssc26-7',docId:'ssc-2026',title:'SSC 2026 成人脓毒症与感染性休克国际指南',source:'Crit Care Med 2026;54(4):725-812',version:'2026',section:'筛查与早期处理 · 第7条',strength:'强推荐，低质量证据',text:'推荐尽快留取血培养，理想情况下在使用抗菌药物之前完成。'},{ref:'K2',id:'icu05-windows',docId:'icu05-rules',title:'ICU-05 感染性休克 Bundle 判定规则（科室主任 v3）',source:'本科室需求文档 v3',version:'v3',section:'1h/3h/6h 时窗',strength:'本院质控口径',text:'B3 要求抗菌药晚于血培养。'}];
@@ -65,7 +71,7 @@ async function ready(id){await f.locator('.icu-patient-left .name').filter({hasT
 async function refresh(){await f.getByRole('button',{name:'刷新数据',exact:true}).click();await page.waitForTimeout(100);await f.locator('.sx-head button[aria-label=刷新数据]:not([disabled])').waitFor();await page.waitForTimeout(100);}
 (async()=>{fs.mkdirSync(out,{recursive:true});await new Promise(r=>server.listen(0,'0.0.0.0',r));origin='http://127.0.0.1:'+server.address().port;browser=await chromium.launch({headless:true,executablePath:process.env.CHROME_EXECUTABLE||'/usr/local/bin/chromium'});page=await browser.newPage({viewport:{width:1680,height:1180},timezoneId:'Asia/Shanghai'});let errors=[];page.on('pageerror',e=>errors.push(e.message));
 await page.route('**/embed-api/**',async r=>{let data={};if(r.request().url().includes('/config'))data={allowedParentOrigins:[origin]};if(r.request().url().includes('host-context')){const id=r.request().postDataJSON().patientId;if(id===slowId&&!slowUsed){slowUsed=true;await new Promise(r=>setTimeout(r,700));}data={...patients[id],accessToken:'fixture-'+id,expiresAt:new Date(now+600000).toISOString(),username:'host',roles:[role]};}await r.fulfill({json:{code:'OK',data}});});
-await page.route('**/api/v1/**',async r=>{if(r.request().method()==='POST')posts.push({url:r.request().url(),body:r.request().postDataJSON()});const u=new URL(r.request().url()),token=r.request().headers()['authorization']||'',id=[A,B,C].find(id=>token.includes(id))||B;let data=patients[id];if(u.pathname.endsWith('/sepsis-assessment'))data=mode==='source'?sourceAssessment(id):assessment(id);else if(u.pathname.endsWith('/icu05-bundle')){if(icu05Mode==='error')return r.fulfill({status:503,json:{message:'模拟 ICU-05 读取失败'}});data=icu05(id);}else if(u.pathname.endsWith('/ai/brief')){if(aiMode==='error')return r.fulfill({status:500,json:{message:'模拟 AI 接口异常',code:'INTERNAL'}});data=aiBrief(id,r.request().postDataJSON().kind);}else if(u.pathname.endsWith('/feedback'))data={interactionId:'x',count:1};else if(u.pathname.endsWith('/clinical-data')){clinicalRequests.push({id,hours:Number(u.searchParams.get('hours'))});if(mode==='unavailable')return r.fulfill({status:503,json:{message:'模拟数据源不可用',code:'SOURCE_UNAVAILABLE'}});data={items:obs(id),asOf:stamp};}else if(u.pathname.endsWith('/risk-assessments'))data={items:[],total:0,page:0,size:20};else if(u.pathname.endsWith('/alerts')){if(mode==='partial')return r.fulfill({status:503,json:{message:'模拟预警服务读取失败'}});data={items:id===B?[{id:'alert-B',patientId:id,encounterId:patients[id].encounterId,simulated:true,version:0,status:'pending',severity:'high',kind:'infection_abnormal',source:'bedside',trigger:'诊断文本含感染线索，且存在异常：呼吸频率 26',reason:'诊断文本含感染线索，且存在异常：呼吸频率 26',patientLabel:'模拟患者B',bed:'02',lastSeenAt:stamp,ruleVersion:'screen-alert-v1',createdAt:stamp}]:[],total:id===B?1:0,page:0,size:20};}else if(u.pathname.endsWith('/bundles/tasks'))data={items:[],total:0,page:0,size:20};await r.fulfill({json:{code:'OK',data}});});
+await page.route('**/api/v1/**',async r=>{if(r.request().method()==='POST')posts.push({url:r.request().url(),body:r.request().postDataJSON()});const u=new URL(r.request().url()),token=r.request().headers()['authorization']||'',id=[A,B,C].find(id=>token.includes(id))||B;let data=patients[id];if(u.pathname.endsWith('/ai/ask'))data=aiExtra(aiBrief(id,'ask'),'ask');else if(u.pathname.endsWith('/alerts/alert-B/ai'))data=r.request().method()==='GET'?null:aiExtra(aiBrief(id,'alert'),'alert');else if(u.pathname.endsWith('/ai/ward-brief'))data=aiExtra(aiBrief(id,'ward'),'ward');else if(u.pathname.endsWith('/sepsis-assessment'))data=mode==='source'?sourceAssessment(id):assessment(id);else if(u.pathname.endsWith('/icu05-bundle')){if(icu05Mode==='error')return r.fulfill({status:503,json:{message:'模拟 ICU-05 读取失败'}});data=icu05(id);}else if(u.pathname.endsWith('/ai/brief')){if(aiMode==='error')return r.fulfill({status:500,json:{message:'模拟 AI 接口异常',code:'INTERNAL'}});const k=r.request().postDataJSON().kind;data=k==='handover'?aiExtra(aiBrief(id,k),k):aiBrief(id,k);}else if(u.pathname.endsWith('/feedback'))data={interactionId:'x',count:1};else if(u.pathname.endsWith('/clinical-data')){clinicalRequests.push({id,hours:Number(u.searchParams.get('hours'))});if(mode==='unavailable')return r.fulfill({status:503,json:{message:'模拟数据源不可用',code:'SOURCE_UNAVAILABLE'}});data={items:obs(id),asOf:stamp};}else if(u.pathname.endsWith('/risk-assessments'))data={items:[],total:0,page:0,size:20};else if(u.pathname.endsWith('/alerts')){if(mode==='partial')return r.fulfill({status:503,json:{message:'模拟预警服务读取失败'}});data={items:id===B?[{id:'alert-B',patientId:id,encounterId:patients[id].encounterId,simulated:true,version:0,status:'pending',severity:'high',kind:'infection_abnormal',source:'bedside',trigger:'诊断文本含感染线索，且存在异常：呼吸频率 26',reason:'诊断文本含感染线索，且存在异常：呼吸频率 26',patientLabel:'模拟患者B',bed:'02',lastSeenAt:stamp,ruleVersion:'screen-alert-v1',createdAt:stamp}]:[],total:id===B?1:0,page:0,size:20};}else if(u.pathname.endsWith('/bundles/tasks'))data={items:[],total:0,page:0,size:20};await r.fulfill({json:{code:'OK',data}});});
 await page.goto(origin+'/review-host');f=page.frameLocator('iframe');
 const tab=name=>f.locator('nav.icu-tabs').getByRole('button',{name,exact:false});
 await test('overview puts the most urgent values first and keeps curves folded',async()=>{await ready(B);
@@ -102,7 +108,13 @@ await test('host receives a per-patient status badge message',async()=>{
 await test('tile opens source evidence in place',async()=>{await f.locator('.sx-tile').filter({hasText:'乳酸'}).click();await f.locator('.review-evidence-detail').waitFor();assert.match(await f.locator('.review-evidence-detail').innerText(),/SYNTHETIC.fixture/);await f.locator('.review-evidence-detail').getByRole('button',{name:'关闭'}).click();});
 await test('vital trends are available on demand',async()=>{await f.locator('.sx-fold > summary').click();await f.locator('.sx-fold svg[role=img]').first().waitFor();assert.equal(await f.locator('.sx-fold svg[role=img]').count(),6);await page.screenshot({path:path.join(out,'61-v5-overview-trends.png')});await f.locator('.sx-fold > summary').click();});
 await test('pending alert button opens quick-reason review',async()=>{await f.locator('.sx-pending.alert').click();await f.getByRole('heading',{name:'预警处理',exact:true}).waitFor();
- await f.getByRole('heading',{name:'执行任务',exact:true}).waitFor();await f.getByText('暂无待处理任务',{exact:true}).waitFor();await page.screenshot({path:path.join(out,'67-v5-alerts-tasks.png')});
+ await f.getByRole('heading',{name:'执行任务',exact:true}).waitFor();await f.getByText('暂无待处理任务',{exact:true}).waitFor();
+ aiMode='ok';await f.getByRole('button',{name:'AI 解读',exact:true}).click();await f.locator('.al-ai .ai-body').waitFor();assert.match(await f.locator('.al-ai').innerText(),/触发依据/);
+ assert.ok(posts.some(p=>p.url.endsWith('/alerts/alert-B/ai')),'no stored explanation → generated on demand');
+ await f.getByRole('button',{name:'全科室',exact:true}).click();await f.getByRole('button',{name:'AI 科室优先级'}).click();await f.locator('.al-ward .ai-body').waitFor();
+ assert.match(await f.locator('.al-ward').innerText(),/02床 模拟患者B（P1）/);await page.screenshot({path:path.join(out,'72-v9-alert-ai-ward.png')});
+ await f.getByRole('button',{name:'本患者',exact:true}).click();aiMode='off';
+ await page.screenshot({path:path.join(out,'67-v5-alerts-tasks.png')});
  await f.getByRole('button',{name:'处置',exact:true}).click();await f.getByRole('dialog').waitFor();
  const submit=f.getByRole('button',{name:'确认提交',exact:true});assert.equal(await submit.isDisabled(),true);
  await f.getByRole('button',{name:'其他',exact:true}).click();assert.equal(await submit.isDisabled(),true,'其他 requires a note');
@@ -148,6 +160,10 @@ await test('separate pressure channels both shown, unconfirmed lactate stays out
  await f.locator('.sx-limits > summary').click();assert.match(await f.locator('.sx-limits').innerText(),/择优规则/);assert.match(await f.locator('.sx-limits').innerText(),/未确认归属的报告/);
 });
 await page.screenshot({path:path.join(out,'65-v5-pressure-source.png')});
+await test('evidence drawer shows clinical context, database fields folded',async()=>{const t=f.locator('.sx-tile').filter({hasText:'平均动脉压 · 有创'});await t.click();const d=f.locator('.review-evidence-detail');await d.waitFor();
+ const txt=await d.innerText();assert.match(txt,/参考/);assert.match(txt,/<65 mmHg/);assert.match(txt,/近 24 小时/);assert.match(txt,/有创测量/);
+ assert.equal(await d.locator('.ev-tech').getAttribute('open'),null,'trace fields collapsed');assert.equal(await d.getByText('来源记录',{exact:true}).count(),0);
+ await page.screenshot({path:path.join(out,'73-v9-evidence-drawer.png')});await d.getByRole('button',{name:'关闭'}).click();});
 await test('records open as a time-column flowsheet with flagged cells',async()=>{
  await tab('记录与依据').click();await f.locator('.sx-sheet').waitFor();
  const cols=await f.locator('.sx-sheet thead th').count();assert.ok(cols>=2&&cols<=13,String(cols));
@@ -207,6 +223,14 @@ await test('AI assist is on-demand and every shown statement links to evidence',
  await card.getByRole('button',{name:'引用依据不对应'}).click();await submit.click();await card.locator('.ai-sent').waitFor();
  const fb=posts.find(p=>p.url.includes('/feedback'));assert.equal(fb.body.verdict,'reject');assert.equal(fb.body.reason,'引用依据不对应');
  assert.equal(await f.locator('.i5').count(),1,'rule card unaffected');
+});
+await test('AI handover is copyable and free questions are answered with evidence',async()=>{aiMode='ok';await refresh();const card=f.locator('.sx-ai');await card.waitFor();
+ await card.getByRole('button',{name:'交班摘要'}).click();await card.locator('.ai-body').first().waitFor();
+ assert.match(await card.innerText(),/S 现状/);assert.match(await card.innerText(),/乳酸待复测/);assert.equal(await card.locator('.ai-copy').count(),1);
+ await card.getByRole('textbox',{name:'向 AI 提问'}).fill('血培养送了吗？');await card.getByRole('button',{name:'提问',exact:true}).click();
+ await card.locator('.ai-turn .ai-body').waitFor();assert.match(await card.locator('.ai-turn').innerText(),/未见血培养实际采样记录/);
+ const q=posts.find(p=>p.url.includes('/ai/ask'));assert.equal(q.body.question,'血培养送了吗？');
+ await card.screenshot({path:path.join(out,'71-v9-ai-handover-ask.png')});aiMode='off';
 });
 await test('AI unavailable keeps rule cards and shows sources only',async()=>{aiMode='unavailable';await refresh();const card=f.locator('.sx-ai');await card.waitFor();
  await card.getByRole('button',{name:'病情摘要'}).click();await card.locator('.ai-status').waitFor();

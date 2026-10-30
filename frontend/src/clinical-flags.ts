@@ -19,6 +19,22 @@ const rules: Record<string, Rule> = {
   TBIL: { critHigh: 120, high: 34, lowWord: '', highWord: '偏高' },
   CREA: { critHigh: 353, high: 177, lowWord: '', highWord: '偏高' },
 };
+/** Plain-language reference for the evidence drawer (display thresholds + the rule thresholds that drive alerts). */
+const refs: Record<string, string> = {
+  MAP: '<65 mmHg 为休克判定阈值（需要升压药，或 乳酸≥2 且 MAP<65）；65–70 提示偏低',
+  SBP: '≤100 mmHg 为 qSOFA 阳性项；<90 显著偏低',
+  LACTATE: '≥2 mmol/L 升高（休克判定），≥4 mmol/L 显著升高（需补液评估）',
+  RR: '≥22 次/分 为 qSOFA 阳性项；≥30 或 <8 显著异常',
+  GCS: '<15 为 qSOFA 阳性项（需排除镇静影响）；≤8 显著下降',
+  HR: '>100 次/分 偏快，≥130 显著偏快；<50 偏慢',
+  TEMP: '>38 ℃ 发热，≥39.5 ℃ 高热；<36 ℃ 偏低',
+  SPO2: '<92% 偏低，<88% 显著偏低',
+  PF_RATIO: '<300 提示氧合受损，<100 严重',
+  PLT: '<100 ×10⁹/L 偏低，<20 严重',
+  TBIL: '≥34 μmol/L 偏高，≥120 显著',
+  CREA: '≥177 μmol/L 偏高，≥353 显著',
+};
+export function reference(code: string): string { return refs[baseCode(code)] || ''; }
 /** MAP_IBP / SBP_NIBP etc. share the base rule of their measurement. */
 export function baseCode(code: string): string { return code.replace(/_(IBP|NIBP)$/, ''); }
 export function level(code: string, value: number | null | undefined): Level {

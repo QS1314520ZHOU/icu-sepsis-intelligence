@@ -36,3 +36,16 @@ test('brief for another patient or encounter is rejected', () => {
   assert.equal(acceptsBrief(base, 'p1', 'e2'), false);
   assert.equal(acceptsBrief(null, 'p1', ''), false);
 });
+
+import { copyText, layoutOf, resolvePatients } from '../src/ai-assist.ts';
+test('v2 layout, copy text without refs, ward pseudonyms resolved', () => {
+  const b = { facts: [{ id: 'E1', category: '趋势', text: 'MAP 78→58', time: null }], knowledge: [], status: 'ok', kind: 'handover',
+    layout: [{ key: 'situation', title: 'S 现状', allowNoRef: false }, { key: 'uncertainties', title: '不确定', allowNoRef: true }],
+    situation: [{ text: 'P1 MAP 下降', refs: ['E1'] }, { text: '无效引用', refs: ['E9'] }], uncertainties: [{ text: '尿量未知', refs: [] }],
+    patients: { P1: '03床 张三' } } as unknown as AiBrief;
+  assert.deepEqual(layoutOf(b).map(s => s.key), ['situation', 'uncertainties']);
+  assert.equal(copyText(b), '【S 现状】\n1. 03床 张三（P1） MAP 下降\n【不确定】\n1. 尿量未知');
+  assert.equal(hasContent(b), true);
+  assert.equal(resolvePatients('P2 待查', { P1: 'x' }), 'P2 待查');
+  assert.deepEqual(layoutOf(null).map(s => s.key), ['summary', 'gaps', 'suggestions', 'uncertainties']);
+});

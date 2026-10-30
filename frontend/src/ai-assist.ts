@@ -1,5 +1,5 @@
 /** AI-assisted explanation (RAG) contract. Pure helpers only, so they can be unit-tested without Angular. */
-export type AiKind = 'summary' | 'icu05';
+export type AiKind = 'summary' | 'icu05' | 'trend' | 'handover' | 'note' | 'family' | 'alert' | 'ask' | 'ward';
 export type AiStatus = 'ok' | 'disabled' | 'busy' | 'unavailable' | 'invalid_output';
 export interface AiItem { text: string; refs: string[]; urgency?: 'high' | 'medium' | 'low'; }
 export interface AiFact { id: string; category: string; text: string; time: string | null; }
@@ -9,15 +9,59 @@ export interface AiBrief {
   model: string | null; modelRole: string | null; fallbackUsed: boolean; latencyMs: number | null; generatedAt: string;
   summary: AiItem[]; gaps: AiItem[]; suggestions: AiItem[]; uncertainties: AiItem[];
   facts: AiFact[]; knowledge: AiKnowledge[]; droppedCount: number; disclaimer: string; clinicalUseAllowed: false;
+  /** v2: per-kind output layout; absent on v1 responses (falls back to sectionTitles). */
+  layout?: AiSection[]; label?: string; alertId?: string | null; question?: string;
+  /** Ward brief only: pseudonym (P1…) → bed/name, resolved in the browser, never sent to the model. */
+  patients?: Record<string, string>;
+  [section: string]: unknown;
 }
+export interface AiSection { key: string; title: string; allowNoRef: boolean; urgency?: boolean; }
 export interface RefTarget { ref: string; kind: 'fact' | 'knowledge'; title: string; body: string; meta: string; }
-export type SectionKey = 'summary' | 'gaps' | 'suggestions' | 'uncertainties';
+export type SectionKey = string;
 
 export const sectionTitles: { key: SectionKey; title: string }[] = [
   { key: 'summary', title: '要点' }, { key: 'gaps', title: '数据缺口' }, { key: 'suggestions', title: '可考虑核对' }, { key: 'uncertainties', title: '不确定' },
 ];
-export const kindLabel: Record<AiKind, string> = { summary: '病情摘要', icu05: 'ICU-05 缺项分析' };
+export const kindLabel: Record<AiKind, string> = {
+  summary: '病情摘要', icu05: 'ICU-05 缺项分析', trend: '趋势解读', handover: '交班摘要', note: '病程记录草稿', family: '家属沟通要点',
+  alert: '预警解读', ask: '提问', ward: '科室优先级',
+};
+/** Buttons on the patient card, in display order. */
+export const patientKinds: { kind: AiKind; label: string; hint: string; needsIcu05?: boolean }[] = [
+  { kind: 'summary', label: '病情摘要', hint: '异常、数据缺口与可考虑核对的事项' },
+  { kind: 'trend', label: '趋势解读', hint: '近 24 小时指标变化与需警惕的趋势' },
+  { kind: 'handover', label: '交班摘要', hint: 'SBAR 结构，可直接复制交班' },
+  { kind: 'note', label: '病程记录草稿', hint: '客观病程记录，医生修改后使用' },
+  { kind: 'family', label: '家属沟通要点', hint: '通俗语言的沟通提纲' },
+  { kind: 'icu05', label: 'ICU-05 缺项分析', hint: '逐时窗解释 Bundle 判定', needsIcu05: true },
+];
+/** Kinds whose output is meant to be pasted elsewhere. */
+export const copyKinds = new Set<string>(['handover', 'note', 'family', 'summary', 'trend', 'ward']);
 export const urgencyLabel: Record<string, string> = { high: '优先', medium: '', low: '' };
+
+export function layoutOf(b: Pick<AiBrief, 'layout'> | null): AiSection[] {
+  if (b?.layout?.length) return b.layout;
+  return sectionTitles.map(s => ({ key: s.key, title: s.title, allowNoRef: s.key === 'uncertainties', urgency: s.key === 'suggestions' }));
+}
+export function sectionItems(b: AiBrief | null, s: AiSection): AiItem[] {
+  return b ? visibleItems(b[s.key] as AiItem[] | undefined, b, s.allowNoRef) : [];
+}
+/** Ward briefs: replace P# pseudonyms with the bed / name the browser already knows. */
+export function resolvePatients(text: string, patients?: Record<string, string>): string {
+  if (!patients) return text;
+  return text.replace(/\bP(\d{1,2})\b/g, (m) => patients[m] ? patients[m] + '（' + m + '）' : m);
+}
+/** Plain text for the clipboard: section titles + items, references removed. */
+export function copyText(b: AiBrief): string {
+  const out: string[] = [];
+  for (const s of layoutOf(b)) {
+    const items = sectionItems(b, s);
+    if (!items.length) continue;
+    out.push('【' + s.title + '】');
+    items.forEach((i, n) => out.push((n + 1) + '. ' + resolvePatients(i.text, b.patients)));
+  }
+  return out.join('\n');
+}
 
 /** Resolve a reference chip; unknown references resolve to null and are not rendered. */
 export function refTarget(ref: string, b: Pick<AiBrief, 'facts' | 'knowledge'>): RefTarget | null {
@@ -44,10 +88,11 @@ export function statusNote(b: Pick<AiBrief, 'status' | 'message'> | null): strin
 }
 
 export function hasContent(b: AiBrief | null): boolean {
-  return !!b && b.status === 'ok' && sectionTitles.some(s => visibleItems(b[s.key], b, s.key === 'uncertainties').length > 0);
+  return !!b && b.status === 'ok' && layoutOf(b).some(s => sectionItems(b, s).length > 0);
 }
 
 export function acceptsBrief(b: Pick<AiBrief, 'patientId' | 'encounterId'> | null, id: string, encounter: string): boolean {
+  if (b && b.patientId === null && id === '') return true;
   return !!b && b.patientId === id && (!encounter || b.encounterId === encounter);
 }
 
