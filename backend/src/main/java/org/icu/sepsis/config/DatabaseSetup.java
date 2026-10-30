@@ -44,7 +44,8 @@ public class DatabaseSetup implements ApplicationRunner {
             Execution.class,
             History.class,
             Audit.class,
-            Command.class)) {
+            Command.class,
+            org.icu.sepsis.ai.AiInteraction.class)) {
       if (!db.collectionExists(t)) db.createCollection(t);
       db.indexOps(t)
           .ensureIndex(
@@ -52,6 +53,12 @@ public class DatabaseSetup implements ApplicationRunner {
                   .on("department", Sort.Direction.ASC)
                   .on("createdAt", Sort.Direction.DESC));
     }
+    db.indexOps(org.icu.sepsis.ai.AiInteraction.class)
+        .ensureIndex(
+            new Index()
+                .on("patientId", Sort.Direction.ASC)
+                .on("encounterId", Sort.Direction.ASC)
+                .on("createdAt", Sort.Direction.DESC));
     db.indexOps(Assessment.class)
         .ensureIndex(
             new Index()

@@ -1,0 +1,20 @@
+{
+ "docId": "sofa-2",
+ "title": "SOFA-2 评分（2025 更新）",
+ "source": "Ranzani OT, et al. Development and Validation of the Sequential Organ Failure Assessment (SOFA)-2 Score. JAMA 2025;334(23):2090-2103.",
+ "version": "2025",
+ "note": "本系统尚未实现 SOFA-2 计算，仅显示宿主系统已有的 SOFA 评分。",
+ "chunks": [
+  {
+   "id": "sofa2-overview",
+   "section": "概述",
+   "strength": "评分工具",
+   "tags": [
+    "SOFA",
+    "SOFA-2",
+    "器官功能"
+   ],
+   "text": "SOFA-2 为 SOFA 的 2025 年更新版，仍按六个器官系统各 0–4 分评估，并更新了部分阈值与支持治疗（如高级呼吸支持、机械循环支持、肾脏替代）的计分方式；具体阈值以原文为准。本系统当前不计算 SOFA-2。"
+  }
+ ]
+}

@@ -19,9 +19,11 @@ public class SepsisAssessmentService {
   private final RuleConfig config;
   private final ObjectProvider<SmartCareSourceReader> reader;
   private final String mode;
+  private final ObjectProvider<org.icu.sepsis.ai.AiProperties> ai;
   public SepsisAssessmentService(ClinicalDataProvider data, ClinicalRules validation, RuleConfig config,
-      ObjectProvider<SmartCareSourceReader> reader, @Value("${app.source.mode:demo}") String mode) {
-    this.data=data; this.validation=validation; this.config=config; this.reader=reader; this.mode=mode;
+      ObjectProvider<SmartCareSourceReader> reader, @Value("${app.source.mode:demo}") String mode,
+      ObjectProvider<org.icu.sepsis.ai.AiProperties> ai) {
+    this.data=data; this.validation=validation; this.config=config; this.reader=reader; this.mode=mode; this.ai=ai;
   }
   public Map<String, Object> assess(Patient p, Instant asOf) {
     Instant now=asOf == null ? Instant.now() : asOf;
@@ -93,7 +95,9 @@ public class SepsisAssessmentService {
       BundleModels.item("REASSESS","容量 / 灌注再评估","unknown","需明确的再评估记录，不自动标为完成",null)));
     out.put("taskNote","本页为只读证据核对，未建立院内批准的 T0 与治疗时限，不自动生成治疗任务。");
     out.put("model",Map.of("configured",false,"label","未配置预测模型","message","不生成风险分或风险百分比"));
-    out.put("ai",Map.of("configured",false,"label","未配置摘要服务"));
+    org.icu.sepsis.ai.AiProperties aiProps=ai==null?null:ai.getIfAvailable();
+    boolean aiOn=aiProps!=null&&aiProps.chatConfigured();
+    out.put("ai",Map.of("configured",aiOn,"label",aiOn?"AI 辅助已配置（按需生成，需医生核对）":"未配置 AI 辅助"));
     return out;
   }
   private Double value(Map<String,Observation> m,String code) { return m.containsKey(code)?m.get(code).value:null; }

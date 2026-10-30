@@ -1,0 +1,45 @@
+{
+ "docId": "sepsis-3",
+ "title": "Sepsis-3 脓毒症与感染性休克定义",
+ "source": "Singer M, et al. The Third International Consensus Definitions for Sepsis and Septic Shock (Sepsis-3). JAMA 2016;315(8):801-810. doi:10.1001/jama.2016.0287",
+ "version": "2016",
+ "url": "https://doi.org/10.1001/jama.2016.0287",
+ "note": "中文为人工摘要。",
+ "chunks": [
+  {
+   "id": "sep3-def",
+   "section": "定义",
+   "strength": "共识定义",
+   "tags": [
+    "定义",
+    "脓毒症",
+    "SOFA"
+   ],
+   "text": "脓毒症：宿主对感染反应失调导致危及生命的器官功能障碍；临床上以感染相关 SOFA 评分较基线急性升高 ≥2 分作为器官功能障碍的判定。"
+  },
+  {
+   "id": "sep3-shock",
+   "section": "定义",
+   "strength": "共识定义",
+   "tags": [
+    "定义",
+    "感染性休克",
+    "乳酸",
+    "MAP"
+   ],
+   "text": "感染性休克：脓毒症的亚型，经充分液体复苏后仍需血管升压药维持 MAP ≥65 mmHg，且血乳酸 >2 mmol/L。"
+  },
+  {
+   "id": "sep3-qsofa",
+   "section": "qSOFA",
+   "strength": "共识（床旁提示工具）",
+   "tags": [
+    "qSOFA",
+    "呼吸",
+    "意识",
+    "收缩压"
+   ],
+   "text": "qSOFA 三项：呼吸频率 ≥22 次/分、意识改变、收缩压 ≤100 mmHg，≥2 项提示预后不良风险；它不是脓毒症诊断标准，SSC 2026 不推荐将其作为单一筛查工具。"
+  }
+ ]
+}

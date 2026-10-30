@@ -45,6 +45,29 @@ app:
   nurse-password: ${NURSE_PASSWORD:}
   quality-password: ${QUALITY_PASSWORD:}
   department: ${AUTHORIZED_DEPARTMENT:DEMO-ICU}
+  # Hospital-intranet OpenAI-compatible model gateway. Off by default; the workbench works identically without it.
+  ai:
+    enabled: ${AI_ENABLED:false}
+    base-url: ${AI_BASE_URL:}
+    api-key: ${AI_API_KEY:}
+    chat-path: ${AI_CHAT_PATH:/v1/chat/completions}
+    embeddings-path: ${AI_EMBEDDINGS_PATH:/v1/embeddings}
+    models:
+      fast: ${AI_MODEL_FAST:}
+      reasoning: ${AI_MODEL_REASONING:}
+      embedding: ${AI_MODEL_EMBEDDING:}
+    connect-timeout-ms: ${AI_CONNECT_TIMEOUT_MS:3000}
+    fast-timeout-ms: ${AI_FAST_TIMEOUT_MS:25000}
+    reasoning-timeout-ms: ${AI_REASONING_TIMEOUT_MS:90000}
+    max-tokens: ${AI_MAX_TOKENS:1500}
+    max-concurrent: ${AI_MAX_CONCURRENT:4}
+    temperature: ${AI_TEMPERATURE:0.2}
+    json-mode: ${AI_JSON_MODE:true}
+    tls-insecure: ${AI_TLS_INSECURE:false}
+    tls-ca-file: ${AI_TLS_CA_FILE:}
+    store-prompt: ${AI_STORE_PROMPT:true}
+    knowledge-dir: ${AI_KNOWLEDGE_DIR:}
+    time-zone: ${AI_TIME_ZONE:Asia/Shanghai}
   rules:
     version: draft-demo-v1
     approval: DRAFT_DEMO_ONLY
