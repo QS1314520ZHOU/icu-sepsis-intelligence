@@ -7,6 +7,7 @@ import { ClinicalReview, Evidence, featureLabel, matchesPatient } from './clinic
 import { Level, ago, baseCode, direction, hoursSince, level, levelRank } from './clinical-flags';
 import { Measure, measures, pointsFor } from './trends';
 import { Icu05Card, Icu05Result } from './icu05-card';
+import { AiAssistCard } from './ai-assist-card';
 
 export interface SepsisStatus {
   patientId: string; level: Level | 'unknown'; summary: string;
@@ -24,7 +25,7 @@ const tileName: Record<string, string> = { MAP: '平均动脉压', MAP_IBP: '平
 const units: Record<string, string> = { MAP: 'mmHg', SBP: 'mmHg', LACTATE: 'mmol/L', RR: '次/分', GCS: '分', HR: '次/分', TEMP: '°C', SPO2: '%' };
 
 @Component({
-  selector: 'sepsis-panel', standalone: true, imports: [CommonModule, ClinicalTrends, UiIcon, Icu05Card],
+  selector: 'sepsis-panel', standalone: true, imports: [CommonModule, ClinicalTrends, UiIcon, Icu05Card, AiAssistCard],
   template: `<section class="clinical-review sx-overview" aria-label="患者脓毒症概览" [attr.aria-busy]="loading" [class.nurse-first]="nurseFirst">
     <header class="sx-head" [attr.data-level]="headLevel">
       <div class="sx-head-main">
@@ -85,6 +86,7 @@ const units: Record<string, string> = { MAP: 'mmHg', SBP: 'mmHg', LACTATE: 'mmol
           <tr class="sx-infection" [attr.data-level]="infectionHit ? 'abnormal' : 'none'"><th scope="row">感染</th><td class="sx-o-item">诊断 / 培养</td><td class="sx-o-value" colspan="2">{{ infectionHit ? '诊断含感染相关描述' : '未取得感染证据' }}<small> · 培养结果未接入</small></td></tr>
         </tbody></table>
       </section>
+      <ai-assist-card *ngIf="canAssist" [patientId]="patientId" [encounterId]="encounterId" [configured]="!!data?.ai?.configured" [icu05Available]="!!icu05?.available"/>
     </div>
 
     <details class="review-card sx-fold" *ngIf="data?.available" (toggle)="showTrends = $any($event.target).open">
@@ -106,6 +108,7 @@ export class SepsisPanel implements OnChanges, OnDestroy {
   @Output() openTasks = new EventEmitter<void>();
   @Output() status = new EventEmitter<SepsisStatus>();
   api = inject(Api);
+  get canAssist() { return this.api.has('DOCTOR') || this.api.has('NURSE'); }
   data: ClinicalReview | null = null;
   icu05: Icu05Result | null = null;
   observations: Observation[] = [];
@@ -184,7 +187,8 @@ export class SepsisPanel implements OnChanges, OnDestroy {
     this.sofa = sofa.at(-1) || null;
     this.sofaDelta = sofa.length > 1 ? (sofa.at(-1)!.value! - sofa[0].value!) : null;
     this.limits = [...(d.sourceWarnings || []), ...(d.contextEvidence?.length ? ['未确认住院归属的检验报告仅列出，不参与提示和集束化判断。'] : []),
-      '提示颜色为显示阈值，不构成诊断；预测模型与摘要服务未配置。'];
+      d.ai?.configured ? '提示颜色为显示阈值，不构成诊断；预测模型未配置；AI 辅助解释按需生成，需医生核对原始记录。'
+        : '提示颜色为显示阈值，不构成诊断；预测模型与 AI 辅助未配置。'];
   }
   private tile(code: string, latest: Map<string, Evidence>, candidates: Map<string, Evidence>, asOf: number, sbpCode?: string): Tile {
     const e = latest.get(code) || null, base = baseCode(code);
