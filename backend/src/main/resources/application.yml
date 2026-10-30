@@ -120,6 +120,14 @@ app:
     knowledge-dir: ${AI_KNOWLEDGE_DIR:}
     time-zone: ${AI_TIME_ZONE:Asia/Shanghai}
 
+  # 自动预警：床旁筛查 / ICU-05 门控判定为"疑似休克"或"感染 + 异常"时生成待处理预警。
+  alerts:
+    auto: ${ALERTS_AUTO:true}
+    scan-ms: ${ALERTS_SCAN_MS:600000}          # 后台巡检间隔（默认 10 分钟）
+    scan-days: ${ALERTS_SCAN_DAYS:30}          # 只巡检近 N 天入科患者
+    reject-suppress-hours: ${ALERTS_REJECT_SUPPRESS_HOURS:6}
+    close-suppress-minutes: ${ALERTS_CLOSE_SUPPRESS_MINUTES:60}
+
   # 筛查/复核显示阈值（RuleConfig）。规则自动判定，不是诊断。
   rules:
     version: draft-demo-v1

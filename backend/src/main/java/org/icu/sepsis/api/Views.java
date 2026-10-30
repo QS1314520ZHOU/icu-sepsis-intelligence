@@ -174,6 +174,12 @@ public final class Views {
             a.acknowledgedAt,
             "closedAt",
             a.closedAt));
+    v.put("kind", a.kind);
+    v.put("source", a.source);
+    v.put("trigger", a.trigger);
+    v.put("patientLabel", a.patientLabel);
+    v.put("bed", a.bed);
+    v.put("lastSeenAt", a.lastSeenAt);
     return v;
   }
 
