@@ -324,6 +324,35 @@ export class SepsisPanel implements OnChanges, OnDestroy {
     const renalNote = urine && urine.value != null
       ? '尿量单次记录 ' + urine.value + (urine.unit || ' ml') + ' · 采样间隔数小时，非连续每小时'
       : '尿量源未接入或近 24h 无记录';
+    const renalValue = crea && crea.value != null
+      ? String(crea.value) + (crea.unit ? ' ' + crea.unit : '') +
+        (urine && urine.value != null ? ' · 尿量 ' + urine.value + (urine.unit || ' ml') : '')
+      : urine && urine.value != null
+        ? '尿量 ' + urine.value + (urine.unit || ' ml')
+        : '—';
+    const renalRow: OrganRow = crea && crea.value != null
+      ? organ('肾脏', '肌酐 / 尿量', crea, renalValue, renalNote)
+      : urine && urine.value != null
+        ? {
+            system: '肾脏',
+            item: '肌酐 / 尿量',
+            value: renalValue,
+            level: 'none',
+            note: renalNote,
+            evidence: {
+              code: 'URINE_OUTPUT',
+              value: urine.value as number,
+              unit: urine.unit || 'ml',
+              eventTime: urine.eventTime,
+              sourceSystem: urine.sourceSystem,
+              sourceRecordId: urine.sourceRecordId,
+              sourceParameterCode: urine.sourceParameterCode,
+              clinicalUse: urine.clinicalUse,
+              qualityNote: urine.qualityNote,
+              timeBasis: urine.timeBasis,
+            },
+          }
+        : { system: '肾脏', item: '肌酐 / 尿量', value: '—', level: 'none', note: renalNote, evidence: null };
 
     return [
       {
@@ -347,7 +376,7 @@ export class SepsisPanel implements OnChanges, OnDestroy {
       organ('呼吸', 'PaO₂/FiO₂', pf, '—', pfNote),
       organ('凝血', '血小板', plt, '—', ''),
       organ('肝脏', '胆红素', tbil, '—', ''),
-      organ('肾脏', '肌酐 / 尿量', crea, urine ? urine.value + ' ml 尿量' : '—', renalNote),
+      renalRow,
     ];
   }
 }

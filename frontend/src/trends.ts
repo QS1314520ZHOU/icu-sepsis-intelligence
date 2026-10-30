@@ -146,6 +146,11 @@ export function label(code: string): string {
         SOFA: 'SOFA 评分',
         APACHEII: 'APACHE II',
         DIAGNOSIS: '感染相关记录',
+        URINE_OUTPUT: '尿量',
+        PF_RATIO: '氧合指数 P/F',
+        PLT: '血小板',
+        TBIL: '总胆红素',
+        CREA: '肌酐',
       } as Record<string, string>
     )[code] ||
     code

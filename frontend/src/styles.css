@@ -813,6 +813,72 @@ body {
   min-width: 0;
   background: linear-gradient(180deg, #fff 75%, #fbfcfe);
 }
+.trend-canvas {
+  position: relative;
+  line-height: 0;
+}
+.trend-canvas svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.trend-dot {
+  cursor: pointer;
+  transition: r 0.12s ease;
+}
+.trend-dot:hover,
+.trend-dot.on,
+.trend-dot:focus {
+  r: 5.5;
+  outline: none;
+}
+.point-tip {
+  position: absolute;
+  z-index: 3;
+  transform: translate(-50%, -100%);
+  pointer-events: none;
+  min-width: 108px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  background: #1f2a3d;
+  color: #f5f7fb;
+  box-shadow: 0 6px 16px #1f2a3d33;
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: center;
+  white-space: nowrap;
+}
+.point-tip::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -4px;
+  width: 8px;
+  height: 8px;
+  background: #1f2a3d;
+  transform: translateX(-50%) rotate(45deg);
+  border-radius: 1px;
+}
+.point-tip b {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+.point-tip b small {
+  font-size: 11px;
+  font-weight: 400;
+  opacity: 0.75;
+  margin-left: 3px;
+}
+.point-tip span {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  opacity: 0.82;
+  font-variant-numeric: tabular-nums;
+}
 .trend-title {
   display: flex;
   align-items: center;

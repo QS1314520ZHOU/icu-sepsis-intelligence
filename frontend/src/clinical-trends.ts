@@ -2,7 +2,10 @@ import { CommonModule } from '@angular/common';
 import { Component, EventEmitter, Input, Output, OnChanges, SimpleChanges } from '@angular/core';
 import { UiIcon } from './ui-icon';
 import type { Observation } from './api';
-import { measuresFor, pointsFor, segments, stale, timeLabel, evidenceNote, Measure } from './trends';
+import { measuresFor, pointsFor, segments, stale, label as trendLabel, Measure } from './trends';
+
+/** Display timezone: hospital local (UTC+8). Independent of browser locale. */
+const TZ = 'Asia/Shanghai';
 
 interface Plot {
   m: Measure;
@@ -13,6 +16,15 @@ interface Plot {
   last?: Observation;
   stale: boolean;
   excluded: number;
+}
+
+interface HoverTip {
+  o: Observation;
+  /** SVG viewBox coords for positioning the tip. */
+  cx: number;
+  cy: number;
+  color: string;
+  label: string;
 }
 
 @Component({
@@ -35,7 +47,7 @@ interface Plot {
         </button>
       </div>
     </div>
-    <div class="chart-caption"><span><ui-icon name="clock"/>{{ from | date:'MM-dd HH:mm' }} — {{ end | date:'MM-dd HH:mm' }}</span><span class="report-chip" *ngIf="contextCount">{{ contextCount }} 条候选报告不参与绘图</span><button class="text-button" *ngIf="embedded" (click)="openRecords.emit()">记录单 <ui-icon name="arrow"/></button></div>
+    <div class="chart-caption"><span><ui-icon name="clock"/>{{ from | date:'MM-dd HH:mm':tz }} — {{ end | date:'MM-dd HH:mm':tz }}</span><span class="report-chip" *ngIf="contextCount">{{ contextCount }} 条候选报告不参与绘图</span><button class="text-button" *ngIf="embedded" (click)="openRecords.emit()">记录单 <ui-icon name="arrow"/></button></div>
     <div class="read-limit" *ngIf="items.length >= 2000"><ui-icon name="info"/>读取量较大，当前结果可能截断；不代表所选时段完整数据。</div>
     <div class="chart-loading" *ngIf="busy" role="status"><span class="spinner"></span>正在读取所选时段…</div>
     <div class="trend-empty-summary" *ngIf="!hasPlottable && !busy">
@@ -43,7 +55,7 @@ interface Plot {
       <div class="empty-chart-action"><ui-icon name="empty"/><div><strong>近 {{ rangeLabel(hours) }}暂无可绘制记录</strong><p>缺项不代表正常，可扩大范围查找已有记录</p></div><div class="empty-chart-buttons"><button class="primary" (click)="expandRange()">{{ compact ? '查看历史记录' : hours < 168 ? '查看近 7 天' : hours < 720 ? '查看近 30 天' : '查看原始记录' }} <ui-icon name="arrow"/></button><button (click)="openRecords.emit()">查看记录单</button></div></div>
     </div>
     <div class="trend-grid" *ngIf="hasPlottable && !busy">
-      <article class="trend-tile" *ngFor="let p of plots">
+      <article class="trend-tile" *ngFor="let p of plots" (pointerleave)="hideTip()">
         <div class="trend-title">
           <div>
             <span>{{ p.m.label }}</span>
@@ -54,82 +66,76 @@ interface Plot {
         </div>
         <div class="trend-reading" >
           <strong>{{ p.last?.value ?? '—' }}</strong><small>{{ p.m.unit }}</small>
-          <span *ngIf="p.last">{{ p.last.eventTime | date: 'MM-dd HH:mm' }}</span>
+          <span *ngIf="p.last">{{ p.last.eventTime | date: 'MM-dd HH:mm':tz }}</span>
         </div>
-        <svg
-          *ngIf="p.points.length"
-          viewBox="0 0 320 158"
-          role="img"
-          [attr.aria-label]="p.m.label + ' ' + p.points.length + ' 次观测'"
-        >
-          <g *ngFor="let tick of [0, 1, 2]">
-            <line
-              x1="36"
-              x2="310"
-              [attr.y1]="20 + tick * 48"
-              [attr.y2]="20 + tick * 48"
-              stroke="#e5ebf2"
-              stroke-dasharray="3 4"
-            />
-            <text x="29" [attr.y]="24 + tick * 48" text-anchor="end" fill="#7b8794" font-size="12">
-              {{ p.high - ((p.high - p.low) * tick) / 2 | number: '1.0-1' }}
-            </text>
-          </g>
-          <path
-            *ngFor="let path of p.paths"
-            [attr.d]="path"
-            fill="none"
-            [attr.stroke]="p.m.color"
-            stroke-width="2"
-            stroke-linejoin="round"
-            stroke-linecap="round"
-          />
-          <circle
-            *ngFor="let o of p.points"
-            [attr.cx]="x(o)"
-            [attr.cy]="y(o, p)"
-            r="3"
-            [attr.fill]="p.m.color"
-            tabindex="0"
-            role="button"
-            (click)="choose(o)"
-            (keydown.enter)="choose(o)"
+        <div class="trend-canvas" *ngIf="p.points.length">
+          <svg
+            viewBox="0 0 320 158"
+            role="img"
+            [attr.aria-label]="p.m.label + ' ' + p.points.length + ' 次观测'"
           >
-            <title>
-              {{ o.value }} {{ o.unit }} · {{ o.eventTime | date: 'MM-dd HH:mm' }}
-              {{ o.sourceSystem }}
-            </title>
-          </circle>
-          <text x="36" y="145" fill="#7b8794" font-size="12">{{ from | date: 'MM-dd HH:mm' }}</text>
-          <text x="310" y="145" text-anchor="end" fill="#7b8794" font-size="12">
-            {{ end | date: 'MM-dd HH:mm' }}
-          </text>
-        </svg>
+            <g *ngFor="let tick of [0, 1, 2]">
+              <line
+                x1="36"
+                x2="310"
+                [attr.y1]="20 + tick * 48"
+                [attr.y2]="20 + tick * 48"
+                stroke="#e5ebf2"
+                stroke-dasharray="3 4"
+              />
+              <text x="29" [attr.y]="24 + tick * 48" text-anchor="end" fill="#7b8794" font-size="12">
+                {{ p.high - ((p.high - p.low) * tick) / 2 | number: '1.0-1' }}
+              </text>
+            </g>
+            <path
+              *ngFor="let path of p.paths"
+              [attr.d]="path"
+              fill="none"
+              [attr.stroke]="p.m.color"
+              stroke-width="2"
+              stroke-linejoin="round"
+              stroke-linecap="round"
+            />
+            <circle
+              *ngFor="let o of p.points"
+              class="trend-dot"
+              [attr.cx]="x(o)"
+              [attr.cy]="y(o, p)"
+              r="3.5"
+              [attr.fill]="p.m.color"
+              [class.on]="hover?.o === o"
+              (pointerenter)="showTip(o, p)"
+              (focus)="showTip(o, p)"
+              (blur)="hideTip()"
+              tabindex="0"
+              role="img"
+              [attr.aria-label]="fmtValue(o) + ' ' + fmtTime(o)"
+            />
+            <text x="36" y="145" fill="#7b8794" font-size="12">{{ from | date: 'MM-dd HH:mm':tz }}</text>
+            <text x="310" y="145" text-anchor="end" fill="#7b8794" font-size="12">
+              {{ end | date: 'MM-dd HH:mm':tz }}
+            </text>
+          </svg>
+          <div
+            class="point-tip"
+            *ngIf="hover"
+            [style.left.%]="tipLeft(hover)"
+            [style.top]="tipTop(hover)"
+            [attr.data-color]="hover.color"
+            role="status"
+          >
+            <b>{{ fmtValue(hover.o) }}</b>
+            <span>{{ fmtTime(hover.o) }}</span>
+          </div>
+        </div>
         <div *ngIf="!p.points.length" class="chart-empty">该时间窗无观测</div>
         <div class="trend-foot">
           <span>{{ p.points.length }} 次观测<span *ngIf="p.excluded"> · {{ p.excluded }} 条未绘制</span></span>
-          <button *ngIf="p.last" (click)="choose(p.last)">来源 <ui-icon name="arrow"/></button>
+          <button *ngIf="p.last" type="button" (click)="openRecords.emit()">记录单 <ui-icon name="arrow"/></button>
         </div>
       </article>
     </div>
-    <div class="point-evidence" *ngIf="selected" role="status">
-      <div class="section-head">
-        <strong>{{ selected.parameterCode }}</strong
-        ><button (click)="selected = null">关闭</button>
-      </div>
-      <dl>
-        <dt>数值</dt>
-        <dd>{{ selected.value }} {{ selected.unit }}</dd>
-        <dt>{{ timeLabel(selected.timeBasis) }}</dt>
-        <dd>{{ selected.eventTime | date: 'MM-dd HH:mm' }}</dd>
-        <dt>来源</dt>
-        <dd>{{ selected.sourceSystem }}</dd>
-        <dt>记录 ID</dt><dd>{{ selected.sourceRecordId }}</dd>
-        <dt *ngIf="selected.sourceParameterCode">源指标</dt><dd *ngIf="selected.sourceParameterCode">{{ selected.sourceParameterCode }}</dd>
-        <dt *ngIf="evidenceNote(selected)">证据限制</dt><dd *ngIf="evidenceNote(selected)">{{ evidenceNote(selected) }}</dd>
-      </dl>
-    </div>
-    <details class="trend-method-note"><summary><ui-icon name="info"/>图表说明</summary><p>有创 / 无创分图，不自动择优；住院归属未确认的报告不绘制。纵轴独立，勿跨图比较斜率；不插值，缺测断线。点选记录可查看时间与来源。</p></details>
+    <details class="trend-method-note"><summary><ui-icon name="info"/>图表说明</summary><p>有创 / 无创分图，不自动择优；住院归属未确认的报告不绘制。纵轴独立，勿跨图比较斜率；不插值，缺测断线。悬停数据点可查看时间与数值（东八区）。</p></details>
   </section>`,
 })
 export class ClinicalTrends implements OnChanges {
@@ -143,31 +149,75 @@ export class ClinicalTrends implements OnChanges {
   @Output() requestRange = new EventEmitter<number>();
   @Output() openHistory = new EventEmitter<void>();
   @Output() openRecords = new EventEmitter<void>();
-  rangeLabel(h:number) { return h >= 72 ? (h / 24) + ' 天' : h + ' 小时'; }
-  get contextCount() { return this.items.filter(o => o.clinicalUse === 'context_only').length; }
-  expandRange() { if(this.compact) this.openHistory.emit(); else if(this.hours < 168) this.setHours(168); else if(this.hours < 720) this.setHours(720); else this.openRecords.emit(); }
-  timeLabel = timeLabel; evidenceNote = evidenceNote;
+  readonly tz = TZ;
+  rangeLabel(h: number) { return h >= 72 ? h / 24 + ' 天' : h + ' 小时'; }
+  get contextCount() { return this.items.filter((o) => o.clinicalUse === 'context_only').length; }
+  expandRange() {
+    if (this.compact) this.openHistory.emit();
+    else if (this.hours < 168) this.setHours(168);
+    else if (this.hours < 720) this.setHours(720);
+    else this.openRecords.emit();
+  }
+  trendLabel = trendLabel;
   hours = 12;
   hourOptions = [6, 12, 24, 72, 168];
   end = Date.now();
   from = this.end - this.hours * 3600000;
   plots: Plot[] = [];
-  selected: Observation | null = null;
-  get hasPlottable() { return this.plots.some(p => p.points.length > 0); }
+  hover: HoverTip | null = null;
+  get hasPlottable() { return this.plots.some((p) => p.points.length > 0); }
   ngOnChanges(changes: SimpleChanges) {
     this.end = Date.parse(this.asOf) || Date.now();
     if (changes['windowHours']) this.hours = this.windowHours;
-    this.hourOptions = this.compact ? [6,12,24] : [6,12,24,72,168,720];
+    this.hourOptions = this.compact ? [6, 12, 24] : [6, 12, 24, 72, 168, 720];
+    this.hideTip();
     this.refresh();
   }
   setHours(h: number) {
-    this.selected = null;
+    this.hideTip();
     if (h > this.availableHours) { this.requestRange.emit(h); return; }
     this.hours = h;
     this.refresh();
   }
-  choose(o: Observation) {
-    this.selected = o;
+  showTip(o: Observation, p: Plot) {
+    this.hover = {
+      o,
+      cx: this.x(o),
+      cy: this.y(o, p),
+      color: p.m.color,
+      label: p.m.label,
+    };
+  }
+  hideTip() { this.hover = null; }
+  /** Horizontal position as % of tile width (SVG viewBox 0–320). */
+  tipLeft(h: HoverTip) {
+    const pct = (h.cx / 320) * 100;
+    return Math.min(82, Math.max(12, pct));
+  }
+  /** Vertical position as % of canvas height; sit above the point when there is room. */
+  tipTop(h: HoverTip) {
+    const pct = (h.cy / 158) * 100;
+    return (pct < 30 ? pct + 4 : pct - 16) + '%';
+  }
+  fmtValue(o: Observation) {
+    const v = o.value == null ? '—' : String(o.value);
+    return o.unit ? v + ' ' + o.unit : v;
+  }
+  /** Hospital local time (Asia/Shanghai), not browser timezone. */
+  fmtTime(o: Observation) {
+    const d = new Date(o.eventTime);
+    if (Number.isNaN(d.getTime())) return '';
+    const parts = new Intl.DateTimeFormat('zh-CN', {
+      timeZone: TZ,
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }).formatToParts(d);
+    const get = (t: string) => parts.find((x) => x.type === t)?.value ?? '';
+    return `${get('month')}-${get('day')} ${get('hour')}:${get('minute')}:${get('second')}`;
   }
   x(o: Observation) {
     return 36 + ((Date.parse(o.eventTime) - this.from) / (this.end - this.from)) * 274;
