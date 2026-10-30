@@ -145,12 +145,12 @@ public class AiAssistService {
     spec(new Spec("handover", "交班摘要", "fast", false, true,
         "任务：按 SBAR 结构写一份供医护交班的摘要。S：当前最主要的问题与异常；B：与本次脓毒症/休克筛查相关的背景（感染线索、升压药、ICU-05 状态）；A：对趋势和数据缺口的客观评估；R：接班者需要重点关注和核对的事项。语句简短，可直接口头交接。",
         s("situation", "S 现状", 3), s("background", "B 背景", 3), s("assessment", "A 评估", 4), u("recommendation", "R 交班关注", 4), UNCERTAIN));
-    spec(new Spec("note", "病程记录草稿", "fast", true, true,
+    spec(new Spec("note", "病程记录草稿", "fast", false, true,
         "任务：起草一段 ICU 病程记录的客观部分，供医生修改后使用。病情记录：按时间描述关键生命体征、乳酸、升压药与 ICU-05 执行情况；分析：客观说明与筛查规则的关系（不下诊断）；拟核对/评估：列出需要补充或复核的事项。使用病历书面语，不写具体剂量。",
         s("record", "病情记录", 5), s("analysis", "分析", 4), u("plan", "拟核对 / 评估", 4), UNCERTAIN));
     spec(new Spec("family", "家属沟通要点", "fast", false, true,
         "任务：为医生准备与家属沟通的要点。使用通俗易懂的语言，避免英文缩写和专业术语（必要时用一句话解释）；说明目前情况、医护正在关注什么、接下来可能需要的检查或处理方向；不承诺预后，不给出概率，不做诊断结论。",
-        s("status", "目前情况", 3), s("focus", "正在关注", 3), s("notes", "沟通提示", 3), UNCERTAIN));
+        s("current", "目前情况", 3), s("focus", "正在关注", 3), s("notes", "沟通提示", 3), UNCERTAIN));
     spec(new Spec("alert", "预警解读", "fast", false, true,
         "任务：解释这条自动预警。说明触发的具体依据（引用对应事实）；列出需要在原始记录中核对的内容（如血压通道、乳酸采样时间、升压药是否在用、感染依据是否成立）以排除误报；给出可考虑的下一步评估方向（引用指南）。",
         s("why", "触发依据", 3), s("verify", "需核对（排除误报）", 4), u("next", "可考虑的下一步", 4), UNCERTAIN));
@@ -161,6 +161,9 @@ public class AiAssistService {
         "任务：根据全科室当前未结束的自动预警，给出建议优先查看的患者顺序（用 P# 编号指代患者）及理由；归纳多名患者共同存在的问题（如乳酸未复测、预警长时间未处理）。不做诊断。",
         u("priority", "建议优先查看", 6), s("pattern", "共性问题", 3), UNCERTAIN));
   }
+  static final Set<String> RESERVED = Set.of("interactionId", "patientId", "encounterId", "kind", "label", "status", "message", "model",
+      "modelRole", "fallbackUsed", "latencyMs", "generatedAt", "promptVersion", "alertId", "layout", "facts", "knowledge", "droppedCount",
+      "disclaimer", "clinicalUseAllowed", "patients", "question");
   /** Kinds a client may request through /patients/{id}/ai/brief. */
   public static final Set<String> PATIENT_KINDS = Set.of("summary", "icu05", "trend", "handover", "note", "family");
 
@@ -294,8 +297,9 @@ public class AiAssistService {
           attempt.put("model", m[1]); attempt.put("role", m[0]);
           rec.attempts.add(attempt);
           try {
-            LlmClient.Reply r = call(m[1], messages, Integer.parseInt(m[2]));
+            LlmClient.Reply r = call(m[1], messages, Integer.parseInt(m[2]), tokens(spec));
             attempt.put("latencyMs", r.latencyMs); attempt.put("finishReason", r.finishReason);
+            rec.lastFinishReason = r.finishReason;
             rec.rawResponse = clip(r.content, 20000);
             List<Map<String, Object>> dropped = new ArrayList<>();
             Map<String, Object> parsed = validate(r.content, spec, facts, chunks, kref, dropped);
@@ -345,7 +349,10 @@ public class AiAssistService {
     out.put("alertId", rec.alertId);
     out.put("layout", spec.sections.stream().map(Section::view).collect(Collectors.toList()));
     for (String legacy : SECTIONS) out.put(legacy, List.of());
-    for (Section sec : spec.sections) out.put(sec.key, rec.result == null ? List.of() : rec.result.getOrDefault(sec.key, List.of()));
+    for (Section sec : spec.sections) {
+      if (RESERVED.contains(sec.key)) throw new IllegalStateException("section key collides with response field: " + sec.key);
+      out.put(sec.key, rec.result == null ? List.of() : rec.result.getOrDefault(sec.key, List.of()));
+    }
     out.put("facts", rec.facts);
     out.put("knowledge", rec.knowledgeFull);
     out.put("droppedCount", rec.droppedKept);
@@ -354,12 +361,21 @@ public class AiAssistService {
     return out;
   }
 
-  private LlmClient.Reply call(String model, List<LlmClient.Message> messages, int timeout) {
+  /** Long narrative kinds need more output room; reasoning models also spend tokens before the JSON. */
+  int tokens(Spec spec) {
+    int base = props.maxTokens;
+    switch (spec.kind) {
+      case "note": case "handover": case "icu05": case "ward": return Math.max(base, 3000);
+      default: return Math.max(base, 2000);
+    }
+  }
+
+  private LlmClient.Reply call(String model, List<LlmClient.Message> messages, int timeout, int maxTokens) {
     try {
-      return llm.chat(model, messages, timeout, props.jsonMode);
+      return llm.chat(model, messages, timeout, props.jsonMode, maxTokens);
     } catch (LlmClient.LlmException e) {
       // Some OpenAI-compatible servers reject response_format; retry once in plain mode.
-      if (props.jsonMode && "http_400".equals(e.kind)) return llm.chat(model, messages, timeout, false);
+      if (props.jsonMode && "http_400".equals(e.kind)) return llm.chat(model, messages, timeout, false, maxTokens);
       throw e;
     }
   }
@@ -369,7 +385,13 @@ public class AiAssistService {
       case "ok": return dropped == 0 ? "" : "已过滤 " + dropped + " 条缺少有效依据、数值不符或含具体剂量的内容";
       case "disabled": return "AI 辅助未配置，仅列出本次核对依据与相关知识条目。";
       case "busy": return "AI 服务繁忙，请稍后重试。";
-      case "invalid_output": return "模型输出未通过格式与引用校验，未展示。";
+      case "invalid_output": {
+        if ("length".equals(r.lastFinishReason)) return "模型输出过长被截断，未展示；可重试或调大 AI_MAX_TOKENS。";
+        Map<String, Integer> why = new LinkedHashMap<>();
+        for (Map<String, Object> d : r.dropped) why.merge(String.valueOf(d.get("reason")).replaceAll("数值 .* 不在依据中", "数值不在依据中"), 1, Integer::sum);
+        if (why.isEmpty()) return "模型输出不是有效 JSON，未展示；可重试。";
+        return "模型输出未通过引用校验（" + why.entrySet().stream().map(e -> e.getKey() + " " + e.getValue() + " 条").collect(Collectors.joining("，")) + "），未展示；可重试。";
+      }
       default: return "AI 服务暂不可用（" + (r.errorKind == null ? "unknown" : r.errorKind) + "），规则判定不受影响。";
     }
   }
@@ -515,7 +537,30 @@ public class AiAssistService {
     String s = content.trim().replaceAll("(?s)^```(?:json)?\\s*", "").replaceAll("(?s)\\s*```$", "");
     int a = s.indexOf('{'), b = s.lastIndexOf('}');
     if (a < 0 || b <= a) return null;
-    try { return json.readTree(s.substring(a, b + 1)); } catch (Exception e) { return null; }
+    try { return json.readTree(s.substring(a, b + 1)); } catch (Exception e) { return repair(s.substring(a)); }
+  }
+
+  /** Truncated output (max_tokens hit): keep every complete item and close the open brackets. */
+  JsonNode repair(String s) {
+    Deque<Character> stack = new ArrayDeque<>();
+    boolean str = false, esc = false;
+    int cut = -1; String closers = null;
+    for (int i = 0; i < s.length(); i++) {
+      char c = s.charAt(i);
+      if (str) { if (esc) esc = false; else if (c == '\\') esc = true; else if (c == '"') str = false; continue; }
+      if (c == '"') str = true;
+      else if (c == '{' || c == '[') stack.push(c);
+      else if (c == '}' || c == ']') {
+        if (stack.isEmpty()) break;
+        stack.pop();
+        StringBuilder close = new StringBuilder();
+        for (char o : stack) close.append(o == '{' ? '}' : ']');
+        cut = i + 1; closers = close.toString();
+        if (stack.isEmpty()) break;
+      }
+    }
+    if (cut < 0) return null;
+    try { return json.readTree(s.substring(0, cut) + closers); } catch (Exception e) { return null; }
   }
 
   public Map<String, Object> feedback(String id, String verdict, String reason, String edited, String actor) {
