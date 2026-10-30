@@ -31,16 +31,16 @@ function icu05(id){
  if(icu05Mode==='off')return{...base,available:false,message:'当前数据源未接入',status:'unavailable',statusLabel:'未接入',windows:[]};
  const T=now-4*3600000,at=m=>new Date(T+m*60000).toISOString(),it=(code,label,value,m,detail='',reason=null)=>({code,label,value,time:m===null?null:at(m),detail,reason});
  const shock=id===B;
- const gate={organ:[it('S1','氧合指数 <300',null,null,'','DATA_MISSING'),it('S2','GCS <13',false,20,'最低 14 分'),it('S3','MAP <70',shock,10,shock?'最低 58 mmHg（有创）':'最低 76 mmHg（无创）'),it('S4','血管活性药',shock,35,shock?'去甲肾上腺素注射液':'')],
+ const gate={organ:[it('S1','氧合指数 <300',null,null,'','DATA_MISSING'),it('S2','GCS <13',false,20,'最低 14 分'),it('S3','MAP <65',shock,10,shock?'最低 58 mmHg（有创）':'最低 76 mmHg（无创）'),it('S4','血管活性药',shock,35,shock?'去甲肾上腺素注射液':'')],
   infection:[it('I1','诊断含感染',true,null,'肺炎'),it('I2','抗菌药执行',true,40,'注射用美罗培南'),it('I3','病原学送检',true,50,'血培养')],
-  shock:[it('K1','乳酸 ≥2',shock,20,shock?'4.6 mmol/L':'1.4 mmol/L'),it('K2','需要升压药',shock,35,shock?'去甲肾上腺素注射液':'')],
-  hasOrganDysfunction:shock?true:null,hasInfection:true,isSepticShock:shock,mapMin:shock?58:76,rule:'休克 = 需要升压药，或 乳酸≥2 且 MAP<70',
+  shock:[it('K1','首次乳酸',shock,20,shock?'4.6 mmol/L':'1.4 mmol/L'),it('K2','需要升压药',shock,35,shock?'去甲肾上腺素注射液':'')],
+  hasOrganDysfunction:shock?true:null,hasInfection:true,isSepticShock:shock,mapMin:shock?58:76,rule:'休克 = 需要升压药，或 乳酸≥2 且 MAP<65',
   status:shock?'septic_shock':'not_met',statusLabel:shock?'符合感染性休克判定':'未达休克判定',reason:shock?null:'NOT_SEPTIC_SHOCK'};
  const w=(h,state,items,reasons)=>({key:h+'h',hours:h,deadline:new Date(T+h*3600000).toISOString(),closed:state!=='in_progress',finish:state==='met'?true:state==='not_met'?false:null,state,finishPath:'triggered',reasons,items});
- const common=[it('A1','乳酸测定',true,20,'4.6 mmol/L'),it('B2','血培养',true,50,'血培养(需氧+厌氧)'),it('C1','MAP <70（触发）',true,10,'最低 58（有创）'),it('C2','乳酸 ≥4（触发）',true,null,'最高 4.6')];
+ const common=[it('A1','乳酸测定',true,20,'4.6 mmol/L'),it('B2','血培养',true,50,'血培养(需氧+厌氧)'),it('C1','MAP <65（触发）',true,10,'最低 58（有创）'),it('C2','乳酸 ≥4（触发）',true,null,'最高 4.6')];
  const windows=[w(1,'not_met',[common[0],it('B1','抗菌药物执行',true,40,'注射用美罗培南'),common[1],it('B3','先培养后抗菌',false,null,'抗菌药早于或同时于血培养','BC_AFTER_AB'),common[2],common[3],it('C3','1h 内开始补液',true,30,'2 条晶体/胶体执行')],['BC_AFTER_AB','MAP_NOT_MET']),
-  w(3,'met',[common[0],it('B1','抗菌药物执行',true,150,'注射用美罗培南'),common[1],it('B3','先培养后抗菌',true,null,'抗菌药晚于血培养'),common[2],common[3],it('C3','补液 ≥1500 ml',true,30,'累计 1600 ml')],['MAP_NOT_MET']),
-  w(6,'in_progress',[common[0],it('A2','复测乳酸（1h 后）',null,null,'','LACTATE_RECHECK_MISSING'),it('B1','抗菌药物执行',true,150,'注射用美罗培南'),common[1],it('B3','先培养后抗菌',true,null,'抗菌药晚于血培养'),common[2],common[3],it('C3','补液 ≥1500 ml',true,30,'累计 1600 ml')],['WINDOW_OPEN'])];
+  w(3,'not_met',[common[0],it('B1','抗菌药物执行',true,40,'注射用美罗培南'),common[1],it('B3','先培养后抗菌',false,null,'首剂抗菌药早于或同时于首次血培养','BC_AFTER_AB'),common[2],common[3],it('C3','补液 ≥1500 ml',true,30,'累计 1600 ml')],['BC_AFTER_AB','MAP_NOT_MET']),
+  w(6,'in_progress',[common[0],it('A2','复测乳酸（1h 后）',null,null,'','LACTATE_RECHECK_MISSING'),it('B1','抗菌药物执行',true,40,'注射用美罗培南'),common[1],it('B3','先培养后抗菌',false,null,'首剂抗菌药早于或同时于首次血培养','BC_AFTER_AB'),common[2],common[3],it('C3','补液 ≥1500 ml',true,30,'累计 1600 ml')],['BC_AFTER_AB','WINDOW_OPEN'])];
  return{...base,available:true,message:'',status:gate.status,statusLabel:gate.statusLabel,applicable:shock,t0:at(0),t0OrderName:'一级护理',t0Source:'入科后首条医嘱 orderTime（DataCenter.VI_ICU_ZYYZ）',
   pool:{eligible:true,icuWithin24h:true,admissionType:'入院',rule:'入院 24h 内进 ICU，且入科类型为 入院 / 手术入院 / 外院'},gate,windows,
   limitations:['乳酸、氧合指数取 SmartCare 血气（bGATemp），按病案号关联，动/静脉标本未区分。','血培养取医嘱审核时间（reviewTime），不等于实际采血时间。']};
@@ -74,11 +74,11 @@ await test('overview puts the most urgent values first and keeps curves folded',
  assert.match(await f.locator('.sx-head h1').innerText(),/^MAP 58 偏低/);
  assert.match(await f.locator('.sx-head h1').innerText(),/乳酸 3.5 偏高/);
  assert.equal(await f.locator('.sx-tile[data-level=critical]').filter({hasText:'平均动脉压'}).count(),1);
- assert.match(await f.locator('.sx-tile').filter({hasText:'平均动脉压'}).innerText(),/升压药 无记录/);
+ assert.match(await f.locator('.sx-tile').filter({hasText:'平均动脉压'}).innerText(),/升压药无记录/);
  assert.ok(await f.locator('.sx-tile').count()>=7);
  assert.equal(await f.locator('svg[role=img]').count(),0);
  assert.equal(await page.locator('aside').count(),1);assert.equal(await f.locator('.risk-score').count(),0);
- assert.match(await f.locator('.sx-pending.danger').innerText(),/1 条预警待处理/);
+ assert.match(await f.locator('.sx-pending.alert').innerText(),/1 条预警待处理/);
  assert.equal(await f.locator('.sx-pending').count(),1,'zero task count is hidden');
 });
 await page.screenshot({path:path.join(out,'60-v5-overview.png')});
@@ -90,7 +90,7 @@ await test('bundle and organ panels never invent completion',async()=>{
  assert.match(await f.locator('.sx-bundle').innerText(),/时间零点\s*未确认/);
  assert.equal(await f.locator('.sx-bundle').getByText('已完成').count(),0);
  assert.match(await f.locator('.sx-organ').innerText(),/SOFA\s*8\s*24h \+2/);
- assert.match(await f.locator('.sx-organ tr').filter({hasText:'凝血'}).innerText(),/未接入/);
+ assert.match(await f.locator('.sx-organ tr').filter({hasText:'凝血'}).innerText(),/凝血\s*血小板\s*—/);
  assert.equal(await f.locator('.sx-organ tr[data-level=critical]').filter({hasText:'循环'}).count(),1);
 });
 await test('host receives a per-patient status badge message',async()=>{
@@ -101,7 +101,7 @@ await test('host receives a per-patient status badge message',async()=>{
 });
 await test('tile opens source evidence in place',async()=>{await f.locator('.sx-tile').filter({hasText:'乳酸'}).click();await f.locator('.review-evidence-detail').waitFor();assert.match(await f.locator('.review-evidence-detail').innerText(),/SYNTHETIC.fixture/);await f.locator('.review-evidence-detail').getByRole('button',{name:'关闭'}).click();});
 await test('vital trends are available on demand',async()=>{await f.locator('.sx-fold > summary').click();await f.locator('.sx-fold svg[role=img]').first().waitFor();assert.equal(await f.locator('.sx-fold svg[role=img]').count(),6);await page.screenshot({path:path.join(out,'61-v5-overview-trends.png')});await f.locator('.sx-fold > summary').click();});
-await test('pending alert button opens quick-reason review',async()=>{await f.locator('.sx-pending.danger').click();await f.getByRole('heading',{name:'预警处理',exact:true}).waitFor();
+await test('pending alert button opens quick-reason review',async()=>{await f.locator('.sx-pending.alert').click();await f.getByRole('heading',{name:'预警处理',exact:true}).waitFor();
  await f.getByRole('heading',{name:'执行任务',exact:true}).waitFor();await f.getByText('暂无待处理任务',{exact:true}).waitFor();await page.screenshot({path:path.join(out,'67-v5-alerts-tasks.png')});
  await f.getByRole('button',{name:'处置',exact:true}).click();await f.getByRole('dialog').waitFor();
  const submit=f.getByRole('button',{name:'确认提交',exact:true});assert.equal(await submit.isDisabled(),true);
@@ -131,7 +131,7 @@ await test('empty overview offers working history lookup',async()=>{
 await test('non-parent message cannot select a patient',async()=>{await f.locator('body').evaluate((_,id)=>window.postMessage({type:'SmartCare',patient:{id}},location.origin),A);await page.waitForTimeout(80);assert.match(await f.locator('.icu-patient-left .name').innerText(),/模拟患者 C/);});
 await test('parent clear removes all previous patient content',async()=>{await page.evaluate(()=>choose(''));await f.getByText('等待患者',{exact:true}).waitFor();assert.equal(await f.locator('.icu-patient-bar').count(),0);});
 await page.evaluate(id=>choose(id),B);await ready(B);
-await test('partial work-queue failure is not shown as zero',async()=>{mode='partial';await refresh();await f.getByText('预警读取失败',{exact:true}).waitFor();assert.equal(await f.locator('.sx-pending.danger').count(),0);assert.equal(await f.getByText('0 条预警待处理').count(),0);
+await test('partial work-queue failure is not shown as zero',async()=>{mode='partial';await refresh();await f.getByText('预警读取失败',{exact:true}).waitFor();assert.equal(await f.locator('.sx-pending.alert').count(),0);assert.equal(await f.getByText('0 条预警待处理').count(),0);
  const m=(await page.evaluate(()=>statusMsgs)).filter(m=>m.patientId===B).at(-1);assert.equal(m.pendingAlerts,null);});
 await test('unavailable source is explicitly reported without low risk',async()=>{mode='unavailable';await refresh();assert.match(await f.locator('.review-state').innerText(),/临床数据暂不可用/);assert.equal(await f.locator('.sx-tile').count(),0);assert.equal(await f.locator('.sx-bundle').count(),0);assert.equal(await f.getByText('极低',{exact:true}).count(),0);assert.match(await f.locator('.sx-head h1').innerText(),/数据暂不可用/);});
 mode='normal';await refresh();
@@ -179,11 +179,11 @@ await test('ICU-05 card shows director rule windows with tri-state cells',async(
  assert.match(await card.locator('.i5-status').innerText(),/符合感染性休克判定/);
  assert.match(await card.innerText(),/T0\s*\d\d-\d\d \d\d:\d\d/);
  const heads=card.locator('.i5-table thead th');assert.equal(await heads.count(),4);
- assert.match(await heads.nth(1).innerText(),/1h\s*未达标/);assert.match(await heads.nth(2).innerText(),/3h\s*达标/);assert.match(await heads.nth(3).innerText(),/6h\s*剩/);
- const b3=card.locator('tbody tr').filter({hasText:'先培养后抗菌'});assert.equal(await b3.locator('td[data-tone=fail]').count(),1);assert.match(await b3.locator('td').first().getAttribute('title'),/抗菌药早于血培养/);
+ assert.match(await heads.nth(1).innerText(),/1h\s*未达标/);assert.match(await heads.nth(2).innerText(),/3h\s*未达标/);assert.match(await heads.nth(2).innerText(),/抗菌药早于血培养/);assert.match(await heads.nth(3).innerText(),/6h\s*剩/);
+ const b3=card.locator('tbody tr').filter({hasText:'先培养后抗菌'});assert.equal(await b3.locator('td[data-tone=fail]').count(),3,'a later repeat dose cannot turn antibiotic-before-culture into met');assert.match(await b3.locator('td').first().getAttribute('title'),/抗菌药早于血培养/);
  const recheck=card.locator('tbody tr').filter({hasText:'复测乳酸'});assert.equal(await recheck.locator('td[data-tone=wait]').count(),1,'open window shows 待, not ✗');
  assert.equal(await recheck.locator('td[data-tone=none]').count(),2,'1h/3h have no recheck item');
- assert.equal(await card.locator('tbody tr').filter({hasText:'MAP<70 触发'}).locator('td[data-tone=flag]').count(),3);
+ assert.equal(await card.locator('tbody tr').filter({hasText:'MAP<65 触发'}).locator('td[data-tone=flag]').count(),3);
  assert.equal(await f.locator('.sx-bundle[aria-label="1小时集束化"]').count(),0,'legacy checklist hidden when ICU-05 available');
  assert.match(await f.locator('.sx-head .i5-head').innerText(),/ICU-05 符合感染性休克判定/);
  await page.waitForFunction(()=>statusMsgs.some(m=>/ICU-05/.test(m.summary||'')));

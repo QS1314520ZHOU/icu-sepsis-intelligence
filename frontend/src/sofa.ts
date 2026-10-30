@@ -32,7 +32,10 @@ export interface SofaComponent {
 
 export interface SofaResult {
   kind: SofaKind;
+  /** Only when all 6 components are scored; a partial sum would understate the score. */
   total: number | null;
+  /** Sum of the scored components (shown as "部分合计 n/6" when total is null). */
+  partial: number | null;
   /** number of components with a score */
   scored: number;
   components: SofaComponent[];
@@ -81,18 +84,13 @@ function worst(
   return best;
 }
 
-function bandClassicResp(pf: number): number {
-  // Vent support unknown → cap at 2 (same as research Sofa.classic)
-  if (pf < 100) return 2;
-  if (pf < 200) return 3 > 2 ? 2 : 3; // cap
-  if (pf < 300) return 2;
-  if (pf < 400) return 1;
-  return 0;
-}
-
+/**
+ * Respiratory 3–4 points require ventilatory support, which is not available here: the score is capped at 2
+ * and flagged (same as research Sofa.java). `capped` marks that the raw P/F band was 3–4.
+ */
 function bandClassicRespFull(pf: number): { score: number; capped: boolean } {
-  if (pf < 100) return { score: 4, capped: true };
-  if (pf < 200) return { score: 3, capped: true };
+  if (pf < 100) return { score: 2, capped: true };
+  if (pf < 200) return { score: 2, capped: true };
   if (pf < 300) return { score: 2, capped: false };
   if (pf < 400) return { score: 1, capped: false };
   return { score: 0, capped: false };
@@ -141,28 +139,29 @@ function bandClassicRenal(creaUmol: number): number {
   return 0;
 }
 
+// SOFA-2 cut-offs are inclusive (JAMA 2025 Table 2): P/F ≤300/≤225/≤150/≤75, PLT ≤150/≤100/≤80/≤50,
+// bilirubin >1.2/>3/>6/>12 mg/dL, creatinine >1.2/>2.0/>3.5 mg/dL.
 function bandSofa2Resp(pf: number): { score: number; capped: boolean } {
-  if (pf < 75) return { score: 4, capped: true };
-  if (pf < 150) return { score: 3, capped: true };
-  if (pf < 225) return { score: 2, capped: false };
-  if (pf < 300) return { score: 1, capped: false };
+  if (pf <= 150) return { score: 2, capped: true };
+  if (pf <= 225) return { score: 2, capped: false };
+  if (pf <= 300) return { score: 1, capped: false };
   return { score: 0, capped: false };
 }
 
 function bandSofa2Coag(plt: number): number {
-  if (plt < 50) return 4;
-  if (plt < 80) return 3;
-  if (plt < 100) return 2;
-  if (plt < 150) return 1;
+  if (plt <= 50) return 4;
+  if (plt <= 80) return 3;
+  if (plt <= 100) return 2;
+  if (plt <= 150) return 1;
   return 0;
 }
 
 function bandSofa2LiverTbilUmol(tb: number): number {
   const mg = tb / 17.104;
-  if (mg >= 12) return 4;
-  if (mg >= 6) return 3;
-  if (mg >= 3) return 2;
-  if (mg >= 1.2) return 1;
+  if (mg > 12) return 4;
+  if (mg > 6) return 3;
+  if (mg > 3) return 2;
+  if (mg > 1.2) return 1;
   return 0;
 }
 
@@ -176,15 +175,20 @@ function bandSofa2Cns(gcs: number): number {
 
 function bandSofa2Renal(creaUmol: number): number {
   const mg = creaUmol / 88.4;
-  if (mg >= 3.5) return 3;
-  if (mg >= 2.0) return 2;
-  if (mg >= 1.2) return 1;
+  if (mg > 3.5) return 3;
+  if (mg > 2.0) return 2;
+  if (mg > 1.2) return 1;
   return 0;
 }
 
-function unitOk(o: Observation | null, allowed: string[]): boolean {
+/**
+ * Unit must match. A blank unit is accepted only when `blankMin` says the value is plausible in the expected
+ * unit (e.g. creatinine < 20 with no unit is probably mg/dL and must not be read as μmol/L).
+ */
+function unitOk(o: Observation | null, allowed: string[], blankMin?: number): boolean {
   if (!o) return false;
   const u = (o.unit || '').trim();
+  if (!u && blankMin !== undefined && (o.value == null || o.value < blankMin)) return false;
   return allowed.some((a) => u === a);
 }
 
@@ -274,7 +278,7 @@ export function computeSofa(
         'mmHg',
         pf.value!,
         r.capped ? ['resp_support_unknown'] : [],
-        r.capped ? '缺机械通气信息，3–4 分封顶为 2' : '床旁血气 P/F 最差值',
+        r.capped ? 'P/F 已达 3–4 分档，缺机械通气信息，封顶为 2' : '床旁血气 P/F 最差值',
       ),
     );
   } else {
@@ -292,7 +296,7 @@ export function computeSofa(
 
   // Liver — TBIL μmol/L (classic) / converted for sofa2
   const tbil = worst(items, ['TBIL'], asOf, 24, 'max');
-  if (tbil && unitOk(tbil, ['μmol/L', 'umol/L', 'µmol/L', ''])) {
+  if (tbil && unitOk(tbil, ['μmol/L', 'umol/L', 'µmol/L', ''], 3)) {
     const s = kind === 'classic' ? bandClassicLiverTbilUmol(tbil.value!) : bandSofa2LiverTbilUmol(tbil.value!);
     comps.push(
       autoComponent('liver', s, tbil, '总胆红素', tbil.unit || 'μmol/L', tbil.value!, [], '近 24h 最高'),
@@ -326,7 +330,7 @@ export function computeSofa(
       mapMin?.value ?? null,
       cardioBand.flags,
       pressor
-        ? '升压药在用；剂量未接入，按最低档 ≥2'
+        ? (kind === 'sofa2' ? '升压药在用；剂量与联用药未接入，按最低档 2（联用时 SOFA-2 ≥3）' : '升压药在用；剂量未接入，按最低档 ≥2')
         : mapMin
           ? '24h 最低 MAP' + (mapMin.measurementChannel ? '（' + mapMin.measurementChannel + '）' : '')
           : '无有效 MAP',
@@ -344,7 +348,7 @@ export function computeSofa(
 
   // Renal — creatinine μmol/L (urine rate not used: weight/interval incomplete)
   const crea = worst(items, ['CREA'], asOf, 24, 'max');
-  if (crea && unitOk(crea, ['μmol/L', 'umol/L', 'µmol/L', ''])) {
+  if (crea && unitOk(crea, ['μmol/L', 'umol/L', 'µmol/L', ''], 20)) {
     const s = kind === 'classic' ? bandClassicRenal(crea.value!) : bandSofa2Renal(crea.value!);
     comps.push(
       autoComponent(
@@ -380,7 +384,8 @@ export function computeSofa(
 
   return {
     kind,
-    total: count >= 4 ? sum : null, // require ≥4 components like research partial rule
+    total: count === 6 ? sum : null,
+    partial: count > 0 ? sum : null,
     scored: count,
     components: withManual,
     flags: [...flags],

@@ -99,3 +99,48 @@ test('sofa2 uses different bands', () => {
   assert.equal(by.cns, 2); // 9≤gcs<13
   assert.equal(by.renal, 2); // 2.0≤mg/dl<3.5
 });
+
+test('respiratory 3–4 bands are capped at 2 without ventilation data (classic and SOFA-2, auto and manual)', () => {
+  const items = [o({ parameterCode: 'PF_RATIO', value: 80, unit: 'mmHg' })];
+  for (const kind of ['classic', 'sofa2'] as const) {
+    const resp = computeSofa(items, now, kind).components.find((c) => c.key === 'resp')!;
+    assert.equal(resp.score, 2, kind);
+    assert.ok(resp.flags.includes('resp_support_unknown'));
+    const manual = computeSofa([], now, kind, { resp: 60 }).components.find((c) => c.key === 'resp')!;
+    assert.equal(manual.score, 2, kind + ' manual');
+  }
+});
+
+test('SOFA-2 cut-offs are inclusive (JAMA 2025)', () => {
+  const items = [
+    o({ parameterCode: 'PF_RATIO', value: 300, unit: 'mmHg' }),
+    o({ parameterCode: 'PLT', value: 150, unit: '10^9/L' }),
+    o({ parameterCode: 'TBIL', value: 1.2 * 17.104, unit: 'μmol/L' }),
+    o({ parameterCode: 'CREA', value: 2.0 * 88.4, unit: 'μmol/L' }),
+  ];
+  const by = Object.fromEntries(computeSofa(items, now, 'sofa2').components.map((c) => [c.key, c.score]));
+  assert.equal(by.resp, 1);
+  assert.equal(by.coag, 1);
+  assert.equal(by.liver, 0);
+  assert.equal(by.renal, 1);
+});
+
+test('partial SOFA is not reported as the total', () => {
+  const items = [
+    o({ parameterCode: 'PLT', value: 40, unit: '10^9/L' }),
+    o({ parameterCode: 'GCS', value: 8, unit: 'score' }),
+    o({ parameterCode: 'MAP_IBP', value: 60, unit: 'mmHg' }),
+    o({ parameterCode: 'CREA', value: 200, unit: 'μmol/L' }),
+  ];
+  const r = computeSofa(items, now, 'classic');
+  assert.equal(r.scored, 4);
+  assert.equal(r.total, null);
+  assert.equal(r.partial, 3 + 3 + 1 + 2);
+});
+
+test('blank-unit creatinine that looks like mg/dL is not read as μmol/L', () => {
+  const r = computeSofa([o({ parameterCode: 'CREA', value: 2.4, unit: '' })], now, 'classic');
+  assert.equal(r.components.find((c) => c.key === 'renal')!.score, null);
+  const ok = computeSofa([o({ parameterCode: 'CREA', value: 240, unit: '' })], now, 'classic');
+  assert.equal(ok.components.find((c) => c.key === 'renal')!.score, 2);
+});
