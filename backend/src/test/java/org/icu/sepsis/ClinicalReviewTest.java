@@ -18,7 +18,7 @@ class ClinicalReviewTest {
   final ClinicalDataProvider provider=mock(ClinicalDataProvider.class);
   @SuppressWarnings("unchecked") final ObjectProvider<SmartCareSourceReader> reader=mock(ObjectProvider.class);
   final RuleConfig cfg=new RuleConfig();
-  final SepsisAssessmentService service=new SepsisAssessmentService(provider,new ClinicalRules(cfg),cfg,reader,"demo");
+  final SepsisAssessmentService service=new SepsisAssessmentService(provider,new ClinicalRules(cfg),cfg,reader,"demo",mock(ObjectProvider.class));
   Patient patient(){Patient p=new Patient();p.id="aaaaaaaaaaaaaaaaaaaaaaaa";p.encounterId="stay-1";p.simulated=true;p.department="TEST";return p;}
   Observation obs(String code,double value,String unit,Instant at){Observation o=new Observation();o.parameterCode=code;o.value=value;o.unit=unit;o.eventTime=at;o.ingestTime=at;o.qualityStatus="valid";o.sourceSystem="TEST";o.sourceRecordId="e-"+code;return o;}
   Map<String,Object> run(List<Observation> rows){when(provider.observations(anyString(),anyString(),any(),any())).thenReturn(rows);return service.assess(patient(),now);}

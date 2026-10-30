@@ -94,6 +94,14 @@
       "passed": true
     },
     {
+      "name": "AI assist is on-demand and every shown statement links to evidence",
+      "passed": true
+    },
+    {
+      "name": "AI unavailable keeps rule cards and shows sources only",
+      "passed": true
+    },
+    {
       "name": "ICU-05 not-met gate folds windows as reference only",
       "passed": true
     },
