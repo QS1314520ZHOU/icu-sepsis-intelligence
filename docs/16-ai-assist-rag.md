@@ -68,14 +68,18 @@
 
 ## 6. 院内评测与试点步骤（由本地 AI 代理在内网执行）
 
+不需要额外脚本或运行环境，只用 `curl` 和应用自带接口。
+
 1. 网关探测（不涉及患者数据）：
-   `AI_BASE_URL=… AI_API_KEY=… AI_MODEL_FAST='deepseek v4 flash 0731' AI_MODEL_REASONING='qwen 3.8 next' python3 scripts/ai-eval.py probe --insecure`
-   看：两个模型是否可用、延迟中位数、JSON 模式是否支持、是否带 `<think>`/`reasoning_content`、向量维度。
-2. 用上一步结果配置环境变量（CA 文件优先于 `--insecure`），启动应用。
-3. 批量生成并统计（患者 id 输出为哈希）：
-   `APP_PASSWORD=… python3 scripts/ai-eval.py brief --patients 20 --keep-text --out ai-eval.jsonl`
-   看：状态分布、延迟、过滤条数、与规则时窗状态的矛盾条数（应为 0）。
-4. 由 2 名医生对 `--keep-text` 输出逐条标注（准确 / 引用不对应 / 遗漏 / 越界），结合页面反馈记录，再决定是否扩大试点。
+   ```bash
+   curl -sk https://192.168.242.50/v1/models -H "Authorization: Bearer $AI_API_KEY"
+   curl -sk https://192.168.242.50/v1/chat/completions -H "Authorization: Bearer $AI_API_KEY" -H 'Content-Type: application/json' \
+     -d '{"model":"deepseek v4 flash 0731","messages":[{"role":"user","content":"只输出 JSON：{\"ok\":true}"}],"response_format":{"type":"json_object"},"max_tokens":50}'
+   ```
+   两个模型各跑几次，记录：是否可用、耗时、是否支持 `response_format`、返回里是否有 `<think>` 或 `reasoning_content`（据此判断哪个是推理模型）。`-k` 只用于探测；正式配置用 `AI_TLS_CA_FILE`。
+2. 按探测结果配置 `AI_*` 环境变量，启动应用，确认 `GET /api/v1/ai/status` 中 `configured=true`。
+3. 在工作台里对约 20 例患者分别点“病情摘要”和“ICU-05 缺项分析”，医生用“有用 / 不采纳 + 原因”反馈。
+4. 质控角色导出 `GET /api/v1/ai/interactions?size=100`：查看状态分布、`latencyMs`、`fallbackUsed`、`dropped`（被过滤条目及原因）和反馈；由 2 名医生对输出逐条复核（准确 / 引用不对应 / 遗漏 / 越界），再决定是否扩大试点。
 
 ## 7. 已知限制
 
