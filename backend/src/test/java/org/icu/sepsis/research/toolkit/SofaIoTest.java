@@ -40,6 +40,16 @@ class SofaIoTest {
     assertEquals(Set.of("resp_support_unknown", "vaso_dose_unknown"), s.flags);
   }
 
+  @Test void sofa2InclusiveBoundaries() {
+    Sofa.Score s = Sofa.sofa2(m("pfMin", 300, "pltMin", 150, "tbilMaxUmol", 1.2 * 17.104, "creaMaxUmol", 2.0 * 88.4));
+    assertEquals(1, s.components.get("resp"));   // ≤300
+    assertEquals(1, s.components.get("coag"));   // ≤150
+    assertEquals(0, s.components.get("liver"));  // ≤1.2 mg/dL is 0
+    assertEquals(1, s.components.get("renal"));  // ≤2.0 mg/dL is 1
+    assertEquals(2, Sofa.sofa2(m("pfMin", 225)).components.get("resp"));
+    assertEquals(4, Sofa.sofa2(m("pltMin", 50)).components.get("coag"));
+  }
+
   @Test void sofa2Bands() {
     Sofa.Score s = Sofa.sofa2(m("pfMin", 200, "pltMin", 70, "tbilMaxUmol", 3.1 * 17.104, "mapMin", 72, "gcsMin", 9, "creaMaxUmol", 2.1 * 88.4,
         "vasoAgents", List.of("ne", "dobutamine")));

@@ -33,7 +33,7 @@ public class PatientContextBuilder {
       Map.entry("BC_MISSING", "未见血培养"), Map.entry("BC_AFTER_AB", "抗菌药早于或同时于血培养"), Map.entry("FLUID_MISSING", "未见补液执行"),
       Map.entry("FLUID_INSUFFICIENT", "补液量不足"), Map.entry("FLUID_AMOUNT_INCOMPLETE", "部分补液记录无量"),
       Map.entry("LACTATE_RECHECK_MISSING", "未复测乳酸"), Map.entry("SOURCE_ERROR", "来源读取失败"), Map.entry("MAP_MISSING", "未取到 MAP"),
-      Map.entry("WINDOW_OPEN", "时窗未结束"), Map.entry("VASO_STATUS_UNKNOWN", "T0 前升压药是否持续未知"), Map.entry("MAP_NOT_MET", "MAP<70"),
+      Map.entry("WINDOW_OPEN", "时窗未结束"), Map.entry("VASO_STATUS_UNKNOWN", "T0 前升压药是否持续未知"), Map.entry("MAP_NOT_MET", "MAP<65"),
       Map.entry("A1_NOT_MET", "乳酸未测"), Map.entry("NO_ORGAN_DYSFUNCTION", "未见器官功能障碍证据"), Map.entry("NOT_SEPTIC_SHOCK", "未达休克判定"),
       Map.entry("NO_INFECTION_EVIDENCE", "未取得感染证据"), Map.entry("INSUFFICIENT_EVIDENCE", "证据不全"));
   static final Map<String, String> STATES = Map.of("met", "达标", "not_met", "未达标", "unknown", "无法判定", "in_progress", "进行中");

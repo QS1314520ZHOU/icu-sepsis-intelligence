@@ -23,7 +23,7 @@ class ClinicalReviewTest {
   Observation obs(String code,double value,String unit,Instant at){Observation o=new Observation();o.parameterCode=code;o.value=value;o.unit=unit;o.eventTime=at;o.ingestTime=at;o.qualityStatus="valid";o.sourceSystem="TEST";o.sourceRecordId="e-"+code;return o;}
   Map<String,Object> run(List<Observation> rows){when(provider.observations(anyString(),anyString(),any(),any())).thenReturn(rows);return service.assess(patient(),now);}
   @Test void unavailableNeverBecomesLowRisk(){when(provider.observations(anyString(),anyString(),any(),any())).thenThrow(new IllegalStateException());Map<String,Object> r=service.assess(patient(),now);assertEquals(false,r.get("available"));assertEquals("unavailable",r.get("screeningStatus"));assertNull(r.get("qsofa"));assertFalse(r.containsKey("risk"));}
-  @Test void emptySourceIsInsufficientRatherThanZero(){Map<String,Object> r=run(List.of());assertEquals("insufficient_data",r.get("screeningStatus"));assertNull(r.get("qsofa"));assertEquals(5,((List<?>)r.get("missingFeatures")).size());}
+  @Test void emptySourceIsInsufficientRatherThanZero(){Map<String,Object> r=run(List.of());assertEquals("insufficient_data",r.get("screeningStatus"));assertNull(r.get("qsofa"));assertEquals(8,((List<?>)r.get("missingFeatures")).size());}
   @Test void pressorRecordDoesNotConfirmSepticShock(){Map<String,Object> r=run(List.of(obs("VASOPRESSOR_ACTIVE",1,"boolean",now)));assertEquals(true,r.get("vasopressorActive"));assertFalse(r.containsKey("shock"));assertEquals("insufficient_data",r.get("screeningStatus"));}
   @Test void latestFreshEvidenceNotHistoricalExtrema(){Map<String,Object> r=run(List.of(obs("MAP",40,"mmHg",now.minus(Duration.ofHours(72))),obs("MAP",78,"mmHg",now.minusSeconds(60))));assertTrue(((List<?>)r.get("findings")).isEmpty());}
   @Test void mapsPressureAndLactateWithoutKeyLoss(){Map<String,Object> r=run(List.of(obs("MAP",58,"mmHg",now),obs("LACTATE",3.5,"mmol/L",now)));assertEquals("review_required",r.get("screeningStatus"));assertEquals(2,((List<?>)r.get("findings")).size());}
@@ -37,12 +37,12 @@ class ClinicalReviewTest {
 
   @Test void channelsRetainIndependentFindingsAndDoNotSelectQsofaPressure(){
     Map<String,Object> r=run(List.of(obs("MAP_IBP",58,"mmHg",now),obs("MAP_NIBP",76,"mmHg",now),obs("SBP_NIBP",85,"mmHg",now),obs("RR",28,"/min",now),obs("GCS",14,"score",now)));
-    assertEquals(true,r.get("pressureSelectionRequired"));assertEquals(3,((List<?>)r.get("pressureEvidence")).size());assertNull(r.get("qsofa"));assertTrue(((List<?>)r.get("missingFeatures")).contains("SBP"));
+    assertEquals(true,r.get("pressureSelectionRequired"));assertEquals(3,((List<?>)r.get("pressureEvidence")).size());assertNull(r.get("qsofa"));assertFalse(((List<?>)r.get("missingFeatures")).contains("SBP"),"channel SBP is present, only unselected");
     assertTrue(r.get("findings").toString().contains("MAP_IBP"));assertFalse(r.get("findings").toString().contains("code=MAP_NIBP"));
   }
   @Test void genericPressureCannotOverrideExplicitChannel(){
     Map<String,Object> r=run(List.of(obs("SBP",120,"mmHg",now),obs("SBP_IBP",80,"mmHg",now),obs("RR",28,"/min",now),obs("GCS",14,"score",now)));
-    assertNull(r.get("qsofa"));assertTrue(((List<?>)r.get("missingFeatures")).contains("SBP"));
+    assertNull(r.get("qsofa"));assertFalse(r.get("latestEvidence").toString().contains("code=SBP,"));
   }
   @Test void sameChannelConflictDoesNotEraseOtherChannel(){
     Map<String,Object> r=run(List.of(obs("MAP_IBP",58,"mmHg",now),obs("MAP_IBP",68,"mmHg",now),obs("MAP_NIBP",76,"mmHg",now)));
@@ -50,6 +50,14 @@ class ClinicalReviewTest {
   }
   @Test void candidateReportIsContextOnlyNotFreshConfirmedLactate(){
     Observation lac=obs("LACTATE",4.2,"mmol/L",now);lac.clinicalUse="context_only";lac.encounterLinkStatus="unconfirmed";lac.timeBasis="reported";lac.reportedAt=now;
-    Map<String,Object> r=run(List.of(lac));assertTrue(((List<?>)r.get("findings")).isEmpty());assertEquals(1,((List<?>)r.get("contextEvidence")).size());assertTrue(((List<?>)r.get("missingFeatures")).contains("LACTATE"));assertFalse(r.get("checklist").toString().contains("status=recorded"));
+    Map<String,Object> r=run(List.of(lac));assertTrue(((List<?>)r.get("findings")).isEmpty());assertEquals(1,((List<?>)r.get("contextEvidence")).size());assertTrue(((List<?>)r.get("missingFeatures")).contains("LACTATE_UNCONFIRMED"));assertFalse(((List<?>)r.get("missingFeatures")).contains("LACTATE"));assertFalse(r.get("checklist").toString().contains("status=recorded"));
+  }
+  @Test void newestSameTimeConflictIsReportedNotReplacedByOlderValue(){
+    Map<String,Object> r=run(List.of(obs("MAP",58,"mmHg",now.minusSeconds(600)),obs("MAP",80,"mmHg",now),obs("MAP",62,"mmHg",now)));
+    assertTrue(((List<?>)r.get("findings")).isEmpty());assertEquals(List.of("MAP"),r.get("conflictingFeatures"));assertTrue(r.get("sourceWarnings").toString().contains("同刻不一致"));
+  }
+  @Test void staleLactateIsMissingNotUnconfirmed(){
+    Map<String,Object> r=run(List.of(obs("LACTATE",3.1,"mmol/L",now.minus(Duration.ofHours(20)))));
+    assertTrue(((List<?>)r.get("missingFeatures")).contains("LACTATE"));assertFalse(((List<?>)r.get("missingFeatures")).contains("LACTATE_UNCONFIRMED"));
   }
 }

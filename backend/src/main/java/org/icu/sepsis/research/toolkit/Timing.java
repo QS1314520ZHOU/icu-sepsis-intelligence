@@ -88,7 +88,7 @@ public final class Timing {
     };
     Function<Map<String, Object>, double[]> fluid = r -> {
       Double mp = num(r, "timing.mapMin6h"), lmax = num(r, "timing.lactateMax6h"), ml = num(r, "timing.fluidMl3h");
-      boolean trig = (mp != null && mp < 70) || (lmax == null ? 0 : lmax) >= 4;
+      boolean trig = (mp != null && mp < org.icu.sepsis.sepsis.Icu05Rules.MAP_LOW) || (lmax == null ? 0 : lmax) >= 4;
       if (!trig || truthy(get(r, "timing.fluidIncomplete3h")) || ml == null) return null;
       return new double[] {ml >= 1500 ? 1.0 : 0.0};
     };

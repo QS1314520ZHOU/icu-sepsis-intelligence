@@ -21,6 +21,12 @@ public final class Icu05Rules {
   static final Duration GATE_BEFORE = Duration.ofHours(24);
   static final Duration GATE_AFTER = Duration.ofHours(6);
   static final double FLUID_THRESHOLD_ML = 1500;
+  /** Hypotension threshold for the shock gate, organ item and C1 trigger (department decision: MAP<65). */
+  public static final double MAP_LOW = 65;
+  /** Lactate threshold for the shock gate (K1). */
+  public static final double LACTATE_HIGH = 2;
+  /** A crystalloid/colloid bag smaller than this is a flush or carrier, not resuscitation fluid. */
+  static final double FLUID_MIN_BAG_ML = 100;
 
   // ---------------- input model ----------------
   public static final class Point {
@@ -63,16 +69,21 @@ public final class Icu05Rules {
   }
 
   // ---------------- dictionaries ----------------
-  static final List<String> VASO_KEYWORDS = List.of("去甲肾上腺素", "肾上腺素", "多巴胺", "多巴酚丁胺", "间羟胺", "阿拉明",
-      "垂体后叶", "血管加压素", "特利加压素", "去氧肾上腺素", "苯肾上腺素", "异丙肾上腺素", "米力农", "左西孟旦",
-      "norepinephrine", "epinephrine", "dopamine", "dobutamine", "vasopressin", "phenylephrine", "milrinone", "isoproterenol", "metaraminol", "terlipressin", "levosimendan");
+  static final List<String> VASO_KEYWORDS = List.of("去甲肾上腺素", "肾上腺素", "多巴胺", "间羟胺", "阿拉明",
+      "垂体后叶", "血管加压素", "特利加压素", "去氧肾上腺素", "苯肾上腺素",
+      "norepinephrine", "epinephrine", "dopamine", "vasopressin", "phenylephrine", "metaraminol", "terlipressin");
+  /** Inotropes / inodilators are not vasopressors: they never make "需要升压药" true. Checked before keywords. */
+  static final List<String> INOTROPES = List.of("多巴酚丁胺", "异丙肾上腺素", "米力农", "左西孟旦", "dobutamine", "isoproterenol", "isoprenaline", "milrinone", "levosimendan");
   /** Known configDrug misclassifications as 血管活性 (audit of the dashboard). */
   static final List<String> VASO_DICTIONARY_EXCLUDE = List.of("氯化钾", "氯化钠", "胺碘酮");
-  static final List<String> ANTIBIOTIC_KEYWORDS = List.of("头孢", "培南", "青霉", "万古", "阿奇", "左氧", "莫西", "甲硝唑", "奥硝唑", "利奈",
-      "替考", "磷霉素", "美罗", "亚胺", "厄他", "哌酮", "舒巴坦", "氨苄", "哌拉", "阿莫", "克拉", "多西", "米诺", "替加", "达托", "夫西",
-      "磺胺", "呋喃", "吡哌", "诺氟", "环丙", "氧氟", "氟康唑", "伏立康唑", "卡泊芬净", "米卡芬净", "多粘菌素", "黏菌素", "阿米卡星", "庆大霉素", "克林霉素");
+  /** Full names or class suffixes only: short stems such as 多西/替加/克拉/米诺 also hit chemotherapy and other drugs. */
+  static final List<String> ANTIBIOTIC_KEYWORDS = List.of("头孢", "培南", "青霉素", "西林", "沙星", "环素", "万古霉素", "去甲万古", "阿奇霉素",
+      "红霉素", "克拉霉素", "罗红霉素", "甲硝唑", "奥硝唑", "替硝唑", "利奈唑胺", "替考拉宁", "磷霉素", "舒巴坦", "他唑巴坦", "阿维巴坦", "氨曲南",
+      "达托霉素", "夫西地酸", "磺胺甲", "复方磺胺", "呋喃妥因", "呋喃唑酮", "吡哌酸", "氟康唑", "伏立康唑", "泊沙康唑", "艾沙康唑", "两性霉素",
+      "卡泊芬净", "米卡芬净", "阿尼芬净", "多粘菌素", "多黏菌素", "黏菌素", "阿米卡星", "庆大霉素", "依替米星", "妥布霉素", "克林霉素", "林可霉素");
   static final List<String> NON_ANTIBIOTIC = List.of("肝素", "低分子", "华法林", "阿司匹林", "氯吡格雷", "维生素", "氯化钾", "胰岛素", "碳酸氢钠",
-      "呋塞米", "甘露醇", "地塞米松", "甲泼尼龙", "丙泊酚", "咪达唑仑", "芬太尼", "右美托咪定", "吗啡", "布洛芬", "对乙酰氨基酚", "皮试");
+      "呋塞米", "甘露醇", "地塞米松", "甲泼尼龙", "丙泊酚", "咪达唑仑", "芬太尼", "右美托咪定", "吗啡", "布洛芬", "对乙酰氨基酚", "皮试",
+      "多西他赛", "替加氟", "克拉屈滨", "米诺地尔", "柔红霉素", "多柔比星", "表柔比星", "博来霉素", "丝裂霉素", "放线菌素", "滴眼液", "眼膏", "软膏");
   static final List<String> INFECTION_DIAG = List.of("脓毒", "败血", "感染性休克", "感染", "肺炎", "腹膜炎", "脑膜炎", "蜂窝织炎", "脓肿", "化脓",
       "尿路感染", "胆管炎", "septic", "sepsis", "infection");
   /** No bare 氯化钠 (hits 10% 浓钠) and no bare 醋酸 (hits 醋酸泼尼松). */
@@ -150,7 +161,7 @@ public final class Icu05Rules {
   }
   public static boolean isVasopressor(String name, Set<String> dictionary) {
     String n = norm(name);
-    if (n.isEmpty()) return false;
+    if (n.isEmpty() || any(n, INOTROPES)) return false;
     if (any(n, VASO_KEYWORDS)) return true;
     return dictionary != null && dictionary.contains(n) && !any(n, VASO_DICTIONARY_EXCLUDE);
   }
@@ -164,7 +175,8 @@ public final class Icu05Rules {
     if (any(name, COLLOID)) return "colloid";
     return null;
   }
-  public static boolean infectionDiagnosis(String text) { return text != null && !text.isBlank() && any(text, INFECTION_DIAG); }
+  /** Shared negation-aware reading: "排除感染" / "非感染性发热" / "既往肺炎" are not infection evidence. */
+  public static boolean infectionDiagnosis(String text) { return org.icu.sepsis.domain.InfectionText.hasClue(text, INFECTION_DIAG); }
 
   // ---------------- evaluation ----------------
   public static Map<String, Object> evaluate(Evidence e) {
@@ -187,9 +199,7 @@ public final class Icu05Rules {
       return out;
     }
     Instant t0 = e.t0;
-    Instant floor = e.hospitalAdmission != null ? e.hospitalAdmission : e.icuAdmission;
-    Instant gateFrom = t0.minus(GATE_BEFORE);
-    if (floor != null && floor.isAfter(gateFrom) && !floor.isAfter(t0)) gateFrom = floor;
+    Instant gateFrom = gateFrom(e);
     Instant gateTo = min(t0.plus(GATE_AFTER), e.asOf);
 
     Map<String, Object> gate = new LinkedHashMap<>();
@@ -197,7 +207,7 @@ public final class Icu05Rules {
     // ---- organ dysfunction S1-S4 ----
     Map<String, Object> s1 = minItem("S1", "氧合指数 <300", e.pf, gateFrom, gateTo, e.failed.contains("bGATemp"), v -> v < 300, "");
     Map<String, Object> s2 = minItem("S2", "GCS <13", e.gcs, gateFrom, gateTo, e.failed.contains("score"), v -> v < 13, "分");
-    Map<String, Object> s3 = minItem("S3", "MAP <70", e.map, gateFrom, gateTo, e.failed.contains("bedside"), v -> v < 70, "mmHg");
+    Map<String, Object> s3 = minItem("S3", "MAP <65", e.map, gateFrom, gateTo, e.failed.contains("bedside"), v -> v < MAP_LOW, "mmHg");
     Map<String, Object> s4 = vasopressor("S4", "血管活性药", e, gateFrom, gateTo);
     List<Map<String, Object>> organ = List.of(s1, s2, s3, s4);
     Boolean hasOrgan = anyTrue(organ);
@@ -210,16 +220,16 @@ public final class Icu05Rules {
     Boolean hasInfection = anyTrue(infection);
     // ---- shock K1 / K2 ----
     Point lacInitial = initialLactate(e.lactate, t0, e.asOf);
-    Boolean k1v = e.failed.contains("bGATemp") ? null : lacInitial == null ? null : lacInitial.value >= 2;
-    Map<String, Object> k1 = item("K1", "乳酸", k1v, lacInitial == null ? null : lacInitial.time,
+    Boolean k1v = e.failed.contains("bGATemp") ? null : lacInitial == null ? null : lacInitial.value >= LACTATE_HIGH;
+    Map<String, Object> k1 = item("K1", "首次乳酸", k1v, lacInitial == null ? null : lacInitial.time,
         lacInitial == null ? "" : fmt(lacInitial.value) + " mmol/L", lacInitial == null ? "DATA_MISSING_LAC" : null);
     // Threshold is not shown in the label; UI colours by value (true = meets ≥2).
     k1.put("threshold", "≥2 mmol/L");
     Map<String, Object> k2 = new LinkedHashMap<>(s4); k2.put("code", "K2"); k2.put("label", "需要升压药");
     Boolean k2v = (Boolean) s4.get("value");
     Double mapMin = (Double) s3.get("number");
-    Boolean hypotension = mapMin == null ? null : mapMin < 70;
-    // SHOCK_RULE = s3: K2 OR (K1 AND MAP<70)
+    Boolean hypotension = mapMin == null ? null : mapMin < MAP_LOW;
+    // SHOCK_RULE = s3: K2 OR (K1 AND MAP<65)
     Boolean shock;
     if (Boolean.TRUE.equals(k2v) || (Boolean.TRUE.equals(k1v) && Boolean.TRUE.equals(hypotension))) shock = true;
     else if (Boolean.FALSE.equals(k2v) && (Boolean.FALSE.equals(k1v) || Boolean.FALSE.equals(hypotension))) shock = false;
@@ -234,7 +244,7 @@ public final class Icu05Rules {
     gate.put("organ", organ); gate.put("hasOrganDysfunction", hasOrgan);
     gate.put("infection", infection); gate.put("hasInfection", hasInfection);
     gate.put("shock", List.of(k1, k2)); gate.put("mapMin", mapMin); gate.put("isSepticShock", shock);
-    gate.put("rule", "休克 = 需要升压药，或 乳酸≥2 且 MAP<70");
+    gate.put("rule", "休克 = 需要升压药，或 乳酸≥2 且 MAP<65");
     gate.put("status", status); gate.put("statusLabel", label); gate.put("reason", reason);
     out.put("gate", gate);
     out.put("status", status);
@@ -264,6 +274,14 @@ public final class Icu05Rules {
     return out;
   }
 
+  /** T0-24h, but not earlier than hospital (or ICU) admission. */
+  static Instant gateFrom(Evidence e) {
+    Instant floor = e.hospitalAdmission != null ? e.hospitalAdmission : e.icuAdmission;
+    Instant from = e.t0.minus(GATE_BEFORE);
+    if (floor != null && floor.isAfter(from) && !floor.isAfter(e.t0)) from = floor;
+    return from;
+  }
+
   static Map<String, Object> pool(Evidence e) {
     Map<String, Object> m = new LinkedHashMap<>();
     Boolean within24 = e.icuAdmission == null || e.hospitalAdmission == null ? null
@@ -290,26 +308,32 @@ public final class Icu05Rules {
     Boolean a1 = lacFail ? null : first == null ? null : true;
     Map<String, Object> a1m = item("A1", "乳酸测定", a1, first == null ? null : first.time,
         first == null ? "" : fmt(first.value) + " mmol/L" + (lac.size() > 1 ? "，最高 " + fmt(lacMax) : ""), a1 == null ? (lacFail ? "SOURCE_ERROR" : "DATA_MISSING_LAC") : null);
-    // B1 antibiotic execution start (latest in window)
-    Map.Entry<Instant, String> abx = drugFail ? null : latestDrug(e, t0, limit, n -> isAntibiotic(n, e.antibioticDictionary));
+    // B1 antibiotic execution start (first dose in window)
+    Map.Entry<Instant, String> abx = drugFail ? null : firstDrug(e, t0, limit, n -> isAntibiotic(n, e.antibioticDictionary));
     Boolean b1 = abx == null ? null : true;
     Map<String, Object> b1m = item("B1", "抗菌药物执行", b1, abx == null ? null : abx.getKey(), abx == null ? "" : abx.getValue(), b1 == null ? (drugFail ? "SOURCE_ERROR" : "AB_MISSING") : null);
-    // B2 blood culture order time (latest in window)
-    Order bc = orderFail ? null : latestCulture(e, t0, limit);
+    // B2 blood culture (first in window)
+    Order bc = orderFail ? null : firstCulture(e, t0, limit);
     Boolean b2 = bc == null ? null : true;
     Map<String, Object> b2m = item("B2", "血培养", b2, bc == null ? null : cultureTime(e, bc), bc == null ? "" : bc.name, b2 == null ? (orderFail ? "SOURCE_ERROR" : "BC_MISSING") : null);
-    // B3 = B1 & B2 & antibiotic later than culture
+    // B3 = B1 & B2 & the FIRST antibiotic dose later than the FIRST blood culture. Both are searched from the gate
+    // start (T0-24h / admission) so a dose given before T0 or a later repeat dose cannot turn a violation into "met".
     Boolean b3; String b3reason;
+    Instant lookback = gateFrom(e);
+    Map.Entry<Instant, String> abxFirst = abx == null ? null : firstDrug(e, lookback, limit, n -> isAntibiotic(n, e.antibioticDictionary));
+    Order bcFirst = bc == null ? null : firstCulture(e, lookback, limit);
     if (b1 == null) { b3 = null; b3reason = "AB_MISSING"; }
     else if (b2 == null) { b3 = null; b3reason = "BC_MISSING"; }
-    else if (abx.getKey().isAfter(cultureTime(e, bc))) { b3 = true; b3reason = null; }
+    else if (abxFirst.getKey().isAfter(cultureTime(e, bcFirst))) { b3 = true; b3reason = null; }
     else { b3 = false; b3reason = "BC_AFTER_AB"; }
-    Map<String, Object> b3m = item("B3", "先培养后抗菌", b3, null, b3reason == null ? "抗菌药晚于血培养" : "BC_AFTER_AB".equals(b3reason) ? "抗菌药早于或同时于血培养" : "", b3reason);
-    // C1 MAP<70 trigger, C2 lactate>=4 trigger (opposite semantics: TRUE = abnormal)
+    String b3detail = b3reason == null ? "首剂抗菌药晚于首次血培养"
+        : "BC_AFTER_AB".equals(b3reason) ? "首剂抗菌药 " + hhmm(abxFirst.getKey()) + " 早于或同时于首次血培养 " + hhmm(cultureTime(e, bcFirst)) : "";
+    Map<String, Object> b3m = item("B3", "先培养后抗菌", b3, null, b3detail, b3reason);
+    // C1 MAP<65 trigger, C2 lactate>=4 trigger (opposite semantics: TRUE = abnormal)
     List<Point> maps = within(e.map, t0, limit);
     Point mapLow = maps.stream().min(Comparator.comparingDouble(p -> p.value)).orElse(null);
-    Boolean c1 = mapFail ? null : mapLow == null ? null : mapLow.value < 70;
-    Map<String, Object> c1m = item("C1", "MAP <70（触发）", c1, mapLow == null ? null : mapLow.time,
+    Boolean c1 = mapFail ? null : mapLow == null ? null : mapLow.value < MAP_LOW;
+    Map<String, Object> c1m = item("C1", "MAP <65（触发）", c1, mapLow == null ? null : mapLow.time,
         mapLow == null ? "" : "最低 " + fmt(mapLow.value) + (mapLow.channel == null ? "" : "（" + ("IBP".equals(mapLow.channel) ? "有创" : "无创") + "）"), c1 == null ? "MAP_MISSING" : null);
     Boolean c2 = lacFail ? null : lacMax == null ? null : lacMax >= 4;
     Map<String, Object> c2m = item("C2", "乳酸 ≥4（触发）", c2, null, lacMax == null ? "" : "最高 " + fmt(lacMax), c2 == null ? "DATA_MISSING_LAC" : null);
@@ -359,8 +383,11 @@ public final class Icu05Rules {
     double sum = 0; boolean incomplete = false; Instant firstTime = null; int count = 0;
     for (Drug d : e.drugs) {
       if (d.start == null || d.start.isBefore(t0) || d.start.isAfter(limit)) continue;
+      // Saline/glucose used as the carrier of another drug (e.g. 0.9%氯化钠 100ml + 美罗培南) is not resuscitation fluid.
+      if (d.items.stream().anyMatch(it -> it.name != null && !it.name.isBlank() && fluidType(it.name) == null)) continue;
       for (DrugItem it : d.items) {
         if (fluidType(it.name) == null) continue;
+        if (it.liquidMl != null && it.liquidUnitKnown && it.liquidMl < FLUID_MIN_BAG_ML) continue;
         count++;
         if (firstTime == null || d.start.isBefore(firstTime)) firstTime = d.start;
         if (it.liquidMl == null || !it.liquidUnitKnown) incomplete = true; else sum += it.liquidMl;
@@ -433,21 +460,13 @@ public final class Icu05Rules {
     return item("I3", "病原学送检", hit != null, hit == null ? null : hit.orderTime, hit == null ? "" : hit.name, null);
   }
 
-  static Order latestCulture(Evidence e, Instant from, Instant to) {
+  static Order firstCulture(Evidence e, Instant from, Instant to) {
     return e.cultureOrders.stream().filter(o -> o.name != null && e.bloodCultureKeywords.stream().anyMatch(o.name::contains))
         .filter(o -> { Instant t = cultureTime(e, o); return t != null && !t.isBefore(from) && !t.isAfter(to); })
-        .max(Comparator.comparing(o -> cultureTime(e, o))).orElse(null);
+        .min(Comparator.comparing(o -> cultureTime(e, o))).orElse(null);
   }
   static Instant cultureTime(Evidence e, Order o) { return "orderTime".equals(e.cultureTimeField) ? o.orderTime : o.reviewTime; }
 
-  static Map.Entry<Instant, String> latestDrug(Evidence e, Instant from, Instant to, Predicate<String> match) {
-    Map.Entry<Instant, String> best = null;
-    for (Drug d : e.drugs) {
-      if (d.start == null || d.start.isBefore(from) || d.start.isAfter(to)) continue;
-      for (DrugItem it : d.items) if (match.test(it.name) && (best == null || d.start.isAfter(best.getKey()))) best = Map.entry(d.start, it.name);
-    }
-    return best;
-  }
   static Map.Entry<Instant, String> firstDrug(Evidence e, Instant from, Instant to, Predicate<String> match) {
     Map.Entry<Instant, String> best = null;
     for (Drug d : e.drugs) {
@@ -483,7 +502,8 @@ public final class Icu05Rules {
     l.add("乳酸、氧合指数取 SmartCare 血气（bGATemp），按病案号关联，动/静脉标本未区分。");
     l.add("抗菌药、补液、升压药取执行单开始时间（drugExe.startTime），药名按关键词与药品字典识别。");
     l.add("血培养取医嘱" + ("orderTime".equals(e.cultureTimeField) ? "开立时间" : "审核时间（reviewTime）") + "，不等于实际采血时间。");
-    l.add("补液只计晶体/胶体，未按体重 30 ml/kg 换算。");
+    l.add("补液只计单独输注的晶体/胶体（作为其他药物溶媒、或单袋 <100 ml 的不计），按执行开始时整袋量累计，不是实际输入量；未按体重 30 ml/kg 换算。");
+    l.add("先培养后抗菌：比较首剂抗菌药与首次血培养，均自门控起点（T0 前 24h，不早于入院）起查找；多巴酚丁胺、米力农等强心药不计为升压药。");
     l.add("人工覆盖与感染部位确认未接入；结果为质控规则自动判定，不是诊断。");
     if (!e.failed.isEmpty()) l.add("读取失败的来源：" + String.join("、", new TreeSet<>(e.failed)) + "；相关项显示为“—”，不按未完成处理。");
     return l;
@@ -520,6 +540,9 @@ public final class Icu05Rules {
   static String fmt(Double v) {
     if (v == null) return "—";
     return Math.abs(v - Math.rint(v)) < 1e-9 ? String.valueOf((long) Math.rint(v)) : String.format(Locale.ROOT, "%.1f", v);
+  }
+  static String hhmm(Instant t) {
+    return t == null ? "—" : java.time.format.DateTimeFormatter.ofPattern("HH:mm").withZone(java.time.ZoneId.of("Asia/Shanghai")).format(t);
   }
   static String clip(String s, int n) { return s == null ? "" : s.length() <= n ? s : s.substring(0, n) + "…"; }
 }

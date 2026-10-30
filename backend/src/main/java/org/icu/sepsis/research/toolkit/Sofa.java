@@ -63,14 +63,15 @@ public final class Sofa {
     Double pf = Data.num(w.get("pfMin"));
     Integer resp = null;
     if (pf != null) {
-      resp = pf < 75 ? 4 : pf < 150 ? 3 : pf < 225 ? 2 : pf < 300 ? 1 : 0;
+      // SOFA-2 cut-offs are inclusive (≤300 / ≤225 / ≤150 / ≤75), JAMA 2025 Table 2.
+      resp = pf <= 75 ? 4 : pf <= 150 ? 3 : pf <= 225 ? 2 : pf <= 300 ? 1 : 0;
       if (resp > 2) { resp = 2; flags.add("resp_support_unknown"); }
     }
     Double plt = Data.num(w.get("pltMin"));
-    Integer coag = plt == null ? null : plt < 50 ? 4 : plt < 80 ? 3 : plt < 100 ? 2 : plt < 150 ? 1 : 0;
+    Integer coag = plt == null ? null : plt <= 50 ? 4 : plt <= 80 ? 3 : plt <= 100 ? 2 : plt <= 150 ? 1 : 0;
     Double tb = Data.num(w.get("tbilMaxUmol"));
     Double tbm = tb == null ? null : tb / 17.104;
-    Integer liver = tbm == null ? null : tbm >= 12 ? 4 : tbm >= 6 ? 3 : tbm >= 3 ? 2 : tbm >= 1.2 ? 1 : 0;
+    Integer liver = tbm == null ? null : tbm > 12 ? 4 : tbm > 6 ? 3 : tbm > 3 ? 2 : tbm > 1.2 ? 1 : 0;
     Set<String> ag = agents(w);
     Double mp = Data.num(w.get("mapMin"));
     Integer cardio;
@@ -86,7 +87,7 @@ public final class Sofa {
     Integer cns = g == null ? null : g >= 15 ? 0 : g >= 13 ? 1 : g >= 9 ? 2 : g >= 6 ? 3 : 4;
     Double cr = Data.num(w.get("creaMaxUmol"));
     Double crm = cr == null ? null : cr / 88.4;
-    Integer renal = crm == null ? null : crm >= 3.5 ? 3 : crm >= 2.0 ? 2 : crm >= 1.2 ? 1 : 0;
+    Integer renal = crm == null ? null : crm > 3.5 ? 3 : crm > 2.0 ? 2 : crm > 1.2 ? 1 : 0;
     return new Score(comps(resp, coag, liver, cardio, cns, renal), flags);
   }
 

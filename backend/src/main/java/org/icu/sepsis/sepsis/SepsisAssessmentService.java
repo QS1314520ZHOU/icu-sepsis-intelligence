@@ -37,23 +37,32 @@ public class SepsisAssessmentService {
     // Same-time numeric conflicts are excluded; do not pick whichever database row arrives first.
     Map<String,List<Observation>> groups=rows.stream().filter(o->validation.valid(o,now))
         .filter(o->o.value!=null).collect(Collectors.groupingBy(o->o.parameterCode+"|"+o.eventTime));
+    Map<String,Instant> conflictAt=new HashMap<>();
     for (List<Observation> g:groups.values()) {
-      if (g.stream().map(o->o.value).distinct().count()!=1) continue;
-      Observation o=g.get(0); latest.merge(o.parameterCode,o,(a,b)->a.eventTime.isAfter(b.eventTime)?a:b);
+      Observation o=g.get(0);
+      if (g.stream().map(x->x.value).distinct().count()!=1) { conflictAt.merge(o.parameterCode,o.eventTime,(a,b)->a.isAfter(b)?a:b); continue; }
+      latest.merge(o.parameterCode,o,(a,b)->a.eventTime.isAfter(b.eventTime)?a:b);
     }
+    // Never fall back silently to an older value when the newest time point is in conflict.
+    List<String> conflicts=new ArrayList<>();
+    for (Map.Entry<String,Instant> c:conflictAt.entrySet()) {
+      Observation cur=latest.get(c.getKey());
+      if (cur==null||!cur.eventTime.isAfter(c.getValue())) { latest.remove(c.getKey()); conflicts.add(c.getKey()); }
+    }
+    Collections.sort(conflicts);
     boolean channelPressure = latest.keySet().stream().anyMatch(c -> c.matches("(MAP|SBP|DBP)_(IBP|NIBP)"));
     // No site-approved preferred channel: never silently use a generic pressure alongside explicit channels.
     if (channelPressure) { latest.remove("MAP"); latest.remove("SBP"); }
     List<String> sourceWarnings = new ArrayList<>();
     if (channelPressure) sourceWarnings.add("有创与无创血压分通道展示，尚未确认院内择优规则；不自动合成为单一血压输入，qSOFA 血压项待核对。");
+    if (!conflicts.isEmpty()) sourceWarnings.add("最新时点存在同刻不一致的记录（"+String.join("、",conflicts)+"），未采用旧值替代，请在原始记录中核对。");
     if ("smartcare".equals(mode)) sourceWarnings.add("源记录入库时间未确认，不能据此进行历史时点回放；乳酸报告的采样时间、结果状态及本次住院关联未确认，候选报告仅供原始记录核对。");
     // Missing = no usable value for screening. Channel MAP/SBP counts as present; a report-only
     // lactate (context_only) is not "absent" — it is unconfirmed and must not be listed as 缺.
     boolean hasMap = latest.containsKey("MAP") || latest.keySet().stream().anyMatch(c -> c.startsWith("MAP_"));
     boolean hasSbp = latest.containsKey("SBP") || latest.keySet().stream().anyMatch(c -> c.startsWith("SBP_"));
     boolean hasLactateValid = latest.containsKey("LACTATE");
-    boolean hasLactateReport =
-        rows.stream().anyMatch(o -> "LACTATE".equals(o.parameterCode) && o.value != null);
+    boolean hasLactateReport = rows.stream().anyMatch(o -> ClinicalRules.lactateReport(o, now));
     List<String> missing = new ArrayList<>();
     if (!hasMap) missing.add("MAP");
     if (!hasSbp) missing.add("SBP");
@@ -93,6 +102,7 @@ public class SepsisAssessmentService {
     out.put("screeningStatus",status); out.put("screeningLabel",label); out.put("missingFeatures",missing); out.put("findings",findings);
     out.put("sourceWarnings",sourceWarnings);
     out.put("pressureSelectionRequired",channelPressure);
+    out.put("conflictingFeatures",conflicts);
     out.put("pressureEvidence",latest.values().stream().filter(o -> o.parameterCode.matches("(MAP|SBP|DBP)_(IBP|NIBP)"))
         .sorted(Comparator.comparing(o -> o.parameterCode)).map(this::evidence).collect(Collectors.toList()));
     out.put("contextEvidence",rows.stream().filter(o -> "context_only".equals(o.clinicalUse))

@@ -48,7 +48,8 @@ public final class Prediction {
       for (int i = Math.max(0, h - 3); i < h; i++) { Double v = at(mp, i); if (v != null) wmin = Math.min(wmin, v); }
       List<double[]> pts = new ArrayList<>();
       for (int i = Math.max(0, h - 6); i < h; i++) { Double v = at(mp, i); if (v != null) pts.add(new double[] {i, v}); }
-      double slope = pts.size() >= 3 ? Stats.slope(pts.stream().mapToDouble(p -> p[0]).toArray(), pts.stream().mapToDouble(p -> p[1]).toArray()) : 0.0;
+      // Fewer than 3 points: slope is missing (median-imputed later), not "flat".
+      Double slope = pts.size() >= 3 ? Stats.slope(pts.stream().mapToDouble(p -> p[0]).toArray(), pts.stream().mapToDouble(p -> p[1]).toArray()) : null;
       Double hLast = last(hr, h, 3), hMax = null;
       for (int i = Math.max(0, h - 3); i < h; i++) { Double v = at(hr, i); if (v != null && (hMax == null || v > hMax)) hMax = v; }
       Double lLast = last(lac, h, 6);
@@ -72,6 +73,13 @@ public final class Prediction {
     return o;
   }
 
+  /** "2024-3" and "2024-03" sort the same; unknown months first. */
+  static String monthKey(Object v) {
+    if (!truthy(v)) return "";
+    java.util.regex.Matcher m = java.util.regex.Pattern.compile("^(\\d{4})\\D?(\\d{1,2})").matcher(String.valueOf(v).trim());
+    return m.find() ? m.group(1) + "-" + (m.group(2).length() == 1 ? "0" : "") + m.group(2) : String.valueOf(v);
+  }
+
   public static Map<String, Object> run(List<Map<String, Object>> cohort) { return run(cohort, 11, 200, 0.7); }
 
   public static Map<String, Object> run(List<Map<String, Object>> cohort, int boots) { return run(cohort, 11, boots, 0.7); }
@@ -79,7 +87,7 @@ public final class Prediction {
   public static Map<String, Object> run(List<Map<String, Object>> cohort, long seed, int boots, double trainFrac) {
     List<Map<String, Object>> stays = new ArrayList<>();
     for (Map<String, Object> r : cohort) if (truthy(r.get("t0Available")) && truthy(r.get("traj"))) stays.add(r);
-    stays.sort(Comparator.comparing((Map<String, Object> r) -> truthy(r.get("admitMonth")) ? String.valueOf(r.get("admitMonth")) : "")
+    stays.sort(Comparator.comparing((Map<String, Object> r) -> monthKey(r.get("admitMonth")))
         .thenComparing(r -> String.valueOf(r.get("stayKey"))));
     int cut = (int) (stays.size() * trainFrac);
     List<Map<String, Object>> train = stays.subList(0, cut), test = stays.subList(cut, stays.size());

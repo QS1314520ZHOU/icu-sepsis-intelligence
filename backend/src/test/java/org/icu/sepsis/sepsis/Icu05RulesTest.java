@@ -211,4 +211,59 @@ class Icu05RulesTest {
     assertEquals(false, Icu05Rules.vasopressorRunningDuring(d, at(120), at(180)));
     assertEquals(false, Icu05Rules.vasopressorRunningDuring(d, at(-200), at(-130)));
   }
+
+  // ---- 2026-10 review regressions ----
+  @Test void repeatAntibioticDoseCannotHideAntibioticBeforeCulture() {
+    Evidence e = full();
+    e.cultureOrders.set(0, new Order("血培养", at(5), at(50), "o1")); // culture reviewed at +50, first abx at +40
+    e.drugs.add(drug(150, "注射用美罗培南", 100.0, "start"));        // repeat dose after the culture
+    Map<String, Object> r = Icu05Rules.evaluate(e);
+    for (String k : List.of("1h", "3h", "6h")) {
+      assertEquals(false, item(win(r, k), "B3").get("value"), k);
+      assertEquals("not_met", win(r, k).get("state"), k);
+    }
+  }
+
+  @Test void antibioticBeforeT0CountsForCultureOrder() {
+    Evidence e = full();
+    e.drugs.add(drug(-60, "头孢曲松钠", 100.0, "start"));
+    assertEquals(false, item(win(Icu05Rules.evaluate(e), "1h"), "B3").get("value"));
+  }
+
+  @Test void inotropesAreNotVasopressors() {
+    for (String n : List.of("多巴酚丁胺注射液", "盐酸异丙肾上腺素注射液", "米力农注射液", "左西孟旦注射液"))
+      assertFalse(Icu05Rules.isVasopressor(n, Set.of(n)), n);
+    assertTrue(Icu05Rules.isVasopressor("盐酸肾上腺素注射液", Set.of()));
+    assertTrue(Icu05Rules.isVasopressor("盐酸多巴胺注射液", Set.of()));
+    Evidence e = full(); e.drugs.removeIf(d -> d.items.get(0).name.contains("肾上腺素"));
+    e.drugs.add(drug(35, "多巴酚丁胺注射液", 50.0, "start"));
+    e.map.clear(); e.map.add(new Point(at(10), 75, "NIBP", "m"));
+    assertEquals(false, gate(Icu05Rules.evaluate(e)).get("isSepticShock"));
+  }
+
+  @Test void shockGateUsesMap65() {
+    Evidence e = full(); e.drugs.removeIf(d -> d.items.get(0).name.contains("肾上腺素"));
+    e.map.clear(); e.map.add(new Point(at(10), 67, "NIBP", "m"));
+    assertEquals(false, gate(Icu05Rules.evaluate(e)).get("isSepticShock"), "MAP 67 is not hypotension");
+    e.map.clear(); e.map.add(new Point(at(10), 64, "NIBP", "m"));
+    assertEquals(true, gate(Icu05Rules.evaluate(e)).get("isSepticShock"), "lactate 4.6 and MAP 64");
+  }
+
+  @Test void carrierSalineIsNotResuscitationFluid() {
+    Evidence e = full(); e.drugs.removeIf(d -> fluidName(d));
+    Drug carrier = new Drug(); carrier.start = at(20);
+    carrier.items.add(new DrugItem("0.9%氯化钠注射液", 1600.0)); carrier.items.add(new DrugItem("注射用美罗培南", null));
+    e.drugs.add(carrier);
+    e.drugs.add(drug(25, "0.9%氯化钠注射液", 50.0, "start")); // flush
+    Map<String, Object> w = win(Icu05Rules.evaluate(e), "3h");
+    assertEquals(false, item(w, "C3").get("value"));
+  }
+
+  static boolean fluidName(Drug d) { return Icu05Rules.fluidType(d.items.get(0).name) != null; }
+
+  @Test void antibioticStemsDoNotHitChemotherapy() {
+    for (String n : List.of("多西他赛注射液", "替加氟胶囊", "克拉屈滨注射液", "米诺地尔片")) assertFalse(Icu05Rules.isAntibiotic(n, Set.of()), n);
+    for (String n : List.of("盐酸多西环素片", "注射用替加环素", "克拉霉素缓释片", "盐酸米诺环素胶囊", "左氧氟沙星注射液", "注射用哌拉西林他唑巴坦"))
+      assertTrue(Icu05Rules.isAntibiotic(n, Set.of()), n);
+  }
 }

@@ -61,7 +61,7 @@ class ClinicalRulesTest {
     assertNull(a.ruleScore);
     assertEquals("unknown", a.infectionVerdict);
     assertEquals("unable_to_assess", a.screeningStatus);
-    assertEquals(7, a.missingFeatures.size());
+    assertEquals(6, a.missingFeatures.size()); // MAP SBP RR GCS LACTATE INFECTION_EVIDENCE
   }
 
   @Test

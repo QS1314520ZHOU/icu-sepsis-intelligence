@@ -22,18 +22,25 @@ public class ClinicalRules {
   private static final Pattern NEG =
       Pattern.compile(
           "排除感染|非感染性|无感染证据|无感染迹象|not.infected|non-infectious", Pattern.CASE_INSENSITIVE);
-  private static final Pattern POS =
-      Pattern.compile("感染已确诊|确诊感染|肺炎|菌血症|脓毒|pneumonia|bacteremia", Pattern.CASE_INSENSITIVE);
+  /** Strong wording: a non-negated hit makes the clause "supported"; any other infection word is "possible". */
+  private static final List<String> STRONG =
+      List.of("感染已确诊", "确诊感染", "肺炎", "菌血症", "脓毒", "pneumonia", "bacteremia", "sepsis", "septic");
 
   public String infection(List<Observation> es) {
     boolean pos = false, neg = false, maybe = false;
     for (Observation o : es) {
       if (!"DIAGNOSIS".equals(o.parameterCode) || o.text == null) continue;
-      for (String clause : o.text.split("[，,。；;\n]")) {
-        if (UNCERTAIN.matcher(clause).find()) maybe = true;
-        else if (NEG.matcher(clause).find()) neg = true;
-        else if (POS.matcher(clause).find()) pos = true;
-        else if (clause.contains("感染")) maybe = true;
+      for (String clause : InfectionText.clauses(o.text)) {
+        if (UNCERTAIN.matcher(clause).find()) { maybe = true; continue; }
+        switch (InfectionText.classify(clause, org.icu.sepsis.sepsis.SepsisClinicalRules.INFECTION_KEYWORDS)) {
+          case UNCERTAIN: maybe = true; break;
+          case NEGATED: neg = true; break;
+          case POSITIVE:
+            if (InfectionText.classify(clause, STRONG) == InfectionText.Clause.POSITIVE) pos = true; else maybe = true;
+            break;
+          default:
+            if (NEG.matcher(clause).find()) neg = true;
+        }
       }
     }
     if (pos && (neg || maybe)) return "possible";
@@ -102,13 +109,29 @@ public class ClinicalRules {
     a.assessmentTime = now;
     a.ruleVersion = cfg.getVersion();
     Map<String, Observation> latest = new HashMap<>();
+    Map<String, Instant> conflictAt = new HashMap<>();
     for (Observation o : input)
       if (valid(o, now)) {
         if ("DIAGNOSIS".equals(o.parameterCode)) {
           a.evidence.add(o);
-        } else latest.merge(o.parameterCode, o, (x, y) -> x.eventTime.isAfter(y.eventTime) ? x : y);
+          continue;
+        }
+        Observation cur = latest.get(o.parameterCode);
+        if (cur != null && cur.eventTime.equals(o.eventTime) && !Objects.equals(cur.value, o.value))
+          conflictAt.merge(o.parameterCode, o.eventTime, (x, y) -> x.isAfter(y) ? x : y);
+        latest.merge(o.parameterCode, o, (x, y) -> y.eventTime.isAfter(x.eventTime) ? y : x);
       }
+    // A same-time numeric conflict at the newest time is not resolved by silently using an older value.
+    for (Map.Entry<String, Instant> c : conflictAt.entrySet()) {
+      Observation cur = latest.get(c.getKey());
+      if (cur != null && !cur.eventTime.isAfter(c.getValue())) {
+        latest.remove(c.getKey());
+        a.conflictingEvidence.add("SAME_TIME_CONFLICT:" + c.getKey());
+      }
+    }
     a.evidence.addAll(latest.values());
+    // Channel pressures (IBP/NIBP) are not merged into one value, but each channel still counts for instability.
+    Double channelMapMin = minOf(latest, "MAP_IBP", "MAP_NIBP"), channelSbpMin = minOf(latest, "SBP_IBP", "SBP_NIBP");
     if (latest.keySet().stream().anyMatch(c -> c.matches("(MAP|SBP|DBP)_(IBP|NIBP)"))) {
       latest.remove("MAP"); latest.remove("SBP");
       a.conflictingEvidence.add("PRESSURE_CHANNEL_SELECTION_REQUIRED");
@@ -116,9 +139,8 @@ public class ClinicalRules {
     a.infectionVerdict = infection(a.evidence);
     boolean hasMap = latest.containsKey("MAP") || latest.keySet().stream().anyMatch(c -> c.startsWith("MAP_"));
     boolean hasSbp = latest.containsKey("SBP") || latest.keySet().stream().anyMatch(c -> c.startsWith("SBP_"));
-    boolean hasLactate =
-        latest.containsKey("LACTATE")
-            || input.stream().anyMatch(o -> "LACTATE".equals(o.parameterCode) && o.value != null);
+    // A report whose encounter/sampling is unconfirmed is "unconfirmed", not absent; stale, invalid or future rows are absent.
+    boolean hasLactate = latest.containsKey("LACTATE") || input.stream().anyMatch(o -> lactateReport(o, now));
     if (!hasMap) a.missingFeatures.add("MAP");
     if (!hasSbp) a.missingFeatures.add("SBP");
     if (!latest.containsKey("RR")) a.missingFeatures.add("RR");
@@ -135,7 +157,9 @@ public class ClinicalRules {
     if (sbp != null && rr != null && gcs != null)
       a.ruleScore = (sbp <= 100 ? 1 : 0) + (rr >= 22 ? 1 : 0) + (gcs < 15 ? 1 : 0);
     boolean unstable =
-        (map != null && map < cfg.getMapLow()) || (sbp != null && sbp < cfg.getSbpLow());
+        (map != null && map < cfg.getMapLow()) || (sbp != null && sbp < cfg.getSbpLow())
+            || (channelMapMin != null && channelMapMin < cfg.getMapLow())
+            || (channelSbpMin != null && channelSbpMin < cfg.getSbpLow());
     boolean infection = Set.of("supported", "possible").contains(a.infectionVerdict);
     a.shockScreeningStatus =
         infection && vaso != null && vaso == 1 && lac != null && lac >= cfg.getLactateHigh()
@@ -150,6 +174,22 @@ public class ClinicalRules {
                 ? "infection_with_abnormality"
                 : (a.missingFeatures.isEmpty() ? "not_triggered" : "unable_to_assess"));
     return a;
+  }
+
+  /** Lactate report kept only for attribution review: unconfirmed encounter/context, but not in the future. */
+  public static boolean lactateReport(Observation o, Instant now) {
+    return "LACTATE".equals(o.parameterCode) && o.value != null && Double.isFinite(o.value)
+        && ("context_only".equals(o.clinicalUse) || "unconfirmed".equals(o.encounterLinkStatus))
+        && (o.eventTime == null || !o.eventTime.isAfter(now));
+  }
+
+  private static Double minOf(Map<String, Observation> m, String... codes) {
+    Double out = null;
+    for (String c : codes) {
+      Observation o = m.get(c);
+      if (o != null && o.value != null && (out == null || o.value < out)) out = o.value;
+    }
+    return out;
   }
 
   private Double value(Map<String, Observation> m, String c) {

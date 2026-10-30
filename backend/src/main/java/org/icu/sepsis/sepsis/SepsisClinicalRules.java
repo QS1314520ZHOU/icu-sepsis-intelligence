@@ -34,13 +34,7 @@ public final class SepsisClinicalRules {
 
   /** A text clue is not confirmed infection. Negation and historical text are not positive facts. */
   public static boolean infectionText(String text) {
-    if (text == null || text.isBlank()) return false;
-    for (String clause : text.toLowerCase(Locale.ROOT).split("[，,。；;|\n]")) {
-      if (Pattern.compile("既往|病史|排除|除外|无.{0,8}(感染|肺炎|菌血症)|非感染|not infected|no infection").matcher(clause).find()
-          && !Pattern.compile("不能排除|无法排除|难以排除|不除外").matcher(clause).find()) continue;
-      if (anyKeyword(clause, INFECTION_KEYWORDS)) return true;
-    }
-    return false;
+    return org.icu.sepsis.domain.InfectionText.hasClue(text, INFECTION_KEYWORDS);
   }
   public static boolean anyKeyword(String text, List<String> keywords) {
     if (text == null || text.isBlank()) return false;

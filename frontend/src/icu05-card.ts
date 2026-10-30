@@ -35,13 +35,13 @@ export const icu05Reason: Record<string, string> = {
   DATA_MISSING_LAC: '未取到乳酸', DATA_MISSING: '未取到记录', AB_MISSING: '未见抗菌药执行', BC_MISSING: '未见血培养', BC_AFTER_AB: '抗菌药早于血培养',
   FLUID_MISSING: '未见补液执行', FLUID_INSUFFICIENT: '补液量不足', FLUID_AMOUNT_INCOMPLETE: '部分补液记录无量', LACTATE_RECHECK_MISSING: '未复测乳酸',
   SOURCE_ERROR: '来源读取失败', MAP_MISSING: '未取到 MAP', WINDOW_OPEN: '时窗未结束', VASO_STATUS_UNKNOWN: 'T0 前用药是否持续未知',
-  MAP_NOT_MET: 'MAP<70', A1_NOT_MET: '乳酸未测',
+  MAP_NOT_MET: 'MAP<65', A1_NOT_MET: '乳酸未测',
   NO_ORGAN_DYSFUNCTION: '未见器官功能障碍证据', NOT_SEPTIC_SHOCK: '未达休克判定', NO_INFECTION_EVIDENCE: '未取得感染证据', INSUFFICIENT_EVIDENCE: '证据不全',
 };
 const TRIGGERS = new Set(['C1', 'C2']);
 const ROWS: { code: string; name: string }[] = [
   { code: 'A1', name: '乳酸测定' }, { code: 'A2', name: '复测乳酸' }, { code: 'B2', name: '血培养' }, { code: 'B1', name: '抗菌药物' },
-  { code: 'B3', name: '先培养后抗菌' }, { code: 'C1', name: 'MAP<70 触发' }, { code: 'C2', name: '乳酸≥4 触发' }, { code: 'C3', name: '补液' },
+  { code: 'B3', name: '先培养后抗菌' }, { code: 'C1', name: 'MAP<65 触发' }, { code: 'C2', name: '乳酸≥4 触发' }, { code: 'C3', name: '补液' },
 ];
 interface Cell { mark: string; tone: 'done' | 'fail' | 'flag' | 'quiet' | 'wait' | 'none'; time: string | null; tip: string; }
 interface Row { code: string; name: string; cells: (Cell | null)[]; }
@@ -68,11 +68,13 @@ interface Row { code: string; name: string; cells: (Cell | null)[]; }
       <table class="sx-table i5-table"><thead><tr><th scope="col"></th>
         <th scope="col" *ngFor="let w of data.windows" [attr.data-state]="w.state" [title]="windowTip(w)">
           <span class="i5-wkey">{{ w.key }}</span><span class="i5-wstate">{{ stateLabel(w) }}</span><small>截止 {{ w.deadline | date:'HH:mm' }}</small>
+          <small class="i5-why" *ngIf="w.state === 'not_met' || w.state === 'unknown'">{{ windowTip(w) }}</small>
         </th></tr></thead>
         <tbody><tr *ngFor="let r of rows"><th scope="row">{{ r.name }}</th>
-          <td *ngFor="let c of r.cells" [attr.data-tone]="c?.tone || 'none'" [title]="c?.tip || ''"><ng-container *ngIf="c"><b>{{ c.mark }}</b><small *ngIf="c.time">{{ c.time | date:'HH:mm' }}</small></ng-container></td>
+          <td *ngFor="let c of r.cells" [attr.data-tone]="c?.tone || 'none'" [title]="c?.tip || ''" [attr.aria-label]="r.name + ' ' + (c ? toneLabel[c.tone] + ' ' + (c.tip || '') : '无')"><ng-container *ngIf="c"><b>{{ c.mark }}</b><small *ngIf="c.time">{{ c.time | date:'HH:mm' }}</small></ng-container></td>
         </tr></tbody>
       </table>
+      <p class="i5-legend" aria-label="图例"><span data-tone="done"><b>✓</b>完成</span><span data-tone="fail"><b>×</b>未完成</span><span data-tone="wait"><b>待</b>时窗未结束</span><span data-tone="none"><b>—</b>无法判定</span><span data-tone="flag"><b>异常</b>触发项成立</span><span class="i5-legend-note">各时窗均自 T0 起独立判定；悬停单元格查看依据</span></p>
     </ng-template>
     <details class="sx-limits i5-limits" *ngIf="data.limitations?.length"><summary><ui-icon name="info"/>判定规则与数据来源</summary>
       <ul><li>{{ data.ruleSource }}；{{ data.gate?.rule || '' }}。“—”表示无法判定，不按未完成计。</li><li *ngIf="data.pool">质控分母：{{ data.pool.rule }}（本例：{{ data.pool.eligible === true ? '符合' : data.pool.eligible === false ? '不符合' : '无法确认' }}）</li><li *ngFor="let l of data.limitations">{{ l }}</li></ul>
@@ -83,6 +85,7 @@ export class Icu05Card implements OnChanges {
   @Input({ required: true }) data!: Icu05Result;
   rows: Row[] = [];
   statusTone = 'none'; gateTip = ''; applicable = false;
+  readonly toneLabel: Record<string, string> = { done: '完成', fail: '未完成', flag: '触发', quiet: '未触发', wait: '时窗未结束', none: '无法判定' };
   readonly infName: Record<string, string> = { I1: '诊断', I2: '抗菌药', I3: '送检' };
   readonly organName: Record<string, string> = { S1: '氧合', S2: 'GCS', S3: 'MAP', S4: '升压药' };
   ngOnChanges() {

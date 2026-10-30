@@ -24,6 +24,25 @@ interface OrganRow { system: string; item: string; value: string; level: Level; 
 
 const shortName: Record<string, string> = { MAP: 'MAP', MAP_IBP: 'MAP(有创)', MAP_NIBP: 'MAP(无创)', LACTATE: '乳酸', RR: '呼吸', GCS: 'GCS', HR: '心率', TEMP: '体温', SPO2: 'SpO₂', SBP: '收缩压', SBP_IBP: '收缩压(有创)', SBP_NIBP: '收缩压(无创)' };
 const tileName: Record<string, string> = { MAP: '平均动脉压', MAP_IBP: '平均动脉压 · 有创', MAP_NIBP: '平均动脉压 · 无创', LACTATE: '乳酸', RR: '呼吸频率', GCS: 'GCS', HR: '心率', TEMP: '体温', SPO2: 'SpO₂' };
+/** The trend fold remembers the clinician's last choice (folded by default) instead of re-collapsing on every patient. */
+const TRENDS_KEY = 'icu-sepsis.trendsOpen';
+function trendsPreferred(): boolean {
+  try { return typeof localStorage !== 'undefined' && localStorage.getItem(TRENDS_KEY) === '1'; } catch { return false; }
+}
+function rememberTrends(open: boolean) {
+  try { localStorage.setItem(TRENDS_KEY, open ? '1' : '0'); } catch { /* storage may be blocked inside the host iframe */ }
+}
+/** Same exclusions as the backend validity check that matter for display: invalid quality and future time. */
+function usable(o: Observation, asOf: number): boolean {
+  if (o.value == null || !Number.isFinite(o.value)) return false;
+  if (o.qualityStatus && o.qualityStatus !== 'valid') return false;
+  const t = Date.parse(o.eventTime);
+  return Number.isFinite(t) && t <= asOf;
+}
+/** Additionally confirmed for this encounter and not a context-only report. */
+function confirmed(o: Observation): boolean {
+  return o.clinicalUse !== 'context_only' && o.encounterLinkStatus !== 'unconfirmed';
+}
 const units: Record<string, string> = { MAP: 'mmHg', SBP: 'mmHg', LACTATE: 'mmol/L', RR: '次/分', GCS: '分', HR: '次/分', TEMP: '°C', SPO2: '%' };
 
 @Component({
@@ -37,7 +56,7 @@ const units: Record<string, string> = { MAP: 'mmHg', SBP: 'mmHg', LACTATE: 'mmol
       <div class="sx-head-side">
         <span class="sx-chip i5-head" *ngIf="icu05?.available && (icu05!.status === 'septic_shock' || icu05!.status === 'suspected_review')" [attr.data-tone]="icu05!.status === 'septic_shock' ? 'critical' : 'abnormal'">ICU-05 {{ icu05!.statusLabel }}</span>
         <span class="sx-chip" *ngIf="data?.available" [title]="data!.qsofaNote || ''">qSOFA <b>{{ data!.qsofa ?? '—' }}</b><small *ngIf="data!.qsofa !== null">/3</small><small *ngIf="data!.qsofa === null">无法计算</small></span>
-        <button class="sx-pending danger" *ngIf="alertTotal" (click)="openAlerts.emit()"><ui-icon name="bell"/>{{ alertTotal }} 条预警待处理</button>
+        <button class="sx-pending alert" *ngIf="alertTotal" (click)="openAlerts.emit()"><ui-icon name="bell"/>{{ alertTotal }} 条预警待处理</button>
         <button class="sx-pending" *ngIf="taskTotal" (click)="openTasks.emit()"><ui-icon name="clipboard"/>{{ taskTotal }} 项任务待执行</button>
         <span class="sx-chip warn" *ngIf="alertsError" role="status">预警读取失败</span>
         <span class="sx-chip warn" *ngIf="tasksError" role="status">任务读取失败</span>
@@ -52,7 +71,7 @@ const units: Record<string, string> = { MAP: 'mmHg', SBP: 'mmHg', LACTATE: 'mmol
 
     <section class="sx-vitals" *ngIf="data?.available && hasAnyValue" aria-label="关键指标">
       <button class="sx-tile" *ngFor="let t of tiles" [attr.data-level]="t.level" [class.candidate]="!t.evidence && t.candidate" (click)="selected = t.evidence || t.candidate" [disabled]="!t.evidence && !t.candidate" [attr.aria-label]="t.label + ' ' + (t.value ?? '无记录')">
-        <span class="sx-tile-name">{{ t.label }}<em *ngIf="t.word">{{ t.word }}</em></span>
+        <span class="sx-tile-name">{{ t.label }}<em *ngIf="t.word">{{ t.word }}</em><small class="sx-ok" *ngIf="!t.word && t.level === 'normal'">正常</small></span>
         <span class="sx-tile-value"><b>{{ t.value ?? '—' }}</b><small>{{ t.unit }}</small><i class="sx-delta" *ngIf="t.delta !== null && t.delta !== 0">{{ t.delta > 0 ? '↑' : '↓' }}{{ abs(t.delta) }}</i></span>
         <svg class="sx-spark" *ngIf="t.spark" viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true"><path [attr.d]="t.spark"/></svg>
         <span class="sx-tile-foot"><ng-container *ngIf="t.time">{{ t.time | date:'HH:mm' }} · {{ ago(t.time) }}</ng-container><ng-container *ngIf="!t.time && t.candidate">报告 {{ t.candidate.value }} · 归属未确认</ng-container><ng-container *ngIf="!t.time && !t.candidate">24h 内无有效记录</ng-container></span>
@@ -83,15 +102,17 @@ const units: Record<string, string> = { MAP: 'mmHg', SBP: 'mmHg', LACTATE: 'mmol
           <span class="sx-sofa-chips">
             <button type="button" class="sx-chip sofa-chip" [class.on]="sofaOpen" (click)="sofaOpen = !sofaOpen"
               [title]="sofaClassic?.note || ''">
-              SOFA <b>{{ sofaClassic?.total ?? '—' }}</b>
-              <small *ngIf="sofaClassic && sofaClassic.total !== null">{{ sofaClassic.scored }}/6 项</small>
-              <small *ngIf="sofaClassic && sofaClassic.total === null">缺项</small>
+              SOFA <b>{{ sofaClassic?.total ?? sofaClassic?.partial ?? '—' }}</b>
+              <small *ngIf="sofaClassic && sofaClassic.total !== null">6/6 项</small>
+              <small *ngIf="sofaClassic && sofaClassic.total === null && sofaClassic.partial !== null">部分 {{ sofaClassic.scored }}/6</small>
+              <small *ngIf="sofaClassic && sofaClassic.partial === null">缺项</small>
             </button>
             <button type="button" class="sx-chip sofa-chip" [class.on]="sofaOpen && sofaKind === 'sofa2'"
               (click)="toggleSofaKind('sofa2')">
-              SOFA-2 <b>{{ sofa2?.total ?? '—' }}</b>
+              SOFA-2 <b>{{ sofa2?.total ?? sofa2?.partial ?? '—' }}</b>
+              <small *ngIf="sofa2 && sofa2.total === null && sofa2.partial !== null">部分 {{ sofa2.scored }}/6</small>
             </button>
-            <span class="sx-chip" *ngIf="sofa" title="宿主系统已录入评分">宿主 <b>{{ sofa.value }}</b>
+            <span class="sx-chip" *ngIf="sofa" title="宿主系统已录入的 SOFA 评分，与上方自动试算相互独立">宿主 SOFA <b>{{ sofa.value }}</b>
               <small *ngIf="sofaDelta !== null">24h {{ sofaDelta >= 0 ? '+' : '' }}{{ sofaDelta }}</small>
             </span>
             <span class="sx-chip" *ngIf="!sofa">宿主未评分</span>
@@ -103,8 +124,9 @@ const units: Record<string, string> = { MAP: 'mmHg', SBP: 'mmHg', LACTATE: 'mmol
               <button type="button" [class.selected]="sofaKind === 'classic'" (click)="toggleSofaKind('classic')">经典 SOFA</button>
               <button type="button" [class.selected]="sofaKind === 'sofa2'" (click)="toggleSofaKind('sofa2')">SOFA-2</button>
             </div>
-            <span class="sofa-total">合计 <b>{{ sofaView.total ?? '—' }}</b>
-              <small *ngIf="sofaView.total === null">（≥4 项才有总分）</small>
+            <span class="sofa-total" *ngIf="sofaView.total !== null">合计 <b>{{ sofaView.total }}</b></span>
+            <span class="sofa-total" *ngIf="sofaView.total === null">部分合计 <b>{{ sofaView.partial ?? '—' }}</b>
+              <small>（{{ sofaView.scored }}/6 项；缺项未计，总分可能被低估）</small>
             </span>
           </div>
           <p class="sofa-note">{{ sofaView.note }}</p>
@@ -155,7 +177,7 @@ const units: Record<string, string> = { MAP: 'mmHg', SBP: 'mmHg', LACTATE: 'mmol
       <ai-assist-card *ngIf="canAssist" [patientId]="patientId" [encounterId]="encounterId" [configured]="!!data?.ai?.configured" [icu05Available]="!!icu05?.available"/>
     </div>
 
-    <details class="review-card sx-fold" *ngIf="data?.available" (toggle)="showTrends = $any($event.target).open">
+    <details class="review-card sx-fold" *ngIf="data?.available" [open]="showTrends" (toggle)="onTrendsToggle($any($event.target).open)">
       <summary><ui-icon name="chart"/>生命体征趋势</summary>
       <clinical-trends *ngIf="showTrends" [items]="observations" [asOf]="asOf" [embedded]="true" [availableHours]="24" [compact]="true" [busy]="loading" (openRecords)="openEvidence.emit()" (openHistory)="openTrends.emit()"/>
     </details>
@@ -181,7 +203,7 @@ export class SepsisPanel implements OnChanges, OnDestroy {
   alertTotal: number | null = null;
   taskTotal: number | null = null;
   loading = false; error = ''; observationsError = ''; alertsError = false; tasksError = false;
-  asOf = ''; updatedAt = ''; selected: Evidence | null = null; showTrends = false;
+  asOf = ''; updatedAt = ''; selected: Evidence | null = null; showTrends = trendsPreferred();
   tiles: Tile[] = []; bundle: BundleRow[] = []; organs: OrganRow[] = []; limits: string[] = [];
   cultureNote = '微生物培养结果源未接入';
   sofa: Observation | null = null; sofaDelta: number | null = null;
@@ -202,8 +224,9 @@ export class SepsisPanel implements OnChanges, OnDestroy {
   get nurseFirst() { return this.api.has('NURSE') && !this.api.has('DOCTOR'); }
   get hasAnyValue() { return this.tiles.some(t => t.value !== null); }
   get infectionHit() { return !!this.data?.infectionClue && this.data.infectionClue.includes('含感染'); }
+  onTrendsToggle(open: boolean) { this.showTrends = open; rememberTrends(open); }
   ago(t: string | null) { return ago(t, Date.parse(this.asOf) || Date.now()); }
-  ngOnChanges() { this.data = null; this.icu05 = null; this.observations = []; this.selected = null; this.showTrends = false; this.derive(); void this.load(); }
+  ngOnChanges() { this.data = null; this.icu05 = null; this.observations = []; this.selected = null; this.showTrends = trendsPreferred(); this.derive(); void this.load(); }
   ngOnDestroy() { ++this.generation; }
   async load() {
     const generation = ++this.generation; if (!this.patientId) return;
@@ -337,14 +360,34 @@ export class SepsisPanel implements OnChanges, OnDestroy {
     const prev = pts.length > 1 ? pts[pts.length - 2].value : null;
     let sub = '';
     if (sbpCode) { const s = latest.get(sbpCode) || this.evidenceFromObs(sbpCode); sub = '收缩压 ' + (s ? s.value : '—'); }
-    if (base === 'MAP') sub += (sub ? ' · ' : '') + '升压药 ' + (this.data?.vasopressorActive === true ? '在用' : this.data?.vasopressorActive === false ? '未用' : '无记录');
+    let lacLabel = '';
+    if (base === 'MAP') sub += (sub ? ' · ' : '') + this.vasoText();
+    // 13: the ICU-05 initial lactate can differ from the latest one; label both.
+    if (code === 'LACTATE' && this.icu05?.gate) {
+      const k1 = this.icu05.gate.shock.find(i => i.code === 'K1');
+      if (k1?.detail) { sub = '首次 ' + k1.detail + (k1.time ? '（' + new Date(k1.time).toTimeString().slice(0, 5) + '）' : ''); lacLabel = '乳酸 · 最近'; }
+    }
     const delta = value !== null && prev !== null && e && pts.at(-1)?.eventTime === e.eventTime ? Math.round((value - prev) * 10) / 10 : null;
-    return { code, label: tileName[code] || featureLabel(code), unit, value, time: e?.eventTime || null, level: level(code, value), word: value === null ? '' : direction(code, value),
+    return { code, label: lacLabel || tileName[code] || featureLabel(code), unit, value, time: e?.eventTime || null, level: level(code, value), word: value === null ? '' : direction(code, value),
       delta, spark: this.sparkPath(pts), sub, evidence: e, candidate: e ? null : candidates.get(code) || null };
   }
 
+  /**
+   * One vasopressor statement for the whole screen: bedside VASOPRESSOR_ACTIVE and the ICU-05 execution sheet (drugExe)
+   * are different sources, so a disagreement is shown instead of two contradictory sentences.
+   */
+  vasoText(): string {
+    const bedside = this.data?.vasopressorActive;
+    const s4 = this.icu05?.available ? this.icu05.gate?.organ.find(i => i.code === 'S4') : undefined;
+    const drug = (s4?.detail || '').replace(/（T0 前开始.*$/, '').trim();
+    if (s4?.value === true) return '升压药 执行单有记录' + (drug ? '（' + drug + '）' : '') + (bedside === false ? ' · 床旁记录为未用' : '');
+    if (bedside === true) return '升压药在用' + (s4?.value === false ? ' · 执行单门控期内未见' : '');
+    if (bedside === false || s4?.value === false) return '升压药未用';
+    return '升压药无记录';
+  }
+
   private evidenceFromObs(code: string): Evidence | null {
-    const obs = this.latestObs(code);
+    const obs = this.latestObs(code, true);
     if (!obs || obs.value == null) return null;
     return {
       code: obs.parameterCode,
@@ -388,15 +431,16 @@ export class SepsisPanel implements OnChanges, OnDestroy {
       { key: 'BLOOD_CULTURE', name: '血培养', state: 'none', text: '采样记录未接入', time: null, hint: '抗菌药前留取', tip: note('BLOOD_CULTURE') },
       { key: 'ANTIBIOTIC', name: '广谱抗菌药', state: 'none', text: '给药记录未接入', time: null, hint: '', tip: note('ANTIBIOTIC') },
       { key: 'FLUID', name: '晶体液 30 ml/kg', state: 'none', text: '输液量 / 体重未接入', time: null, hint: mapLow || (lac && lac.value >= 4) ? '低血压或乳酸≥4 时适用' : '', tip: note('FLUID') },
-      { key: 'VASOPRESSOR', name: '血管活性药', state: vaso === true ? 'done' : mapLow ? 'warn' : 'none', text: vaso === true ? '有在用记录' : vaso === false ? '记录为未用' : '未取得记录', time: null, hint: mapLow ? 'MAP<65' : '', tip: '仅反映源系统记录，不判断剂量或达标' },
+      { key: 'VASOPRESSOR', name: '血管活性药', state: vaso === true ? 'done' : mapLow ? 'warn' : 'none', text: vaso === true ? '有在用记录' : vaso === false ? '记录为未用' : '未取得记录', time: null, hint: mapLow ? 'MAP<65' : '', tip: '仅反映源系统记录，不判断剂量或达标；休克口径：需要升压药，或乳酸≥2 且 MAP<65' },
       { key: 'REASSESS', name: '容量 / 灌注再评估', state: 'none', text: '未取得记录', time: null, hint: '', tip: note('REASSESS') },
     ];
   }
   /** Latest observation for a code from clinical-data (includes lab reports). */
-  private latestObs(code: string): Observation | null {
+  private latestObs(code: string, confirmedOnly = false): Observation | null {
     let best: Observation | null = null;
+    const asOf = Date.parse(this.asOf) || Date.now();
     for (const o of this.observations) {
-      if (o.parameterCode !== code || o.value == null) continue;
+      if (o.parameterCode !== code || !usable(o, asOf) || (confirmedOnly && !confirmed(o))) continue;
       if (!best || Date.parse(o.eventTime) > Date.parse(best.eventTime)) best = o;
     }
     return best;
@@ -411,11 +455,18 @@ export class SepsisPanel implements OnChanges, OnDestroy {
     let total = 0;
     let count = 0;
     let latest: Observation | null = null;
+    const asOf = Date.parse(this.asOf) || Date.now();
+    const seen = new Set<string>();
     for (const o of this.observations) {
-      if (o.parameterCode !== 'URINE_OUTPUT' || o.value == null) continue;
+      if (o.parameterCode !== 'URINE_OUTPUT' || !usable(o, asOf) || !confirmed(o)) continue;
+      if (Date.parse(o.eventTime) < asOf - 24 * 3600000) continue;
+      // The same nursing record can arrive twice (re-sync); count it once.
+      const key = (o.sourceRecordId || '') + '|' + o.eventTime + '|' + o.value;
+      if (seen.has(key)) continue;
+      seen.add(key);
       const unit = (o.unit || 'ml').trim().toLowerCase();
       if (unit && unit !== 'ml' && unit !== '毫升') continue;
-      total += o.value;
+      total += o.value!;
       count += 1;
       if (!latest || Date.parse(o.eventTime) > Date.parse(latest.eventTime)) latest = o;
     }
@@ -427,7 +478,7 @@ export class SepsisPanel implements OnChanges, OnDestroy {
     const maps = this.tiles.filter(t => baseCode(t.code) === 'MAP' && t.value !== null);
     const worstMap = maps.sort((a, b) => levelRank[a.level] - levelRank[b.level])[0];
     const gcsEv = latest.get('GCS');
-    const gcsObs = this.latestObs('GCS');
+    const gcsObs = this.latestObs('GCS', true);
     const gcsValue = gcsEv?.value ?? gcsObs?.value ?? null;
     let gcsEvid: Evidence | null = gcsEv || null;
     if (!gcsEvid && gcsObs && gcsObs.value != null) {
@@ -442,7 +493,7 @@ export class SepsisPanel implements OnChanges, OnDestroy {
       };
     }
     const rr = latest.get('RR'), spo2 = latest.get('SPO2');
-    const vaso = d.vasopressorActive === true ? '升压药在用' : d.vasopressorActive === false ? '升压药未用' : '升压药无记录';
+    const vaso = this.vasoText();
 
     const pf = this.latestObs('PF_RATIO');
     const plt = this.latestObs('PLT');
