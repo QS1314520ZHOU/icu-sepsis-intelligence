@@ -201,7 +201,7 @@ await test('ICU-05 card shows director rule windows with tri-state cells',async(
  assert.equal(await recheck.locator('td[data-tone=none]').count(),2,'1h/3h have no recheck item');
  assert.equal(await card.locator('tbody tr').filter({hasText:'MAP<65 触发'}).locator('td[data-tone=flag]').count(),3);
  assert.equal(await f.locator('.sx-bundle[aria-label="1小时集束化"]').count(),0,'legacy checklist hidden when ICU-05 available');
- assert.match(await f.locator('.sx-head .i5-head').innerText(),/ICU-05 符合感染性休克判定/);
+ assert.equal(await f.locator('.sx-head .i5-head').count(),0,'ICU-05 status shown once, in its card');
  await page.waitForFunction(()=>statusMsgs.some(m=>/ICU-05/.test(m.summary||'')));
  await page.screenshot({path:path.join(out,'68-v6-icu05-bundle.png')});
  await card.locator('.i5-limits > summary').click();assert.match(await card.locator('.i5-limits').innerText(),/reviewTime/);

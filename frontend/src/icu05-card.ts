@@ -66,15 +66,14 @@ interface Row { code: string; name: string; cells: (Cell | null)[]; }
     </ng-container>
     <ng-template #grid>
       <table class="sx-table i5-table"><thead><tr><th scope="col"></th>
-        <th scope="col" *ngFor="let w of data.windows" [attr.data-state]="w.state" [title]="windowTip(w)">
-          <span class="i5-wkey">{{ w.key }}</span><span class="i5-wstate">{{ stateLabel(w) }}</span><small>截止 {{ w.deadline | date:'HH:mm' }}</small>
-          <small class="i5-why" *ngIf="w.state === 'not_met' || w.state === 'unknown'">{{ windowTip(w) }}</small>
+        <th scope="col" *ngFor="let w of data.windows" [attr.data-state]="w.state" [title]="'截止 ' + (w.deadline | date:'MM-dd HH:mm') + (windowTip(w) ? ' · ' + windowTip(w) : '')">
+          <span class="i5-wkey">{{ w.key }}</span><span class="i5-wstate">{{ stateLabel(w) }}</span>          <small class="i5-why" *ngIf="w.state === 'not_met' || w.state === 'unknown'">{{ windowTip(w) }}</small>
         </th></tr></thead>
         <tbody><tr *ngFor="let r of rows"><th scope="row">{{ r.name }}</th>
-          <td *ngFor="let c of r.cells" [attr.data-tone]="c?.tone || 'none'" [title]="c?.tip || ''" [attr.aria-label]="r.name + ' ' + (c ? toneLabel[c.tone] + ' ' + (c.tip || '') : '无')"><ng-container *ngIf="c"><b>{{ c.mark }}</b><small *ngIf="c.time">{{ c.time | date:'HH:mm' }}</small></ng-container></td>
+          <td *ngFor="let c of r.cells" [attr.data-tone]="c?.tone || 'none'" [title]="c?.tip || ''" [attr.aria-label]="r.name + ' ' + (c ? toneLabel[c.tone] + ' ' + (c.tip || '') : '无')"><ng-container *ngIf="c"><b>{{ c.mark }}</b></ng-container></td>
         </tr></tbody>
       </table>
-      <p class="i5-legend" aria-label="图例"><span data-tone="done"><b>✓</b>完成</span><span data-tone="fail"><b>×</b>未完成</span><span data-tone="wait"><b>待</b>时窗未结束</span><span data-tone="none"><b>—</b>无法判定</span><span data-tone="flag"><b>异常</b>触发项成立</span><span class="i5-legend-note">各时窗均自 T0 起独立判定；悬停单元格查看依据</span></p>
+      <p class="i5-legend" aria-label="图例" title="各时窗均自 T0 起独立判定；悬停单元格查看依据与时间"><span data-tone="done"><b>✓</b>完成</span><span data-tone="fail"><b>×</b>未完成</span><span data-tone="wait"><b>待</b>时窗未结束</span><span data-tone="none"><b>—</b>无法判定</span><span data-tone="flag"><b>异常</b>触发项成立</span></p>
     </ng-template>
     <details class="sx-limits i5-limits" *ngIf="data.limitations?.length"><summary><ui-icon name="info"/>判定规则与数据来源</summary>
       <ul><li>{{ data.ruleSource }}；{{ data.gate?.rule || '' }}。“—”表示无法判定，不按未完成计。</li><li *ngIf="data.pool">质控分母：{{ data.pool.rule }}（本例：{{ data.pool.eligible === true ? '符合' : data.pool.eligible === false ? '不符合' : '无法确认' }}）</li><li *ngFor="let l of data.limitations">{{ l }}</li></ul>
@@ -100,7 +99,8 @@ export class Icu05Card implements OnChanges {
     const i = w.items.find(x => x.code === code);
     if (!i) return null;
     const trigger = TRIGGERS.has(code);
-    const tip = [i.label, i.detail, i.reason ? icu05Reason[i.reason] || i.reason : ''].filter(Boolean).join(' · ');
+    const at = i.time ? new Date(i.time).toTimeString().slice(0, 5) : '';
+    const tip = [i.label, i.detail, at ? '时间 ' + at : '', i.reason ? icu05Reason[i.reason] || i.reason : ''].filter(Boolean).join(' · ');
     // 补液：格内写出具体量；仅未达标打红 ×，达标写量 + ✓，量不全不打 ×
     if (code === 'C3') {
       const vol = (i.detail || '').trim();

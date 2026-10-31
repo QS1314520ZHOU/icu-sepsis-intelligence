@@ -17,7 +17,7 @@ export interface SepsisStatus {
 }
 interface Tile {
   code: string; label: string; unit: string; value: number | null; time: string | null; level: Level; word: string;
-  delta: number | null; spark: string; sub: string; evidence: Evidence | null; candidate: Evidence | null;
+  delta: number | null; spark: string; sub: string; subTip?: string; evidence: Evidence | null; candidate: Evidence | null;
 }
 interface BundleRow { key: string; name: string; state: 'done' | 'warn' | 'none' | 'info'; text: string; time: string | null; hint: string; tip: string; }
 interface OrganRow { system: string; item: string; value: string; level: Level; note: string; evidence: Evidence | null; }
@@ -54,15 +54,13 @@ const units: Record<string, string> = { MAP: 'mmHg', SBP: 'mmHg', LACTATE: 'mmol
         <div><h1>{{ headline }}</h1><p *ngIf="headDetail">{{ headDetail }}</p></div>
       </div>
       <div class="sx-head-side">
-        <span class="sx-chip i5-head" *ngIf="icu05?.available && (icu05!.status === 'septic_shock' || icu05!.status === 'suspected_review')" [attr.data-tone]="icu05!.status === 'septic_shock' ? 'critical' : 'abnormal'">ICU-05 {{ icu05!.statusLabel }}</span>
         <span class="sx-chip" *ngIf="data?.available" [title]="data!.qsofaNote || ''">qSOFA <b>{{ data!.qsofa ?? '—' }}</b><small *ngIf="data!.qsofa !== null">/3</small><small *ngIf="data!.qsofa === null">无法计算</small></span>
         <button class="sx-pending alert" *ngIf="alertTotal" (click)="openAlerts.emit()"><ui-icon name="bell"/>{{ alertTotal }} 条预警待处理</button>
         <button class="sx-pending" *ngIf="taskTotal" (click)="openTasks.emit()"><ui-icon name="clipboard"/>{{ taskTotal }} 项任务待执行</button>
         <span class="sx-chip warn" *ngIf="alertsError" role="status">预警读取失败</span>
         <span class="sx-chip warn" *ngIf="tasksError" role="status">任务读取失败</span>
         <span class="sample-badge" *ngIf="data?.simulated">模拟数据</span>
-        <span class="sx-time" *ngIf="updatedAt"><ui-icon name="clock"/>{{ updatedAt | date:'HH:mm' }}</span>
-        <button (click)="load()" [disabled]="loading" aria-label="刷新数据"><ui-icon name="refresh"/>{{ loading ? '读取中…' : '刷新' }}</button>
+        <button class="sx-refresh" (click)="load()" [disabled]="loading" [class.spin]="loading" aria-label="刷新数据" [title]="loading ? '读取中…' : (updatedAt ? '更新于 ' + (updatedAt | date:'HH:mm') + '，点击刷新' : '刷新')"><ui-icon name="refresh"/><span *ngIf="updatedAt">{{ updatedAt | date:'HH:mm' }}</span></button>
       </div>
     </header>
     <div class="review-state" role="alert" *ngIf="error || (data && !data.available)"><ui-icon name="info"/><strong>数据暂不可用</strong><span>{{ error || data?.message || '请刷新重试' }}</span></div>
@@ -70,12 +68,12 @@ const units: Record<string, string> = { MAP: 'mmHg', SBP: 'mmHg', LACTATE: 'mmol
     <p class="review-inline-error" role="alert" *ngIf="observationsError"><ui-icon name="info"/>{{ observationsError }} <button (click)="load()">重试</button></p>
 
     <section class="sx-vitals" *ngIf="data?.available && hasAnyValue" aria-label="关键指标">
-      <button class="sx-tile" *ngFor="let t of tiles" [attr.data-level]="t.level" [class.candidate]="!t.evidence && t.candidate" (click)="selected = t.evidence || t.candidate" [disabled]="!t.evidence && !t.candidate" [attr.aria-label]="t.label + ' ' + (t.value ?? '无记录')">
+      <button class="sx-tile" *ngFor="let t of tiles" [title]="t.time ? '记录于 ' + (t.time | date:'MM-dd HH:mm') + ' · ' + ago(t.time) : ''" [attr.data-level]="t.level" [class.candidate]="!t.evidence && t.candidate" (click)="selected = t.evidence || t.candidate" [disabled]="!t.evidence && !t.candidate" [attr.aria-label]="t.label + ' ' + (t.value ?? '无记录')">
         <span class="sx-tile-name">{{ t.label }}<em *ngIf="t.word">{{ t.word }}</em><small class="sx-ok" *ngIf="!t.word && t.level === 'normal'">正常</small></span>
         <span class="sx-tile-value"><b>{{ t.value ?? '—' }}</b><small>{{ t.unit }}</small><i class="sx-delta" *ngIf="t.delta !== null && t.delta !== 0">{{ t.delta > 0 ? '↑' : '↓' }}{{ abs(t.delta) }}</i></span>
         <svg class="sx-spark" *ngIf="t.spark" viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true"><path [attr.d]="t.spark"/></svg>
-        <span class="sx-tile-foot"><ng-container *ngIf="t.time">{{ t.time | date:'HH:mm' }} · {{ ago(t.time) }}</ng-container><ng-container *ngIf="!t.time && t.candidate">报告 {{ t.candidate.value }} · 归属未确认</ng-container><ng-container *ngIf="!t.time && !t.candidate">24h 内无有效记录</ng-container></span>
-        <span class="sx-tile-sub" *ngIf="t.sub">{{ t.sub }}</span>
+        <span class="sx-tile-foot" *ngIf="!t.time || stale(t.time)" [class.stale]="t.time"><ng-container *ngIf="t.time">{{ t.time | date:'HH:mm' }} · {{ ago(t.time) }}</ng-container><ng-container *ngIf="!t.time && t.candidate">报告 {{ t.candidate.value }} · 归属未确认</ng-container><ng-container *ngIf="!t.time && !t.candidate">24h 内无有效记录</ng-container></span>
+        <span class="sx-tile-sub" *ngIf="t.sub" [title]="t.subTip || t.sub">{{ t.sub }}</span>
       </button>
     </section>
     <div class="sx-empty-bar" *ngIf="data?.available && !hasAnyValue">
@@ -91,7 +89,7 @@ const units: Record<string, string> = { MAP: 'mmHg', SBP: 'mmHg', LACTATE: 'mmol
           <tr *ngFor="let b of bundle" [attr.data-state]="b.state" [title]="b.tip">
             <th scope="row"><i class="sx-dot"></i>{{ b.name }}</th>
             <td class="sx-b-text">{{ b.text }}</td>
-            <td class="sx-b-time">{{ b.time ? (b.time | date:'HH:mm') + ' · ' + ago(b.time) : '' }}</td>
+            <td class="sx-b-time" [title]="b.time ? ago(b.time) : ''">{{ b.time ? (b.time | date:'HH:mm') : '' }}</td>
             <td class="sx-b-hint"><span *ngIf="b.hint">{{ b.hint }}</span></td>
           </tr>
         </tbody></table>
@@ -294,7 +292,7 @@ export class SepsisPanel implements OnChanges, OnDestroy {
     const flagged = this.tiles.filter(t => t.level === 'critical' || t.level === 'abnormal').sort((a, b) => levelRank[a.level] - levelRank[b.level]);
     if (flagged.length) {
       this.headLevel = flagged[0].level;
-      this.headline = flagged.slice(0, 4).map(t => `${shortName[t.code] || t.label} ${t.value} ${t.word}`.trim()).join(' · ');
+      this.headline = flagged.slice(0, 3).map(t => `${shortName[t.code] || t.label} ${t.value} ${t.word}`.trim()).join(' · ');
     } else if (d.missingFeatures.length) { this.headLevel = 'unknown'; this.headline = '关键数据不全'; }
     else { this.headLevel = 'normal'; this.headline = '主要指标未超出提示阈值'; }
     const missing = d.missingFeatures.map((code) => {
@@ -302,7 +300,7 @@ export class SepsisPanel implements OnChanges, OnDestroy {
       if (code === 'INFECTION_EVIDENCE') return '感染证据';
       return featureLabel(code);
     });
-    this.headDetail = missing.length ? '缺：' + missing.join('、') : flagged.length > 4 ? '另有 ' + (flagged.length - 4) + ' 项异常' : '';
+    this.headDetail = missing.length ? '缺：' + missing.join('、') : flagged.length > 3 ? '另有 ' + (flagged.length - 3) + ' 项异常' : '';
     this.bundle = this.bundleRows(d, latest, candidates, asOf);
     this.organs = this.organRows(d, latest);
     const sofa = this.series('SOFA', 'score', 0, 24, asOf);
@@ -378,7 +376,8 @@ export class SepsisPanel implements OnChanges, OnDestroy {
     let sub = '';
     if (sbpCode) { const s = latest.get(sbpCode) || this.evidenceFromObs(sbpCode); sub = '收缩压 ' + (s ? s.value : '—'); }
     let lacLabel = '';
-    if (base === 'MAP') sub += (sub ? ' · ' : '') + this.vasoText();
+    let subTip = '';
+    if (base === 'MAP') { const v = this.vasoText(); subTip = sub + ' · ' + v; sub += (sub ? ' · ' : '') + this.vasoShort(v); }
     // 13: the ICU-05 initial lactate can differ from the latest one; label both.
     if (code === 'LACTATE' && this.icu05?.gate) {
       const k1 = this.icu05.gate.shock.find(i => i.code === 'K1');
@@ -386,13 +385,19 @@ export class SepsisPanel implements OnChanges, OnDestroy {
     }
     const delta = value !== null && prev !== null && e && pts.at(-1)?.eventTime === e.eventTime ? Math.round((value - prev) * 10) / 10 : null;
     return { code, label: lacLabel || tileName[code] || featureLabel(code), unit, value, time: e?.eventTime || null, level: level(code, value), word: value === null ? '' : direction(code, value),
-      delta, spark: this.sparkPath(pts), sub, evidence: e, candidate: e ? null : candidates.get(code) || null };
+      delta, spark: this.sparkPath(pts), sub, subTip, evidence: e, candidate: e ? null : candidates.get(code) || null };
   }
 
   /**
    * One vasopressor statement for the whole screen: bedside VASOPRESSOR_ACTIVE and the ICU-05 execution sheet (drugExe)
    * are different sources, so a disagreement is shown instead of two contradictory sentences.
    */
+  /** Tile-sized vasopressor wording; the full sentence (drug, source) stays in the tooltip and organ card. */
+  vasoShort(full: string): string {
+    if (full.startsWith('升压药 执行单有记录')) return full.includes('床旁记录为未用') ? '升压药记录不一致' : '升压药有记录';
+    return full.replace(/ · .*$/, '');
+  }
+  stale(t: string) { const a = Date.parse(this.asOf) || Date.now(); return a - Date.parse(t) > 60 * 60000; }
   vasoText(): string {
     const bedside = this.data?.vasopressorActive;
     const s4 = this.icu05?.available ? this.icu05.gate?.organ.find(i => i.code === 'S4') : undefined;
@@ -609,7 +614,7 @@ export class SepsisPanel implements OnChanges, OnDestroy {
           ? maps.map(m => (shortName[m.code] || 'MAP') + ' ' + m.value).join('，')
           : '—',
         level: worstMap?.level || 'none',
-        note: vaso + ' · 剂量换算未接入',
+        note: vaso,
         evidence: worstMap?.evidence || null,
       },
       {
