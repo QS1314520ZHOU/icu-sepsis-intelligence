@@ -1,43 +1,11 @@
 import { CommonModule } from '@angular/common';
-import { Component, Input, OnChanges } from '@angular/core';
+import { Component, Input, OnChanges, inject } from '@angular/core';
+import { Api } from './api';
 import { UiIcon } from './ui-icon';
 
-/** ICU-05 septic-shock bundle timeline (department director rule set). Tri-state: true / false / null. */
-export interface Icu05Item {
-  code: string; label: string; value: boolean | null; time: string | null; detail: string; reason: string | null;
-  /** Optional display threshold (not shown in body text; used in tooltip only). */
-  threshold?: string;
-}
-export interface Icu05Window {
-  key: string; hours: number; deadline: string; closed: boolean; finish: boolean | null;
-  state: 'met' | 'not_met' | 'unknown' | 'in_progress'; finishPath: string; reasons: string[]; items: Icu05Item[];
-}
-export interface Icu05Gate {
-  organ: Icu05Item[]; infection: Icu05Item[]; shock: Icu05Item[]; hasOrganDysfunction: boolean | null; hasInfection: boolean | null;
-  isSepticShock: boolean | null; mapMin: number | null; status: string; statusLabel: string; reason: string | null; rule: string;
-}
-export interface Icu05CultureOrder {
-  name: string | null;
-  orderTime: string | null;
-  reviewTime: string | null;
-  sourceId?: string;
-}
-export interface Icu05Result {
-  schemaVersion: number; patientId: string; encounterId: string; available: boolean; message: string; asOf: string;
-  ruleVersion: string; ruleSource: string; status: string; statusLabel: string; applicable?: boolean;
-  t0: string | null; t0OrderName: string | null; t0Source: string | null;
-  cultureOrders?: Icu05CultureOrder[];
-  pool?: { eligible: boolean | null; icuWithin24h: boolean | null; admissionType: string | null; rule: string };
-  gate: Icu05Gate | null; windows: Icu05Window[]; limitations?: string[];
-}
-
-export const icu05Reason: Record<string, string> = {
-  DATA_MISSING_LAC: '未取到乳酸', DATA_MISSING: '未取到记录', AB_MISSING: '未见抗菌药执行', BC_MISSING: '未见血培养', BC_AFTER_AB: '抗菌药早于血培养',
-  FLUID_MISSING: '未见补液执行', FLUID_INSUFFICIENT: '补液量不足', FLUID_AMOUNT_INCOMPLETE: '部分补液记录无量', LACTATE_RECHECK_MISSING: '未复测乳酸',
-  SOURCE_ERROR: '来源读取失败', MAP_MISSING: '未取到 MAP', WINDOW_OPEN: '时窗未结束', VASO_STATUS_UNKNOWN: 'T0 前用药是否持续未知',
-  MAP_NOT_MET: 'MAP<65', A1_NOT_MET: '乳酸未测',
-  NO_ORGAN_DYSFUNCTION: '未见器官功能障碍证据', NOT_SEPTIC_SHOCK: '未达休克判定', NO_INFECTION_EVIDENCE: '未取得感染证据', INSUFFICIENT_EVIDENCE: '证据不全',
-};
+import { Icu05Item, Icu05Result, Icu05Window, icu05Reason, bedsideActions, nextDue, windowChips, BedsideAction, fmtLeft, elapsedSinceT0 } from './icu05-view';
+export type { Icu05Item, Icu05Result, Icu05Window, Icu05Gate, Icu05CultureOrder } from './icu05-view';
+export { icu05Reason } from './icu05-view';
 const TRIGGERS = new Set(['C1', 'C2']);
 const ROWS: { code: string; name: string }[] = [
   { code: 'A1', name: '乳酸测定' }, { code: 'A2', name: '复测乳酸' }, { code: 'B2', name: '血培养' }, { code: 'B1', name: '抗菌药物' },
@@ -51,9 +19,32 @@ interface Row { code: string; name: string; cells: (Cell | null)[]; }
   template: `<section class="review-card sx-bundle i5" aria-label="感染性休克集束化">
     <div class="review-card-title">
       <h2><ui-icon name="clipboard"/>感染性休克 Bundle</h2>
-      <span class="sx-chip i5-status" [attr.data-tone]="statusTone" [title]="gateTip">{{ data.gate?.statusLabel || data.statusLabel }}</span>
-      <span class="sx-chip" *ngIf="data.t0" [title]="'T0：' + (data.t0Source || '') + (data.t0OrderName ? '，' + data.t0OrderName : '')">T0 <b>{{ data.t0 | date:'MM-dd HH:mm' }}</b></span>
+      <span class="sx-chip i5-status" *ngIf="view === 'quality' || !applicable" [attr.data-tone]="statusTone" [title]="gateTip">{{ data.gate?.statusLabel || data.statusLabel }}</span>
+      <span class="sx-chip i5-t0" *ngIf="data.t0" [title]="'T0：' + (data.t0Source || '') + (data.t0OrderName ? '，' + data.t0OrderName : '')">T0 <b>{{ data.t0 | date:'MM-dd HH:mm' }}</b><small *ngIf="elapsed">已 {{ elapsed }}</small></span>
+      <div class="segmented i5-view" role="group" aria-label="Bundle 视图" *ngIf="data.windows.length">
+        <button type="button" [class.selected]="view === 'bedside'" (click)="view = 'bedside'" title="按措施列出已做、待做和剩余时间">床旁</button>
+        <button type="button" [class.selected]="view === 'quality'" (click)="view = 'quality'" title="ICU-05 质控口径：1h/3h/6h 时窗逐项判定">质控</button>
+      </div>
     </div>
+    <ng-container *ngIf="view === 'bedside' && data.windows.length">
+      <div class="i5-next" *ngIf="next && applicable" [attr.data-urgent]="next.minutesLeft <= 30 ? 'y' : null">
+        <span class="i5-next-k">下一步</span><b>{{ next.name }}</b><span class="i5-next-t">{{ next.window }} 时窗 · 剩 <strong>{{ left(next.minutesLeft) }}</strong>（截止 {{ next.deadline | date:'HH:mm' }}）</span>
+      </div>
+      <p class="i5-next quiet" *ngIf="!next && applicable">各时窗均已结束</p>
+      <ng-container *ngIf="applicable"><ng-container *ngTemplateOutlet="acts"/></ng-container>
+      <details class="i5-na-b" *ngIf="!applicable"><summary>未达感染性休克判定，措施记录仅供参考</summary><ng-container *ngTemplateOutlet="acts"/></details>
+      <ng-template #acts>
+      <ul class="i5-acts">
+        <li *ngFor="let a of actions" [attr.data-state]="a.state" [title]="a.time ? (a.time | date:'MM-dd HH:mm') : ''">
+          <i aria-hidden="true">{{ mark[a.state] }}</i><span class="i5-a-name">{{ a.name }}</span>
+          <span class="i5-a-rel">{{ a.state === 'todo' ? '待做' : a.state === 'unknown' ? '无法判定' : a.state === 'fail' ? '未完成' : a.rel }}</span>
+          <span class="i5-a-detail">{{ a.detail }}</span><em class="i5-a-warn" *ngIf="a.warn">{{ a.warn }}</em>
+        </li>
+      </ul>
+      </ng-template>
+      <p class="i5-wins" *ngIf="applicable"><span *ngFor="let c of chips" [attr.data-state]="c.state">{{ c.key }} <b>{{ c.label }}</b></span><small class="i5-wins-why" *ngIf="failWhy">未达标：{{ failWhy }}</small></p>
+    </ng-container>
+    <ng-container *ngIf="view === 'quality' || !data.windows.length">
     <p class="i5-msg" *ngIf="!data.t0">{{ data.message || '未取得 T0，不做 Bundle 判定' }}</p>
     <div class="i5-gate" *ngIf="data.gate as g">
       <span><em>休克</em><ng-container *ngFor="let i of g.shock"><i [attr.data-v]="v(i.value)" [title]="tip(i)">{{ gateText(i) }}</i></ng-container></span>
@@ -75,6 +66,7 @@ interface Row { code: string; name: string; cells: (Cell | null)[]; }
       </table>
       <p class="i5-legend" aria-label="图例" title="各时窗均自 T0 起独立判定；悬停单元格查看依据与时间"><span data-tone="done"><b>✓</b>完成</span><span data-tone="fail"><b>×</b>未完成</span><span data-tone="wait"><b>待</b>时窗未结束</span><span data-tone="none"><b>—</b>无法判定</span><span data-tone="flag"><b>异常</b>触发项成立</span></p>
     </ng-template>
+    </ng-container>
     <details class="sx-limits i5-limits" *ngIf="data.limitations?.length"><summary><ui-icon name="info"/>判定规则与数据来源</summary>
       <ul><li>{{ data.ruleSource }}；{{ data.gate?.rule || '' }}。“—”表示无法判定，不按未完成计。</li><li *ngIf="data.pool">质控分母：{{ data.pool.rule }}（本例：{{ data.pool.eligible === true ? '符合' : data.pool.eligible === false ? '不符合' : '无法确认' }}）</li><li *ngFor="let l of data.limitations">{{ l }}</li></ul>
     </details>
@@ -83,6 +75,11 @@ interface Row { code: string; name: string; cells: (Cell | null)[]; }
 export class Icu05Card implements OnChanges {
   @Input({ required: true }) data!: Icu05Result;
   rows: Row[] = [];
+  api = inject(Api);
+  view: 'bedside' | 'quality' = this.api.has('QUALITY') && !this.api.has('DOCTOR') ? 'quality' : 'bedside';
+  actions: BedsideAction[] = []; next: ReturnType<typeof nextDue> = null; chips: { key: string; state: string; label: string }[] = []; elapsed = ''; failWhy = '';
+  readonly mark: Record<string, string> = { done: '✓', fail: '×', todo: '○', unknown: '—' };
+  left = fmtLeft;
   statusTone = 'none'; gateTip = ''; applicable = false;
   readonly toneLabel: Record<string, string> = { done: '完成', fail: '未完成', flag: '触发', quiet: '未触发', wait: '时窗未结束', none: '无法判定' };
   readonly infName: Record<string, string> = { I1: '诊断', I2: '抗菌药', I3: '送检' };
@@ -94,6 +91,8 @@ export class Icu05Card implements OnChanges {
     this.gateTip = d.gate?.reason ? icu05Reason[d.gate.reason] || d.gate.reason : '';
     this.rows = ROWS.map(r => ({ code: r.code, name: r.name, cells: d.windows.map(w => this.cell(w, r.code)) }))
       .filter(r => r.cells.some(c => c));
+    this.actions = bedsideActions(d); this.next = nextDue(d); this.chips = windowChips(d); this.elapsed = elapsedSinceT0(d);
+    this.failWhy = [...new Set(d.windows.filter(w => w.state === 'not_met').flatMap(w => w.reasons).filter(r => r !== 'MAP_NOT_MET').map(r => icu05Reason[r] || r))].join('、');
   }
   private cell(w: Icu05Window, code: string): Cell | null {
     const i = w.items.find(x => x.code === code);

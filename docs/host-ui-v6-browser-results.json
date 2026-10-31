@@ -98,6 +98,14 @@
       "passed": true
     },
     {
+      "name": "doctor can confirm or exclude the pending alert from the overview",
+      "passed": true
+    },
+    {
+      "name": "director board shows ICU-05 window rates, process indicators and cases to act on",
+      "passed": true
+    },
+    {
       "name": "AI assist is on-demand and every shown statement links to evidence",
       "passed": true
     },
