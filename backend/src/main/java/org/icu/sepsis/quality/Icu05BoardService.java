@@ -28,6 +28,7 @@ public class Icu05BoardService {
   private final Map<String, Cached> cache = new ConcurrentHashMap<>();
   static final class Cached { final Instant at; final Map<String, Object> result; Cached(Instant a, Map<String, Object> r) { at = a; result = r; } }
 
+  @org.springframework.beans.factory.annotation.Autowired
   public Icu05BoardService(Store store, Icu05Service icu05) { this(store, icu05, Clock.systemUTC()); }
   Icu05BoardService(Store store, Icu05Service icu05, Clock clock) { this.store = store; this.icu05 = icu05; this.clock = clock; }
 

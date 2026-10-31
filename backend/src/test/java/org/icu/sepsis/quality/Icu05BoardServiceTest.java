@@ -61,4 +61,15 @@ class Icu05BoardServiceTest {
     assertEquals("4", rows.get(1).get("patientId"), "suspected cases need review next");
     assertTrue(((List<?>) rows.get(2).get("failReasons")).contains("抗菌药早于血培养"));
   }
+
+  /** Spring must be able to pick the public constructor (regression: "No default constructor found" at startup). */
+  @Test void springCanInstantiate() {
+    try (org.springframework.context.annotation.AnnotationConfigApplicationContext ctx = new org.springframework.context.annotation.AnnotationConfigApplicationContext()) {
+      ctx.registerBean(org.icu.sepsis.application.Store.class, () -> org.mockito.Mockito.mock(org.icu.sepsis.application.Store.class));
+      ctx.registerBean(org.icu.sepsis.sepsis.Icu05Service.class, () -> org.mockito.Mockito.mock(org.icu.sepsis.sepsis.Icu05Service.class));
+      ctx.register(Icu05BoardService.class);
+      ctx.refresh();
+      assertNotNull(ctx.getBean(Icu05BoardService.class));
+    }
+  }
 }
