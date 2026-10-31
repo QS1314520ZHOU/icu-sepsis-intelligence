@@ -3,9 +3,10 @@ import { Component, inject, OnInit } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { Api, errorMessage, Quality } from '../api';
 import { percentage } from '../presentation';
+import { WardBoard } from '../ward-board';
 @Component({
   standalone: true,
-  imports: [CommonModule, RouterLink],
+  imports: [CommonModule, RouterLink, WardBoard],
   template: `<div class="pagehead">
       <div>
         <p class="eyebrow">QUALITY & TRACEABILITY</p>
@@ -14,6 +15,7 @@ import { percentage } from '../presentation';
       </div>
       <button (click)="load()">刷新统计</button>
     </div>
+    <ward-board class="quality-board"></ward-board>
     <p class="error" *ngIf="error">{{ error }}</p>
     <ng-container *ngIf="q && !error"
       ><div class="metrics">

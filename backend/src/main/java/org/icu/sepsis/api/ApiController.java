@@ -28,6 +28,7 @@ public class ApiController {
   private final org.icu.sepsis.sepsis.SepsisAssessmentService sepsis;
   private final org.icu.sepsis.sepsis.Icu05Service icu05;
   private final org.icu.sepsis.alerting.ScreeningAlertService screening;
+  private final org.icu.sepsis.quality.Icu05BoardService board;
 
   public ApiController(
       Store st,
@@ -38,7 +39,8 @@ public class ApiController {
       RiskModelProvider m,
       org.icu.sepsis.sepsis.SepsisAssessmentService sepsisSvc,
       org.icu.sepsis.sepsis.Icu05Service icu05Svc,
-      org.icu.sepsis.alerting.ScreeningAlertService screeningSvc) {
+      org.icu.sepsis.alerting.ScreeningAlertService screeningSvc,
+      org.icu.sepsis.quality.Icu05BoardService boardSvc) {
     s = st;
     q = qs;
     assessments = a;
@@ -48,6 +50,7 @@ public class ApiController {
     sepsis = sepsisSvc;
     icu05 = icu05Svc;
     screening = screeningSvc;
+    board = boardSvc;
   }
 
   @GetMapping("/me")
@@ -247,6 +250,13 @@ public class ApiController {
       @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
       @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to) {
     return Envelope.ok(q.quality(from, to));
+  }
+
+  /** Department ICU-05 board (director view): window rates, process sub-indicators, open/failed cases. */
+  @GetMapping("/quality/icu05-board")
+  @PreAuthorize("hasAnyRole('DOCTOR','QUALITY')")
+  public Envelope<?> icu05Board(@RequestParam(defaultValue = "7") @Min(1) @Max(31) int days) {
+    return Envelope.ok(board.board(days));
   }
 
   @GetMapping("/overview")

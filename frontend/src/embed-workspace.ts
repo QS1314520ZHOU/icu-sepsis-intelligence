@@ -1,3 +1,4 @@
+import { WardBoard } from './ward-board';
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { Component, inject, OnInit, OnDestroy, ViewChild } from '@angular/core';
@@ -35,7 +36,7 @@ interface HostPatientSession extends Session {
 
 @Component({
   standalone: true,
-  imports: [CommonModule, Detail, Alerts, Bundles, SepsisPanel, UiIcon],
+  imports: [CommonModule, Detail, Alerts, Bundles, SepsisPanel, UiIcon, WardBoard],
   template: ` <main class="icu-embed">
     <!-- 等待宿主 -->
     <section class="icu-embed-wait" *ngIf="!patient && !loading">
@@ -67,7 +68,7 @@ interface HostPatientSession extends Session {
 
       <nav class="icu-tabs" aria-label="当前患者工作区">
         <button
-          *ngFor="let t of tabs"
+          *ngFor="let t of visibleTabs"
           [class.active]="view === t.key"
           [attr.aria-current]="view === t.key ? 'page' : null"
           (click)="recordsPanel='evidence'; trendInitialHours=12; setView(t.key)"
@@ -88,6 +89,7 @@ interface HostPatientSession extends Session {
           [panel]="recordsPanel"
           (openAlerts)="setView('alerts')"
         />
+        <ward-board *ngIf="view === 'ward'" [currentPatientId]="p.id" />
         <ng-container *ngIf="view === 'alerts'">
           <patient-alerts [embedded]="true" [patientId]="p.id" (openEvidence)="openRecords()" (changed)="refreshStatus()" />
           <div id="icu-tasks"><patient-bundles [embedded]="true" (openEvidence)="openRecords()" (changed)="refreshStatus()" /></div>
@@ -107,7 +109,7 @@ export class EmbedWorkspace implements OnInit, OnDestroy {
   openTrendHistory(){this.trendInitialHours=168;this.recordsPanel='trends';this.setView('records');}
   openRecords(){this.trendInitialHours=12;this.recordsPanel='evidence';this.setView('records');}
   openTasksView(){this.setView('alerts');setTimeout(()=>document.getElementById('icu-tasks')?.scrollIntoView({block:'start'}),60);}
-  tabIcon(key:string) { return ({risk:'activity',records:'file',alerts:'bell'} as Record<string,string>)[key] || 'file'; }
+  tabIcon(key:string) { return ({risk:'activity',records:'file',alerts:'bell',ward:'chart'} as Record<string,string>)[key] || 'file'; }
   /** Status for the host's own patient list/badge. Counts that failed to load are sent as null, never 0. */
   onStatus(s: SepsisStatus) {
     if (!this.patient || s.patientId !== this.patient.id) return;
@@ -157,7 +159,10 @@ export class EmbedWorkspace implements OnInit, OnDestroy {
     { key: 'risk', label: '概览' },
     { key: 'alerts', label: '预警处理' },
     { key: 'records', label: '记录与依据' },
+    { key: 'ward', label: '科室质控' },
   ];
+  /** The department board is for doctors / quality staff (director view); nurses keep the three patient tabs. */
+  get visibleTabs() { return this.tabs.filter(t => t.key !== 'ward' || this.api.has('DOCTOR') || this.api.has('QUALITY')); }
   private listener = (event: MessageEvent) => void this.receive(event);
 
   get mrn(): string {

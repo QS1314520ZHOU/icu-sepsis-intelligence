@@ -45,6 +45,21 @@ function icu05(id){
   pool:{eligible:true,icuWithin24h:true,admissionType:'入院',rule:'入院 24h 内进 ICU，且入科类型为 入院 / 手术入院 / 外院'},gate,windows,
   limitations:['乳酸、氧合指数取 SmartCare 血气（bGATemp），按病案号关联，动/静脉标本未区分。','血培养取医嘱审核时间（reviewTime），不等于实际采血时间。']};
 }
+function board(days){
+ const w=(key,met,notMet,unknown,inProgress)=>({key,met,notMet,unknown,inProgress,rate:met+notMet?met/(met+notMet):null});
+ const ind=(key,label,yes,no,unknown,rule)=>({key,label,available:true,yes,no,unknown,rate:yes+no?yes/(yes+no):null,rule});
+ const T=now-4*3600000,iso=m=>new Date(T+m*60000).toISOString();
+ return{asOf:stamp,from:new Date(now-days*86400000).toISOString(),to:stamp,days,ruleSource:'ICU-05 感染性休克 Bundle（科室主任规则 v3）；国家重症质控指标 2024 版 ICU-05',
+  screened:days===7?18:64,unavailable:0,septicShock:days===7?6:21,suspected:1,denominator:days===7?5:18,excluded:1,poolUnknown:0,
+  windows:[w('1h',2,3,0,0),w('3h',3,1,1,0),w('6h',3,0,1,1)],
+  indicators:[ind('abx1h','1h 内给予抗菌药物',4,1,0,'1h 时窗 B1'),ind('cultureBeforeAbx','抗菌药前留取血培养',3,2,0,'B3'),ind('lactate1h','1h 内监测乳酸',5,0,0,'1h 时窗 A1'),{key:'oxygenMetabolism',label:'氧代谢监测',available:false,rate:null,rule:'ScvO₂ / 静脉-动脉 CO₂ 差值数据源未接入'}],
+  cases:[{patientId:B,encounterId:patients[B].encounterId,label:'模拟患者 B',bed:'02',simulated:true,status:'septic_shock',statusLabel:'符合感染性休克判定',t0:iso(0),eligible:true,counted:true,
+     windows:[{key:'1h',state:'not_met',deadline:iso(60)},{key:'3h',state:'not_met',deadline:iso(180)},{key:'6h',state:'in_progress',deadline:iso(360)}],next:'复测乳酸',nextDeadline:iso(360),minutesLeft:140,failReasons:['抗菌药早于血培养']},
+   {patientId:'d'.repeat(24),encounterId:'x',label:'模拟患者 D',bed:'07',simulated:true,status:'suspected_review',statusLabel:'疑似，待复核感染证据',t0:iso(-600),eligible:null,counted:false,windows:[],next:null,nextDeadline:null,minutesLeft:null,failReasons:[]},
+   {patientId:'e'.repeat(24),encounterId:'y',label:'模拟患者 E',bed:'11',simulated:true,status:'septic_shock',statusLabel:'符合感染性休克判定',t0:iso(-2000),eligible:true,counted:true,
+     windows:[{key:'1h',state:'met',deadline:iso(-1940)},{key:'3h',state:'met',deadline:iso(-1820)},{key:'6h',state:'met',deadline:iso(-1640)}],next:null,nextDeadline:null,minutesLeft:null,failReasons:[]}],
+  limitations:['按当前时刻用床旁同一规则重算，非上报口径的最终结果；“—”无法判定单列，不计为未完成。']};
+}
 function aiExtra(b,kind){
  const L={ask:[['answer','回答'],['uncertainties','不确定']],alert:[['why','触发依据'],['verify','需核对（排除误报）'],['next','可考虑的下一步']],ward:[['priority','建议优先查看'],['pattern','共性问题']],handover:[['situation','S 现状'],['background','B 背景'],['assessment','A 评估'],['recommendation','R 交班关注']]}[kind];
  b.layout=L.map(([key,title])=>({key,title,allowNoRef:key==='uncertainties',urgency:['next','priority','recommendation'].includes(key)}));
@@ -71,11 +86,11 @@ async function ready(id){await f.locator('.icu-patient-left .name').filter({hasT
 async function refresh(){await f.getByRole('button',{name:'刷新数据',exact:true}).click();await page.waitForTimeout(100);await f.locator('.sx-head button[aria-label=刷新数据]:not([disabled])').waitFor();await page.waitForTimeout(100);}
 (async()=>{fs.mkdirSync(out,{recursive:true});await new Promise(r=>server.listen(0,'0.0.0.0',r));origin='http://127.0.0.1:'+server.address().port;browser=await chromium.launch({headless:true,executablePath:process.env.CHROME_EXECUTABLE||'/usr/local/bin/chromium'});page=await browser.newPage({viewport:{width:1680,height:1180},timezoneId:'Asia/Shanghai'});let errors=[];page.on('pageerror',e=>errors.push(e.message));
 await page.route('**/embed-api/**',async r=>{let data={};if(r.request().url().includes('/config'))data={allowedParentOrigins:[origin]};if(r.request().url().includes('host-context')){const id=r.request().postDataJSON().patientId;if(id===slowId&&!slowUsed){slowUsed=true;await new Promise(r=>setTimeout(r,700));}data={...patients[id],accessToken:'fixture-'+id,expiresAt:new Date(now+600000).toISOString(),username:'host',roles:[role]};}await r.fulfill({json:{code:'OK',data}});});
-await page.route('**/api/v1/**',async r=>{if(r.request().method()==='POST')posts.push({url:r.request().url(),body:r.request().postDataJSON()});const u=new URL(r.request().url()),token=r.request().headers()['authorization']||'',id=[A,B,C].find(id=>token.includes(id))||B;let data=patients[id];if(u.pathname.endsWith('/ai/ask'))data=aiExtra(aiBrief(id,'ask'),'ask');else if(u.pathname.endsWith('/alerts/alert-B/ai'))data=r.request().method()==='GET'?null:aiExtra(aiBrief(id,'alert'),'alert');else if(u.pathname.endsWith('/ai/ward-brief'))data=aiExtra(aiBrief(id,'ward'),'ward');else if(u.pathname.endsWith('/sepsis-assessment'))data=mode==='source'?sourceAssessment(id):assessment(id);else if(u.pathname.endsWith('/icu05-bundle')){if(icu05Mode==='error')return r.fulfill({status:503,json:{message:'模拟 ICU-05 读取失败'}});data=icu05(id);}else if(u.pathname.endsWith('/ai/brief')){if(aiMode==='error')return r.fulfill({status:500,json:{message:'模拟 AI 接口异常',code:'INTERNAL'}});const k=r.request().postDataJSON().kind;data=k==='handover'?aiExtra(aiBrief(id,k),k):aiBrief(id,k);}else if(u.pathname.endsWith('/feedback'))data={interactionId:'x',count:1};else if(u.pathname.endsWith('/clinical-data')){clinicalRequests.push({id,hours:Number(u.searchParams.get('hours'))});if(mode==='unavailable')return r.fulfill({status:503,json:{message:'模拟数据源不可用',code:'SOURCE_UNAVAILABLE'}});data={items:obs(id),asOf:stamp};}else if(u.pathname.endsWith('/risk-assessments'))data={items:[],total:0,page:0,size:20};else if(u.pathname.endsWith('/alerts')){if(mode==='partial')return r.fulfill({status:503,json:{message:'模拟预警服务读取失败'}});data={items:id===B?[{id:'alert-B',patientId:id,encounterId:patients[id].encounterId,simulated:true,version:0,status:'pending',severity:'high',kind:'infection_abnormal',source:'bedside',trigger:'诊断文本含感染线索，且存在异常：呼吸频率 26',reason:'诊断文本含感染线索，且存在异常：呼吸频率 26',patientLabel:'模拟患者B',bed:'02',lastSeenAt:stamp,ruleVersion:'screen-alert-v1',createdAt:stamp}]:[],total:id===B?1:0,page:0,size:20};}else if(u.pathname.endsWith('/bundles/tasks'))data={items:[],total:0,page:0,size:20};await r.fulfill({json:{code:'OK',data}});});
+await page.route('**/api/v1/**',async r=>{if(r.request().method()==='POST')posts.push({url:r.request().url(),body:r.request().postDataJSON()});const u=new URL(r.request().url()),token=r.request().headers()['authorization']||'',id=[A,B,C].find(id=>token.includes(id))||B;let data=patients[id];if(u.pathname.endsWith('/quality/icu05-board'))data=board(Number(u.searchParams.get('days')||7));else if(u.pathname.endsWith('/ai/ask'))data=aiExtra(aiBrief(id,'ask'),'ask');else if(u.pathname.endsWith('/alerts/alert-B/ai'))data=r.request().method()==='GET'?null:aiExtra(aiBrief(id,'alert'),'alert');else if(u.pathname.endsWith('/ai/ward-brief'))data=aiExtra(aiBrief(id,'ward'),'ward');else if(u.pathname.endsWith('/sepsis-assessment'))data=mode==='source'?sourceAssessment(id):assessment(id);else if(u.pathname.endsWith('/icu05-bundle')){if(icu05Mode==='error')return r.fulfill({status:503,json:{message:'模拟 ICU-05 读取失败'}});data=icu05(id);}else if(u.pathname.endsWith('/ai/brief')){if(aiMode==='error')return r.fulfill({status:500,json:{message:'模拟 AI 接口异常',code:'INTERNAL'}});const k=r.request().postDataJSON().kind;data=k==='handover'?aiExtra(aiBrief(id,k),k):aiBrief(id,k);}else if(u.pathname.endsWith('/feedback'))data={interactionId:'x',count:1};else if(u.pathname.endsWith('/clinical-data')){clinicalRequests.push({id,hours:Number(u.searchParams.get('hours'))});if(mode==='unavailable')return r.fulfill({status:503,json:{message:'模拟数据源不可用',code:'SOURCE_UNAVAILABLE'}});data={items:obs(id),asOf:stamp};}else if(u.pathname.endsWith('/risk-assessments'))data={items:[],total:0,page:0,size:20};else if(u.pathname.endsWith('/alerts')){if(mode==='partial')return r.fulfill({status:503,json:{message:'模拟预警服务读取失败'}});data={items:id===B?[{id:'alert-B',patientId:id,encounterId:patients[id].encounterId,simulated:true,version:0,status:'pending',severity:'high',kind:'infection_abnormal',source:'bedside',trigger:'诊断文本含感染线索，且存在异常：呼吸频率 26',reason:'诊断文本含感染线索，且存在异常：呼吸频率 26',patientLabel:'模拟患者B',bed:'02',lastSeenAt:stamp,ruleVersion:'screen-alert-v1',createdAt:stamp}]:[],total:id===B?1:0,page:0,size:20};}else if(u.pathname.endsWith('/bundles/tasks'))data={items:[],total:0,page:0,size:20};await r.fulfill({json:{code:'OK',data}});});
 await page.goto(origin+'/review-host');f=page.frameLocator('iframe');
 const tab=name=>f.locator('nav.icu-tabs').getByRole('button',{name,exact:false});
 await test('overview puts the most urgent values first and keeps curves folded',async()=>{await ready(B);
- assert.equal(await f.locator('nav.icu-tabs button').count(),3);
+ assert.equal(await f.locator('nav.icu-tabs button').count(),4,'doctor also sees the department board tab');
  assert.equal(await f.locator('.sx-head').getAttribute('data-level'),'critical');
  assert.match(await f.locator('.sx-head h1').innerText(),/^MAP 58 偏低/);
  assert.match(await f.locator('.sx-head h1').innerText(),/乳酸 3.5 偏高/);
@@ -187,11 +202,24 @@ await test('detail list filter and range apply to rows',async()=>{
  await f.getByRole('combobox',{name:'筛选指标'}).selectOption('LACTATE');assert.match(await f.locator('tbody').innerText(),/归属未确认/);
 });
 await test('trend chart mode is inside records tab',async()=>{await f.getByRole('button',{name:'趋势图',exact:true}).click();await f.locator('svg[role=img]').first().waitFor();assert.equal(await f.locator('.trend-title').filter({hasText:'平均动脉压（有创）'}).count(),1);for(const text of await f.locator('.trend-title').allTextContents())assert.ok(!text.includes('>'));});
-await test('nurse role sees bundle across the full width',async()=>{mode='normal';role='ROLE_NURSE';await page.evaluate(id=>choose(id),A);await ready(A);await f.locator('.sx-overview.nurse-first').waitFor();
+await test('nurse role sees bundle across the full width',async()=>{mode='normal';role='ROLE_NURSE';await page.evaluate(id=>choose(id),A);await ready(A);await f.locator('.sx-overview.nurse-first').waitFor();assert.equal(await f.locator('nav.icu-tabs button').count(),3,'nurses keep the three patient tabs');
  const b=await f.locator('.sx-bundle').boundingBox(),o=await f.locator('.sx-organ').boundingBox();assert.ok(b.width>o.width*1.5&&b.y<o.y,JSON.stringify({b,o}));
  assert.equal(await f.locator('.sx-head').getAttribute('data-level'),'normal');assert.match(await f.locator('.sx-head h1').innerText(),/主要指标未超出提示阈值/);role='ROLE_DOCTOR';});
 await test('ICU-05 card shows director rule windows with tri-state cells',async()=>{icu05Mode='shock';await page.evaluate(id=>choose(id),B);await ready(B);await refresh();
  const card=f.locator('.i5');await card.waitFor();
+ assert.equal(await f.locator('.sx-head h1').innerText().then(t=>t.startsWith('感染性休克')),true,'conclusion first');
+ assert.match(await f.locator('.sx-head h1').innerText(),/T0 后 4h/);
+ assert.match(await f.locator('.sx-basis').innerText(),/首次乳酸 4.6 · MAP 58（有创） · 去甲肾上腺素 · 感染：肺炎/);
+ assert.match(await f.locator('.sx-head').innerText(),/当前：MAP 58 偏低/);
+ assert.match(await card.locator('.i5-next').innerText(),/下一步\s*复测乳酸\s*6h 时窗 · 剩 2h/);
+ const acts=card.locator('.i5-acts li');assert.equal(await acts.count(),5);
+ assert.match(await acts.filter({hasText:'抗菌药物'}).innerText(),/\+0:40[\s\S]*早于血培养/);
+ assert.equal(await acts.filter({hasText:'复测乳酸'}).getAttribute('data-state'),'todo');
+ assert.match(await card.locator('.i5-wins').innerText(),/1h 未达标[\s\S]*未达标：抗菌药早于血培养/);
+ assert.match(await f.locator('.sx-tile').filter({hasText:'乳酸 · 最近'}).innerText(),/清除 24%/);
+ assert.match(await f.locator('.sx-tile').filter({hasText:'平均动脉压'}).innerText(),/升压药：去甲肾上腺素/);
+ await page.screenshot({path:path.join(out,'74-v10-bedside-verdict.png')});
+ await card.getByRole('button',{name:'质控',exact:true}).click();
  assert.match(await card.locator('.i5-status').innerText(),/符合感染性休克判定/);
  assert.match(await card.innerText(),/T0\s*\d\d-\d\d \d\d:\d\d/);
  const heads=card.locator('.i5-table thead th');assert.equal(await heads.count(),4);
@@ -201,11 +229,29 @@ await test('ICU-05 card shows director rule windows with tri-state cells',async(
  assert.equal(await recheck.locator('td[data-tone=none]').count(),2,'1h/3h have no recheck item');
  assert.equal(await card.locator('tbody tr').filter({hasText:'MAP<65 触发'}).locator('td[data-tone=flag]').count(),3);
  assert.equal(await f.locator('.sx-bundle[aria-label="1小时集束化"]').count(),0,'legacy checklist hidden when ICU-05 available');
- assert.match(await f.locator('.sx-head .i5-head').innerText(),/ICU-05 符合感染性休克判定/);
+ assert.equal(await f.locator('.sx-head .i5-head').count(),0,'ICU-05 status shown once, in its card');
  await page.waitForFunction(()=>statusMsgs.some(m=>/ICU-05/.test(m.summary||'')));
  await page.screenshot({path:path.join(out,'68-v6-icu05-bundle.png')});
  await card.locator('.i5-limits > summary').click();assert.match(await card.locator('.i5-limits').innerText(),/reviewTime/);
  await card.screenshot({path:path.join(out,'69-v6-icu05-card.png')});
+});
+await test('doctor can confirm or exclude the pending alert from the overview',async()=>{
+ const n=posts.length;await f.locator('.sx-judge').getByRole('button',{name:'排除'}).click();const box=f.locator('.sx-judge-box');await box.waitFor();
+ assert.match(await box.innerText(),/呼吸频率 26/);assert.ok(await box.getByRole('button',{name:'提交'}).isDisabled(),'reason required');
+ await box.getByRole('button',{name:'低血压/乳酸有其他原因'}).click();await box.getByRole('button',{name:'提交'}).click();
+ await f.locator('.sx-judge-box').waitFor({state:'detached'});
+ const p=posts.slice(n).find(p=>p.url.includes('/alerts/alert-B/review'));assert.equal(p.body.action,'reject');assert.equal(p.body.reason,'低血压/乳酸有其他原因');assert.equal(p.body.expectedVersion,0);
+});
+await test('director board shows ICU-05 window rates, process indicators and cases to act on',async()=>{
+ await tab('科室质控').click();const wb=f.locator('.wb');await wb.locator('.wb-kpi').first().waitFor();
+ assert.equal(await wb.locator('.wb-kpi').count(),3);assert.match(await wb.locator('.wb-kpi').first().innerText(),/1h 完成率\s*40%\s*2\/5 例/);
+ assert.match(await wb.locator('.wb-kpi').nth(1).innerText(),/75%[\s\S]*无法判定 1/);
+ assert.match(await wb.locator('.wb-ind').innerText(),/抗菌药前留取血培养\s*60%/);assert.match(await wb.locator('.wb-ind').innerText(),/氧代谢监测\s*未接入/);
+ const first=wb.locator('.wb-table tbody tr').first();assert.match(await first.innerText(),/02[\s\S]*当前患者[\s\S]*复测乳酸 · 剩 2h20m[\s\S]*抗菌药早于血培养/);
+ assert.match(await wb.locator('.wb-table tbody tr').nth(1).innerText(),/疑似待复核[\s\S]*待医生复核感染证据/);
+ await page.screenshot({path:path.join(out,'75-v10-director-board.png')});
+ await wb.getByRole('button',{name:'近 30 天'}).click();await page.waitForTimeout(150);assert.match(await wb.locator('.wb-pool').innerText(),/入科 64 例/);
+ await tab('概览').click();await ready(B);
 });
 await test('AI assist is on-demand and every shown statement links to evidence',async()=>{aiMode='ok';await refresh();const card=f.locator('.sx-ai');await card.waitFor();
  assert.equal(posts.filter(p=>p.url.includes('/ai/brief')).length,0,'never generated automatically');
@@ -240,7 +286,8 @@ await test('AI unavailable keeps rule cards and shows sources only',async()=>{ai
  assert.equal(await f.locator('.i5').count(),1);aiMode='off';
 });
 await test('ICU-05 not-met gate folds windows as reference only',async()=>{await page.evaluate(id=>choose(id),A);await ready(A);await f.locator('.i5').waitFor();
- assert.match(await f.locator('.i5-status').innerText(),/未达休克判定/);assert.equal(await f.locator('.i5-na').count(),1);assert.equal(await f.locator('.i5-na').getAttribute('open'),null);});
+ assert.match(await f.locator('.i5-status').innerText(),/未达休克判定/);assert.equal(await f.locator('.i5-na-b').getAttribute('open'),null,'bedside list folded when not applicable');assert.equal(await f.locator('.sx-head h1').innerText().then(t=>t.includes('感染性休克')),false);
+ await f.locator('.i5').getByRole('button',{name:'质控',exact:true}).click();assert.equal(await f.locator('.i5-na').count(),1);assert.equal(await f.locator('.i5-na').getAttribute('open'),null);});
 await test('ICU-05 read failure falls back to checklist, never to not-met',async()=>{icu05Mode='error';await refresh();await f.locator('.sx-bundle[aria-label="1小时集束化"]').waitFor();assert.equal(await f.locator('.i5').count(),0);assert.equal(await f.getByText('未达标').count(),0);icu05Mode='off';});
 await test('no browser runtime errors',async()=>assert.deepEqual(errors,[]));
 fs.writeFileSync(path.join(R,'docs/host-ui-v6-browser-results.json'),JSON.stringify({scope:'compiled frontend with synthetic API responses; not hospital integration',tests,errors},null,2));

@@ -14,12 +14,12 @@ interface Turn { q: string; brief: AiBrief | null; error: string; busy: boolean;
   template: `<section class="review-card sx-ai" aria-label="AI 辅助">
     <div class="review-card-title">
       <h2><ui-icon name="file"/>AI 辅助</h2>
-      <span class="ai-label">{{ configured ? '生成内容需医生核对' : 'AI 未配置' }}</span>
+      <span class="ai-label" [title]="configured ? '仅依据本页规则结果、近 24 小时记录与指南条目' : '未接入院内模型时，可查看本次核对依据与相关指南条目'">{{ configured ? '生成内容需医生核对' : 'AI 未配置' }}</span>
       <span class="ai-actions">
         <ng-container *ngFor="let k of kinds"><button type="button" *ngIf="!k.needsIcu05 || icu05Available" [class.on]="brief?.kind === k.kind" (click)="run(k.kind)" [disabled]="!!busy" [title]="k.hint">{{ busy === k.kind ? '生成中…' : k.label }}</button></ng-container>
       </span>
     </div>
-    <p class="ai-idle" *ngIf="!brief && !busy && !error && !turns.length">{{ configured ? '按需生成，仅依据本页规则结果、近 24 小时记录与指南条目；不会自动运行。也可以在下方直接提问。' : '未接入院内模型时，可查看本次核对依据与相关指南条目。' }}</p>
+    <p class="ai-idle" *ngIf="configured && !brief && !busy && !error && !turns.length">按需生成，不会自动运行。</p>
     <p class="review-inline-error" role="alert" *ngIf="error"><ui-icon name="info"/>{{ error }}</p>
     <ai-brief-view [brief]="brief" />
     <div class="ai-chat" *ngIf="configured">
