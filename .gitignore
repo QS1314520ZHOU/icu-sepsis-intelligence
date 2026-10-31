@@ -8,11 +8,8 @@
 .vscode/
 *.iml
 .DS_Store
-backend/src/main/resources/static/main-*.js
-backend/src/main/resources/static/polyfills-*.js
-backend/src/main/resources/static/styles-*.css
-!backend/src/main/resources/static/host-demo.html
-!backend/src/main/resources/static/index.html
+# 前端产物由 mvn package 自动拷入 jar，不再手工放到 static/
+backend/src/main/resources/static/
 
 .playwright-cli/
 release/*.jar

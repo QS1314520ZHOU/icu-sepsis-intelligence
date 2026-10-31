@@ -61,6 +61,10 @@
 - `backend/`、`frontend/`、`tests/`、`scripts/`：源码与可复现命令。
 - `release/sepsis-intelligence-0.3.0.jar`（完整交付包中）：已嵌入 Angular 静态资源的可执行 jar。
 
+## 打包（前端已内置进 jar）
+
+`cd backend && mvn clean package -DskipTests` 会自动执行 `frontend` 下的 `npm install` 与 `ng build`，并把 `frontend/dist/workbench/browser` 打进 jar 的 `BOOT-INF/classes/static/`，部署时只需上传这一个 jar。打包机需安装 Node 18+；已有前端产物时可加 `-Dfrontend.skip=true` 跳过 npm 步骤。`backend/src/main/resources/static/` 不再手工维护。
+
 ## 运行要求
 - **JDK 15**，本次使用 Zulu 15.0.10；Maven 3.9.9；Node 24；npm 11。
 - **MongoDB 副本集**（本次测试 7.0.14，单节点 rs0）。事务是必要条件，不支持以 standalone 静默降级。

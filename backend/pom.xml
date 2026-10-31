@@ -1,6 +1,9 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
 <modelVersion>4.0.0</modelVersion><parent><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-parent</artifactId><version>2.7.18</version><relativePath/></parent>
-<groupId>org.icu</groupId><artifactId>sepsis-intelligence</artifactId><version>0.3.0</version><properties><java.version>15</java.version><maven.compiler.release>15</maven.compiler.release></properties>
+<groupId>org.icu</groupId><artifactId>sepsis-intelligence</artifactId><version>0.3.0</version><properties><java.version>15</java.version><maven.compiler.release>15</maven.compiler.release>
+<!-- 前端随后端一起打包：mvn package 会先 npm install + ng build，再把 dist 拷进 jar 的 static/。-Dfrontend.skip=true 可跳过 npm 步骤（仍会拷贝已有 dist）。 -->
+<frontend.dir>${project.basedir}/../frontend</frontend.dir><frontend.skip>false</frontend.skip><npm.exe>npm</npm.exe></properties>
+<profiles><profile><id>windows-npm</id><activation><os><family>windows</family></os></activation><properties><npm.exe>npm.cmd</npm.exe></properties></profile></profiles>
 <dependencies>
 <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-web</artifactId></dependency>
 <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-validation</artifactId></dependency>
@@ -9,4 +12,18 @@
 <dependency><groupId>org.springdoc</groupId><artifactId>springdoc-openapi-ui</artifactId><version>1.7.0</version></dependency>
 <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-test</artifactId><scope>test</scope></dependency>
 <dependency><groupId>org.springframework.security</groupId><artifactId>spring-security-test</artifactId><scope>test</scope></dependency>
-</dependencies><build><plugins><plugin><groupId>org.springframework.boot</groupId><artifactId>spring-boot-maven-plugin</artifactId></plugin><plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-compiler-plugin</artifactId><configuration><release>15</release></configuration></plugin></plugins></build></project>
+</dependencies><build>
+<resources><resource><directory>src/main/resources</directory><excludes><exclude>static/**</exclude></excludes></resource></resources>
+<plugins>
+<plugin><groupId>org.springframework.boot</groupId><artifactId>spring-boot-maven-plugin</artifactId></plugin>
+<plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-compiler-plugin</artifactId><configuration><release>15</release></configuration></plugin>
+<plugin><groupId>org.codehaus.mojo</groupId><artifactId>exec-maven-plugin</artifactId><version>3.1.0</version>
+<configuration><skip>${frontend.skip}</skip><executable>${npm.exe}</executable><workingDirectory>${frontend.dir}</workingDirectory></configuration>
+<executions>
+<execution><id>npm-install</id><phase>generate-resources</phase><goals><goal>exec</goal></goals><configuration><arguments><argument>install</argument><argument>--no-audit</argument><argument>--no-fund</argument></arguments></configuration></execution>
+<execution><id>ng-build</id><phase>generate-resources</phase><goals><goal>exec</goal></goals><configuration><arguments><argument>run</argument><argument>build</argument></arguments></configuration></execution>
+</executions></plugin>
+<plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-resources-plugin</artifactId>
+<executions><execution><id>copy-frontend</id><phase>process-resources</phase><goals><goal>copy-resources</goal></goals>
+<configuration><outputDirectory>${project.build.outputDirectory}/static</outputDirectory><resources><resource><directory>${frontend.dir}/dist/workbench/browser</directory></resource></resources></configuration></execution></executions></plugin>
+</plugins></build></project>
