@@ -32,6 +32,7 @@ public class LlmClient {
   }
   public static class LlmException extends RuntimeException {
     public final String kind;
+    public String detail;
     public LlmException(String kind, String message) { super(message); this.kind = kind; }
   }
 
@@ -100,6 +101,16 @@ public class LlmClient {
   }
 
   public Reply chat(String model, List<Message> messages, int timeoutMs, boolean jsonMode, int maxTokens) {
+    try {
+      return chat(model, messages, timeoutMs, jsonMode, maxTokens, disableThinking);
+    } catch (LlmException e) {
+      // 混合思考模型（vLLM reasoning 字段）把 max_tokens 用在思考上、正文为空：自动关闭思考重试一次。
+      if (!disableThinking && "thinking_exhausted".equals(e.detail)) return chat(model, messages, timeoutMs, jsonMode, maxTokens, true);
+      throw e;
+    }
+  }
+
+  private Reply chat(String model, List<Message> messages, int timeoutMs, boolean jsonMode, int maxTokens, boolean noThink) {
     ObjectNode body = json.createObjectNode();
     body.put("model", model);
     ArrayNode arr = body.putArray("messages");
@@ -108,7 +119,7 @@ public class LlmClient {
     body.put("max_tokens", Math.max(1, maxTokens));
     body.put("stream", false);
     if (jsonMode) body.putObject("response_format").put("type", "json_object");
-    if (disableThinking) body.putObject("chat_template_kwargs").put("enable_thinking", false);
+    if (noThink) body.putObject("chat_template_kwargs").put("enable_thinking", false);
     long start = System.nanoTime();
     JsonNode res = post(p.chatPath, body, timeoutMs);
     Reply r = new Reply();
@@ -120,8 +131,11 @@ public class LlmClient {
       String finish = choice.path("finish_reason").asText("");
       boolean thought = choice.path("message").hasNonNull("reasoning_content") || choice.path("message").hasNonNull("reasoning");
       log.warn("AI chat response without content (model={}, finish={}): {}", model, finish, AiAssistService.clip(res.toString(), 400));
-      if (thought && "length".equals(finish))
-        throw new LlmException("bad_response", "模型思考过程耗尽 max_tokens 未输出正文；可调大 AI_MAX_TOKENS 或设 AI_DISABLE_THINKING=true");
+      if (thought && ("length".equals(finish) || finish.isEmpty())) {
+        LlmException ex = new LlmException("bad_response", "模型思考过程耗尽 max_tokens 未输出正文；可调大 AI_MAX_TOKENS 或设 AI_DISABLE_THINKING=true");
+        ex.detail = "thinking_exhausted";
+        throw ex;
+      }
       throw new LlmException("bad_response", "模型返回缺少 content" + (finish.isEmpty() ? "" : "（finish_reason=" + finish + "）"));
     }
     r.content = stripThinking(text);
