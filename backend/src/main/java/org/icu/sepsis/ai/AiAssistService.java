@@ -297,7 +297,7 @@ public class AiAssistService {
           attempt.put("model", m[1]); attempt.put("role", m[0]);
           rec.attempts.add(attempt);
           try {
-            LlmClient.Reply r = call(m[1], messages, Integer.parseInt(m[2]), tokens(spec));
+            LlmClient.Reply r = call(m[1], m[0], messages, Integer.parseInt(m[2]), tokens(spec));
             attempt.put("latencyMs", r.latencyMs); attempt.put("finishReason", r.finishReason);
             rec.lastFinishReason = r.finishReason;
             rec.rawResponse = clip(r.content, 20000);
@@ -370,12 +370,13 @@ public class AiAssistService {
     }
   }
 
-  private LlmClient.Reply call(String model, List<LlmClient.Message> messages, int timeout, int maxTokens) {
+  private LlmClient.Reply call(String model, String role, List<LlmClient.Message> messages, int timeout, int maxTokens) {
+    Boolean thinking = llm.thinkingFor(role);
     try {
-      return llm.chat(model, messages, timeout, props.jsonMode, maxTokens);
+      return llm.chat(model, messages, timeout, props.jsonMode, maxTokens, thinking);
     } catch (LlmClient.LlmException e) {
-      // Some OpenAI-compatible servers reject response_format; retry once in plain mode.
-      if (props.jsonMode && "http_400".equals(e.kind)) return llm.chat(model, messages, timeout, false, maxTokens);
+      // Some OpenAI-compatible servers reject response_format / chat_template_kwargs; retry once in plain mode.
+      if (props.jsonMode && "http_400".equals(e.kind)) return llm.chat(model, messages, timeout, false, maxTokens, null); // 也去掉思考参数，兼容不认识 chat_template_kwargs 的网关
       throw e;
     }
   }

@@ -113,7 +113,13 @@ app:
     max-concurrent: ${AI_MAX_CONCURRENT:4}
     temperature: ${AI_TEMPERATURE:0.2}
     json-mode: ${AI_JSON_MODE:true}
-    # Qwen3 等混合思考模型：true 时请求关闭思考（chat_template_kwargs.enable_thinking=false），避免思考耗尽 max_tokens。
+    # 思考模式（Qwen3 等混合思考模型，经 chat_template_kwargs.enable_thinking 下发）：on / off / default（不传参）。
+    # 快速任务（病情摘要等）建议 off；推理任务（ICU-05 缺项分析）建议 on。思考用完 max_tokens 时自动关闭思考重试一次。
+    # 网关不认识该参数（HTTP 400）时两项都填 default。
+    thinking:
+      fast: ${AI_THINKING_FAST:off}
+      reasoning: ${AI_THINKING_REASONING:on}
+    # 旧开关：true = 两类任务都关闭思考。
     disable-thinking: ${AI_DISABLE_THINKING:false}
     # 仅隔离探测用；生产禁止 true。
     tls-insecure: ${AI_TLS_INSECURE:false}

@@ -64,6 +64,18 @@ class LlmClientParseTest {
   }
 
   @Test
+  void thinkingPerRole() {
+    LlmClient c = new LlmClient(null, JSON);
+    c.thinkingFast = "off"; c.thinkingReasoning = "on";
+    assertEquals(Boolean.FALSE, c.thinkingFor("fast"));
+    assertEquals(Boolean.TRUE, c.thinkingFor("reasoning"));
+    c.thinkingReasoning = "default";
+    assertNull(c.thinkingFor("reasoning"));
+    c.disableThinking = true;
+    assertEquals(Boolean.FALSE, c.thinkingFor("reasoning"));
+  }
+
+  @Test
   void sourceLabelsHideTableNames() {
     assertEquals("观察项", SourceLabels.of("SmartCare.bedside", "MAP"));
     assertEquals("出入量", SourceLabels.of("SmartCare.bedside", "URINE_OUTPUT"));
