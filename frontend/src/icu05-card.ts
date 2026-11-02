@@ -19,14 +19,14 @@ interface Row { code: string; name: string; cells: (Cell | null)[]; }
   template: `<section class="review-card sx-bundle i5" aria-label="感染性休克集束化">
     <div class="review-card-title">
       <h2><ui-icon name="clipboard"/>感染性休克 Bundle</h2>
-      <span class="sx-chip i5-status" *ngIf="view === 'quality' || !applicable" [attr.data-tone]="statusTone" [title]="gateTip">{{ data.gate?.statusLabel || data.statusLabel }}</span>
+      <span class="sx-chip i5-status" *ngIf="mode === 'quality' || !applicable" [attr.data-tone]="statusTone" [title]="gateTip">{{ data.gate?.statusLabel || data.statusLabel }}</span>
       <span class="sx-chip i5-t0" *ngIf="data.t0" [title]="'T0：' + (data.t0Source || '') + (data.t0OrderName ? '，' + data.t0OrderName : '')">T0 <b>{{ data.t0 | date:'MM-dd HH:mm' }}</b><small *ngIf="elapsed">已 {{ elapsed }}</small></span>
-      <div class="segmented i5-view" role="group" aria-label="Bundle 视图" *ngIf="data.windows.length">
-        <button type="button" [class.selected]="view === 'bedside'" (click)="view = 'bedside'" title="按措施列出已做、待做和剩余时间">床旁</button>
-        <button type="button" [class.selected]="view === 'quality'" (click)="view = 'quality'" title="ICU-05 质控口径：1h/3h/6h 时窗逐项判定">质控</button>
+      <div class="segmented i5-view" role="group" aria-label="Bundle 视图" *ngIf="data.windows.length && !api.nurseView">
+        <button type="button" [class.selected]="mode === 'bedside'" (click)="view = 'bedside'" title="按措施列出已做、待做和剩余时间">床旁</button>
+        <button type="button" [class.selected]="mode === 'quality'" (click)="view = 'quality'" title="ICU-05 质控口径：1h/3h/6h 时窗逐项判定">质控</button>
       </div>
     </div>
-    <ng-container *ngIf="view === 'bedside' && data.windows.length">
+    <ng-container *ngIf="mode === 'bedside' && data.windows.length">
       <div class="i5-next" *ngIf="next && applicable" [attr.data-urgent]="next.minutesLeft <= 30 ? 'y' : null">
         <span class="i5-next-k">下一步</span><b>{{ next.name }}</b><span class="i5-next-t">{{ next.window }} 时窗 · 剩 <strong>{{ left(next.minutesLeft) }}</strong>（截止 {{ next.deadline | date:'HH:mm' }}）</span>
       </div>
@@ -44,7 +44,7 @@ interface Row { code: string; name: string; cells: (Cell | null)[]; }
       </ng-template>
       <p class="i5-wins" *ngIf="applicable"><span *ngFor="let c of chips" [attr.data-state]="c.state">{{ c.key }} <b>{{ c.label }}</b></span><small class="i5-wins-why" *ngIf="failWhy">未达标：{{ failWhy }}</small></p>
     </ng-container>
-    <ng-container *ngIf="view === 'quality' || !data.windows.length">
+    <ng-container *ngIf="mode === 'quality' || !data.windows.length">
     <p class="i5-msg" *ngIf="!data.t0">{{ data.message || '未取得 T0，不做 Bundle 判定' }}</p>
     <div class="i5-gate" *ngIf="data.gate as g">
       <span><em>休克</em><ng-container *ngFor="let i of g.shock"><i [attr.data-v]="v(i.value)" [title]="tip(i)">{{ gateText(i) }}</i></ng-container></span>
@@ -76,6 +76,8 @@ export class Icu05Card implements OnChanges {
   @Input({ required: true }) data!: Icu05Result;
   rows: Row[] = [];
   api = inject(Api);
+  /** 护士视图固定床旁待办，不出现质控矩阵。 */
+  get mode(): 'bedside' | 'quality' { return this.api.nurseView ? 'bedside' : this.view; }
   view: 'bedside' | 'quality' = this.api.has('QUALITY') && !this.api.has('DOCTOR') ? 'quality' : 'bedside';
   actions: BedsideAction[] = []; next: ReturnType<typeof nextDue> = null; chips: { key: string; state: string; label: string }[] = []; elapsed = ''; failWhy = '';
   readonly mark: Record<string, string> = { done: '✓', fail: '×', todo: '○', unknown: '—' };

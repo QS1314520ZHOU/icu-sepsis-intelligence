@@ -7,6 +7,8 @@ export interface AiKnowledge { ref: string; id: string; docId: string; title: st
 export interface AiBrief {
   interactionId: string; patientId: string; encounterId: string; kind: AiKind; status: AiStatus; message: string;
   model: string | null; modelRole: string | null; fallbackUsed: boolean; latencyMs: number | null; generatedAt: string;
+  /** 输入未变时服务端复用了上次成功结果。 */
+  cached?: boolean; cachedAt?: string;
   summary: AiItem[]; gaps: AiItem[]; suggestions: AiItem[]; uncertainties: AiItem[];
   facts: AiFact[]; knowledge: AiKnowledge[]; droppedCount: number; disclaimer: string; clinicalUseAllowed: false;
   /** v2: per-kind output layout; absent on v1 responses (falls back to sectionTitles). */

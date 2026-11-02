@@ -101,6 +101,20 @@ export function extractSmartCareContext(
   return msg;
 }
 
+/**
+ * Best-effort role of the host's logged-in account (SmartCare passes it as an opaque object, e.g. 「渝中(护士)」).
+ * Used only to pick the nurse/doctor layout; permissions stay server-side.
+ */
+export function hostAccountRole(account: unknown): 'nurse' | 'doctor' | null {
+  if (account == null) return null;
+  let text = '';
+  try { text = typeof account === 'string' ? account : JSON.stringify(account); } catch { return null; }
+  if (!text) return null;
+  if (/护士|护理|nurse/i.test(text)) return 'nurse';
+  if (/医生|医师|主任|doctor|physician/i.test(text)) return 'doctor';
+  return null;
+}
+
 export function patientIdOf(patient?: SmartCarePatient | null): string {
   return String(patient?.id ?? '').trim();
 }

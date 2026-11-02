@@ -12,7 +12,7 @@ public class AiInteraction extends Base {
   public int droppedKept;
   public List<Map<String, Object>> facts;
   public List<Map<String, Object>> knowledgeFull = new ArrayList<>();
-  public String kind, status, errorKind, model, modelRole, actor, traceId, promptHash, rawResponse;
+  public String kind, status, errorKind, model, modelRole, actor, traceId, promptHash, cacheKey, rawResponse;
   public boolean fallbackUsed;
   public Long latencyMs;
   public Integer promptTokens, completionTokens;

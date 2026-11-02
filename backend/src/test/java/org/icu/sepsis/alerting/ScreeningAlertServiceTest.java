@@ -85,4 +85,39 @@ class ScreeningAlertServiceTest {
     when(db.findOne(any(Query.class), eq(Alert.class))).thenReturn(null, last);
     assertEquals(1, svc.raise(patient(), shock()));
   }
+
+  // ---- sweep scope / incremental
+  @SuppressWarnings("unchecked")
+  @Test void sweepOnlyInWardAndSkipsUnchanged() {
+    org.icu.sepsis.sepsis.SepsisAssessmentService sepsis = mock(org.icu.sepsis.sepsis.SepsisAssessmentService.class);
+    org.icu.sepsis.sepsis.Icu05Service icu05 = mock(org.icu.sepsis.sepsis.Icu05Service.class);
+    org.icu.sepsis.integration.SmartCareSourceReader reader = mock(org.icu.sepsis.integration.SmartCareSourceReader.class);
+    Patient a = patient(); a.admittedAt = now.minus(Duration.ofDays(1));
+    Patient gone = patient(); gone.id = "p2"; gone.admittedAt = now.minus(Duration.ofDays(2));
+    when(db.find(any(Query.class), eq(Patient.class))).thenReturn(List.of(a, gone));
+    when(reader.admittedAmong(anyCollection())).thenReturn(Set.of("p1"));
+    Map<String, Object> r = review(null, NO);
+    r.put("latestEvidence", List.of(Map.of("code", "MAP", "eventTime", now, "value", 70)));
+    when(sepsis.assess(any(), any())).thenReturn(r);
+    when(icu05.evaluate(any(), any())).thenReturn(Map.of("available", false));
+    ScreeningAlertService s = new ScreeningAlertService(store, sepsis, icu05, Clock.fixed(now, ZoneOffset.UTC), true, 30, 6, 60);
+    org.springframework.beans.factory.ObjectProvider<org.icu.sepsis.integration.SmartCareSourceReader> prov = mock(org.springframework.beans.factory.ObjectProvider.class);
+    when(prov.getIfAvailable()).thenReturn(reader);
+    s.setSource(prov);
+    s.scan();
+    s.scan();
+    verify(sepsis, times(2)).assess(eq(a), any());
+    verify(sepsis, never()).assess(eq(gone), any());
+    verify(icu05, times(1)).evaluate(any(), any()); // second sweep: data unchanged within full-eval window
+  }
+
+  @Test void inWardFilterFailureScansAll() {
+    org.icu.sepsis.integration.SmartCareSourceReader reader = mock(org.icu.sepsis.integration.SmartCareSourceReader.class);
+    when(reader.admittedAmong(anyCollection())).thenThrow(new RuntimeException("down"));
+    @SuppressWarnings("unchecked")
+    org.springframework.beans.factory.ObjectProvider<org.icu.sepsis.integration.SmartCareSourceReader> prov = mock(org.springframework.beans.factory.ObjectProvider.class);
+    when(prov.getIfAvailable()).thenReturn(reader);
+    svc.setSource(prov);
+    assertEquals(1, svc.filterInWard(List.of(patient())).size());
+  }
 }

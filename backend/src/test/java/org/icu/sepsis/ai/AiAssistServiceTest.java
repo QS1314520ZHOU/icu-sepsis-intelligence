@@ -141,6 +141,30 @@ class AiAssistServiceTest {
     verify(db).insert(any(AiInteraction.class));
   }
 
+  @Test void unchangedInputsReuseCachedResultUntilRefresh() {
+    models.put("fast-m", r -> ok(GOOD));
+    AiAssistService svc = service(props(true, url(), "fast-m", "reason-m", "", 2000, 4));
+    Map<String, Object> first = svc.brief(patient(), "summary", "doctor");
+    org.mockito.ArgumentCaptor<AiInteraction> saved = org.mockito.ArgumentCaptor.forClass(AiInteraction.class);
+    verify(db).insert(saved.capture());
+    assertNotNull(saved.getValue().cacheKey);
+    when(db.findOne(any(org.springframework.data.mongodb.core.query.Query.class), eq(AiInteraction.class))).thenReturn(saved.getValue());
+    Map<String, Object> second = svc.brief(patient(), "summary", "doctor");
+    assertEquals(Boolean.TRUE, second.get("cached"));
+    assertEquals(first.get("summary"), second.get("summary"));
+    assertEquals(1, requests.size(), "cache hit must not call the gateway");
+    svc.brief(patient(), "summary", "doctor", true);
+    assertEquals(2, requests.size(), "refresh bypasses the cache");
+  }
+
+  @Test void relativeTimesDoNotChangeCacheKey() {
+    List<LlmClient.Message> a = List.of(new LlmClient.Message("user", "MAP 58，记录时间 11-02 20:00（43 分钟前）"));
+    List<LlmClient.Message> b = List.of(new LlmClient.Message("user", "MAP 58，记录时间 11-02 20:00（44 分钟前）"));
+    List<LlmClient.Message> c = List.of(new LlmClient.Message("user", "MAP 62，记录时间 11-02 20:15（1 分钟前）"));
+    assertEquals(AiAssistService.cacheKey("summary", patient(), null, a), AiAssistService.cacheKey("summary", patient(), null, b));
+    assertNotEquals(AiAssistService.cacheKey("summary", patient(), null, a), AiAssistService.cacheKey("summary", patient(), null, c));
+  }
+
   @Test void promptIsDeIdentified() {
     models.put("fast-m", r -> ok(GOOD));
     service(props(true, url(), "fast-m", "", "", 2000, 4)).brief(patient(), "icu05", "doctor");

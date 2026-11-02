@@ -132,6 +132,12 @@ export class Api {
   token = '';
   user = '';
   roles: string[] = [];
+  /** Layout override (embed toggle / host account); null = derive from roles. Not a permission. */
+  viewAs: 'doctor' | 'nurse' | null = null;
+  get nurseView(): boolean {
+    if (this.viewAs) return this.viewAs === 'nurse';
+    return this.has('NURSE') && !this.has('DOCTOR');
+  }
   async login(user: string, password: string) {
     this.scheme = 'Basic';
     this.token = btoa(user + ':' + password);

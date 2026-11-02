@@ -18,7 +18,10 @@ import {
   sendSmartCareReady,
   sendSepsisStatus,
   type SmartCarePatient,
+  hostAccountRole,
 } from './smartcare-protocol';
+
+const VIEW_AS_KEY = 'sepsis.viewAs';
 
 interface Session {
   accessToken: string;
@@ -75,6 +78,10 @@ interface HostPatientSession extends Session {
         >
           <ui-icon [name]="tabIcon(t.key)"/>{{ t.label }}<span class="icu-tab-badge" *ngIf="t.key === 'alerts' && pendingCount">{{ pendingCount }}</span>
         </button>
+        <span class="icu-viewas segmented" role="group" aria-label="界面视图" title="只改变显示内容，不改变权限">
+          <button type="button" [class.selected]="!api.nurseView" (click)="setViewAs('doctor')">医生视图</button>
+          <button type="button" [class.selected]="api.nurseView" (click)="setViewAs('nurse')">护士视图</button>
+        </span>
       </nav></div>
 
       <p class="icu-error" role="alert" *ngIf="error">{{ error }}</p>
@@ -162,7 +169,25 @@ export class EmbedWorkspace implements OnInit, OnDestroy {
     { key: 'ward', label: '科室质控' },
   ];
   /** The department board is for doctors / quality staff (director view); nurses keep the three patient tabs. */
-  get visibleTabs() { return this.tabs.filter(t => t.key !== 'ward' || this.api.has('DOCTOR') || this.api.has('QUALITY')); }
+  get visibleTabs() { return this.tabs.filter(t => t.key !== 'ward' || ((this.api.has('DOCTOR') || this.api.has('QUALITY')) && !this.api.nurseView)); }
+  /** 护士 / 医生视图：本机记住手动选择；未选择时按宿主登录账号（如「渝中(护士)」）推断。 */
+  private viewAsKey = VIEW_AS_KEY;
+  setViewAs(v: 'doctor' | 'nurse') {
+    this.api.viewAs = v;
+    try { localStorage.setItem(this.viewAsKey, v); } catch { /* private mode */ }
+    if (v === 'nurse' && this.view === 'ward') this.view = 'risk';
+  }
+  /** 手动选择按宿主账号分别记住：同一工作站换人登录不会沿用上一位的视图。 */
+  private applyViewAs(account: unknown) {
+    let id = '';
+    try { id = account == null ? '' : typeof account === 'string' ? account : JSON.stringify(account); } catch { id = ''; }
+    let h = 0; for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
+    this.viewAsKey = id ? VIEW_AS_KEY + ':' + (h >>> 0).toString(36) : VIEW_AS_KEY;
+    let stored: string | null = null;
+    try { stored = localStorage.getItem(this.viewAsKey); } catch { /* ignore */ }
+    this.api.viewAs = stored === 'nurse' || stored === 'doctor' ? stored : hostAccountRole(account);
+    if (this.api.nurseView && this.view === 'ward') this.view = 'risk';
+  }
   private listener = (event: MessageEvent) => void this.receive(event);
 
   get mrn(): string {
@@ -272,7 +297,8 @@ export class EmbedWorkspace implements OnInit, OnDestroy {
     await this.applySecureContext(event, m);
   }
 
-  private async applySmartCare(event: MessageEvent, msg: { patient?: SmartCarePatient | null }) {
+  private async applySmartCare(event: MessageEvent, msg: { patient?: SmartCarePatient | null; account?: unknown }) {
+    this.applyViewAs(msg.account);
     const hostPatient = msg.patient || {};
     const patientId = String(hostPatient.id || '').trim();
     if (!patientId) {

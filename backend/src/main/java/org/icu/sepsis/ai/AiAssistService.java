@@ -161,16 +161,30 @@ public class AiAssistService {
         "任务：根据全科室当前未结束的自动预警，给出建议优先查看的患者顺序（用 P# 编号指代患者）及理由；归纳多名患者共同存在的问题（如乳酸未复测、预警长时间未处理）。不做诊断。",
         u("priority", "建议优先查看", 6), s("pattern", "共性问题", 3), UNCERTAIN));
   }
-  static final Set<String> RESERVED = Set.of("interactionId", "patientId", "encounterId", "kind", "label", "status", "message", "model",
+  static final Set<String> RESERVED = Set.of("cached", "cachedAt", "interactionId", "patientId", "encounterId", "kind", "label", "status", "message", "model",
       "modelRole", "fallbackUsed", "latencyMs", "generatedAt", "promptVersion", "alertId", "layout", "facts", "knowledge", "droppedCount",
       "disclaimer", "clinicalUseAllowed", "patients", "question");
   /** Kinds a client may request through /patients/{id}/ai/brief. */
   public static final Set<String> PATIENT_KINDS = Set.of("summary", "icu05", "trend", "handover", "note", "family");
 
-  public Map<String, Object> brief(Patient p, String kind, String actor) {
+  public Map<String, Object> brief(Patient p, String kind, String actor) { return brief(p, kind, actor, false); }
+
+  /** refresh=true 跳过缓存强制重新生成（界面“重新生成”）。 */
+  public Map<String, Object> brief(Patient p, String kind, String actor, boolean refresh) {
     if (!PATIENT_KINDS.contains(kind))
       throw new ApiException(HttpStatus.BAD_REQUEST, "BAD_KIND", "kind 仅支持 " + String.join(" / ", PATIENT_KINDS));
-    return generate(p, SPECS.get(kind), actor, List.of(), null, null);
+    return generate(p, SPECS.get(kind), actor, List.of(), null, null, true, refresh);
+  }
+
+  /** 同一病人、同一任务、输入事实（去掉“N 分钟前”这类相对时间后）与知识片段都未变时，在有效期内复用上次成功结果。 */
+  @org.springframework.beans.factory.annotation.Value("${app.ai.cache-minutes:30}")
+  int cacheMinutes = 30;
+
+  static String cacheKey(String kind, Patient p, String alertId, List<LlmClient.Message> messages) {
+    String norm = messages.stream().map(m -> m.role + ":" + m.content).collect(Collectors.joining("\n"))
+        .replaceAll("（-?\\d+ (分钟|小时)(前|后)）", "")
+        .replaceAll("已持续约 \\d+ 小时", "");
+    return sha(PROMPT_VERSION + "|" + kind + "|" + (p == null ? "" : p.id + "|" + p.encounterId) + "|" + alertId + "|" + norm);
   }
 
   /** Free question about the current patient; history = earlier turns [{q,a}] (≤4), answers are re-validated. */
@@ -189,12 +203,14 @@ public class AiAssistService {
   }
 
   /** Explanation of one alert (also run in the background right after a screening alert is created). */
-  public Map<String, Object> explainAlert(Alert a, String actor) {
+  public Map<String, Object> explainAlert(Alert a, String actor) { return explainAlert(a, actor, false); }
+
+  public Map<String, Object> explainAlert(Alert a, String actor, boolean refresh) {
     Patient p = store.db.findById(a.patientId, Patient.class);
     if (p == null) throw ApiException.notFound();
     String trig = a.trigger != null ? a.trigger : a.reason;
     List<String[]> pre = new ArrayList<>(); pre.add(new String[] {"预警", ("critical".equals(a.severity) ? "紧急" : "优先") + "预警：" + trig});
-    return generate(p, SPECS.get("alert"), actor, pre, null, a.id);
+    return generate(p, SPECS.get("alert"), actor, pre, null, a.id, true, refresh);
   }
 
   public void explainAlertAsync(Alert a) {
@@ -241,6 +257,10 @@ public class AiAssistService {
   }
 
   Map<String, Object> generate(Patient p, Spec spec, String actor, List<String[]> pre, String extra, String alertId, boolean patientFacts) {
+    return generate(p, spec, actor, pre, extra, alertId, patientFacts, false);
+  }
+
+  Map<String, Object> generate(Patient p, Spec spec, String actor, List<String[]> pre, String extra, String alertId, boolean patientFacts, boolean refresh) {
     Instant now = Instant.now();
     List<Fact> facts = new ArrayList<>();
     for (String[] f : pre) context.add(facts, f[0], f[1], null);
@@ -281,6 +301,15 @@ public class AiAssistService {
     }
     List<LlmClient.Message> messages = messages(spec, facts, chunks, extra);
     rec.promptHash = sha(messages.stream().map(m -> m.role + ":" + m.content).collect(Collectors.joining("\n")));
+    rec.cacheKey = cacheKey(spec.kind, p, alertId, messages);
+    if (!refresh && cacheMinutes > 0 && props.chatConfigured()) {
+      AiInteraction hit = cached(rec.cacheKey, now);
+      if (hit != null) {
+        Map<String, Object> out = response(hit, spec);
+        out.put("cached", true); out.put("cachedAt", hit.generatedAt != null ? hit.generatedAt : hit.createdAt);
+        return out;
+      }
+    }
     if (props.storePrompt) rec.prompt = messages.stream().map(m -> Map.of("role", m.role, "content", m.content)).collect(Collectors.toList());
 
     Map<String, Object> result = null;
@@ -331,6 +360,16 @@ public class AiAssistService {
     rec.generatedAt = now;
     store.db.insert(rec);
     return response(rec, spec);
+  }
+
+  AiInteraction cached(String key, Instant now) {
+    try {
+      return store.db.findOne(Query.query(Criteria.where("cacheKey").is(key).and("status").is("ok")
+              .and("createdAt").gte(now.minus(Duration.ofMinutes(cacheMinutes))))
+          .with(org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.DESC, "createdAt")), AiInteraction.class);
+    } catch (RuntimeException e) {
+      return null; // 缓存只是加速；读失败就照常生成
+    }
   }
 
   private List<Fact> renumber(List<Fact> facts, int offset) {
