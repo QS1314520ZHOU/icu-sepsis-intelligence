@@ -44,9 +44,26 @@ public class LlmClient {
 
   private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(LlmClient.class);
 
-  /** Qwen3 等混合思考模型：true 时请求 chat_template_kwargs.enable_thinking=false（vLLM 支持），避免思考耗尽 max_tokens。 */
+  /** 旧开关：true 等同于两类任务都关闭思考。 */
   @org.springframework.beans.factory.annotation.Value("${app.ai.disable-thinking:false}")
   boolean disableThinking;
+
+  /** 每类任务的思考模式：on / off / default（不传参，用模型默认）。通过 chat_template_kwargs.enable_thinking 下发（vLLM / Qwen3）。 */
+  @org.springframework.beans.factory.annotation.Value("${app.ai.thinking.fast:off}")
+  String thinkingFast = "default";
+
+  @org.springframework.beans.factory.annotation.Value("${app.ai.thinking.reasoning:on}")
+  String thinkingReasoning = "default";
+
+  /** null = 不下发参数。 */
+  public Boolean thinkingFor(String role) {
+    if (disableThinking) return Boolean.FALSE;
+    String v = ("reasoning".equals(role) ? thinkingReasoning : thinkingFast);
+    v = v == null ? "" : v.trim().toLowerCase(java.util.Locale.ROOT);
+    if (v.equals("on") || v.equals("true")) return Boolean.TRUE;
+    if (v.equals("off") || v.equals("false")) return Boolean.FALSE;
+    return null;
+  }
 
   private HttpClient http() {
     if (http == null) synchronized (this) {
@@ -101,16 +118,21 @@ public class LlmClient {
   }
 
   public Reply chat(String model, List<Message> messages, int timeoutMs, boolean jsonMode, int maxTokens) {
+    return chat(model, messages, timeoutMs, jsonMode, maxTokens, disableThinking ? Boolean.FALSE : null);
+  }
+
+  /** thinking：null 不下发；思考用完 max_tokens、正文为空时自动关闭思考重试一次。 */
+  public Reply chat(String model, List<Message> messages, int timeoutMs, boolean jsonMode, int maxTokens, Boolean thinking) {
     try {
-      return chat(model, messages, timeoutMs, jsonMode, maxTokens, disableThinking);
+      return send(model, messages, timeoutMs, jsonMode, maxTokens, thinking);
     } catch (LlmException e) {
-      // 混合思考模型（vLLM reasoning 字段）把 max_tokens 用在思考上、正文为空：自动关闭思考重试一次。
-      if (!disableThinking && "thinking_exhausted".equals(e.detail)) return chat(model, messages, timeoutMs, jsonMode, maxTokens, true);
+      if (!Boolean.FALSE.equals(thinking) && "thinking_exhausted".equals(e.detail))
+        return send(model, messages, timeoutMs, jsonMode, maxTokens, Boolean.FALSE);
       throw e;
     }
   }
 
-  private Reply chat(String model, List<Message> messages, int timeoutMs, boolean jsonMode, int maxTokens, boolean noThink) {
+  private Reply send(String model, List<Message> messages, int timeoutMs, boolean jsonMode, int maxTokens, Boolean thinking) {
     ObjectNode body = json.createObjectNode();
     body.put("model", model);
     ArrayNode arr = body.putArray("messages");
@@ -119,7 +141,7 @@ public class LlmClient {
     body.put("max_tokens", Math.max(1, maxTokens));
     body.put("stream", false);
     if (jsonMode) body.putObject("response_format").put("type", "json_object");
-    if (noThink) body.putObject("chat_template_kwargs").put("enable_thinking", false);
+    if (thinking != null) body.putObject("chat_template_kwargs").put("enable_thinking", thinking.booleanValue());
     long start = System.nanoTime();
     JsonNode res = post(p.chatPath, body, timeoutMs);
     Reply r = new Reply();
