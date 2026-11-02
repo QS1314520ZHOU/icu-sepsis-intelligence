@@ -41,6 +41,12 @@ public class LlmClient {
 
   public LlmClient(AiProperties p, ObjectMapper json) { this.p = p; this.json = json; }
 
+  private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(LlmClient.class);
+
+  /** Qwen3 等混合思考模型：true 时请求 chat_template_kwargs.enable_thinking=false（vLLM 支持），避免思考耗尽 max_tokens。 */
+  @org.springframework.beans.factory.annotation.Value("${app.ai.disable-thinking:false}")
+  boolean disableThinking;
+
   private HttpClient http() {
     if (http == null) synchronized (this) {
       if (http == null) {
@@ -102,14 +108,23 @@ public class LlmClient {
     body.put("max_tokens", Math.max(1, maxTokens));
     body.put("stream", false);
     if (jsonMode) body.putObject("response_format").put("type", "json_object");
+    if (disableThinking) body.putObject("chat_template_kwargs").put("enable_thinking", false);
     long start = System.nanoTime();
     JsonNode res = post(p.chatPath, body, timeoutMs);
     Reply r = new Reply();
     r.latencyMs = (System.nanoTime() - start) / 1_000_000;
-    JsonNode choice = res.path("choices").path(0);
-    JsonNode content = choice.path("message").path("content");
-    if (content.isMissingNode() || content.isNull()) throw new LlmException("bad_response", "模型返回缺少 content");
-    r.content = stripThinking(content.asText());
+    JsonNode root = res.has("choices") || !res.path("data").has("choices") ? res : res.path("data");
+    JsonNode choice = root.path("choices").path(0);
+    String text = extractContent(root);
+    if (text == null) {
+      String finish = choice.path("finish_reason").asText("");
+      boolean thought = choice.path("message").hasNonNull("reasoning_content") || choice.path("message").hasNonNull("reasoning");
+      log.warn("AI chat response without content (model={}, finish={}): {}", model, finish, AiAssistService.clip(res.toString(), 400));
+      if (thought && "length".equals(finish))
+        throw new LlmException("bad_response", "模型思考过程耗尽 max_tokens 未输出正文；可调大 AI_MAX_TOKENS 或设 AI_DISABLE_THINKING=true");
+      throw new LlmException("bad_response", "模型返回缺少 content" + (finish.isEmpty() ? "" : "（finish_reason=" + finish + "）"));
+    }
+    r.content = stripThinking(text);
     r.finishReason = choice.path("finish_reason").asText(null);
     r.model = res.path("model").asText(model);
     JsonNode u = res.path("usage");
@@ -169,11 +184,63 @@ public class LlmClient {
     }
     if (res.statusCode() / 100 != 2)
       throw new LlmException("http_" + res.statusCode(), "AI 服务返回 HTTP " + res.statusCode());
+    String raw = res.body() == null ? "" : res.body();
     try {
-      return json.readTree(res.body());
+      return json.readTree(raw);
     } catch (Exception e) {
-      throw new LlmException("bad_response", "AI 服务返回非 JSON");
+      JsonNode sse = fromSse(raw);
+      if (sse != null) return sse;
+      log.warn("AI gateway returned non-JSON from {} (HTTP {}): {}", path, res.statusCode(), AiAssistService.clip(raw, 400));
+      throw new LlmException("bad_response", "AI 服务返回非 JSON：" + AiAssistService.clip(raw.replaceAll("\\s+", " "), 80));
     }
+  }
+
+  /** OpenAI 兼容的几种正文形态：message.content 字符串 / 分段数组、text、Anthropic content[]。 */
+  static String extractContent(JsonNode root) {
+    JsonNode choice = root.path("choices").path(0);
+    JsonNode c = choice.path("message").path("content");
+    if (c.isTextual()) return c.asText();
+    if (c.isArray()) {
+      StringBuilder b = new StringBuilder();
+      for (JsonNode part : c) if (part.path("text").isTextual()) b.append(part.path("text").asText());
+      if (b.length() > 0) return b.toString();
+    }
+    if (choice.path("text").isTextual()) return choice.path("text").asText();
+    if (choice.path("delta").path("content").isTextual()) return choice.path("delta").path("content").asText();
+    JsonNode a = root.path("content");
+    if (a.isArray() && a.size() > 0 && a.path(0).path("text").isTextual()) return a.path(0).path("text").asText();
+    if (root.path("output_text").isTextual()) return root.path("output_text").asText();
+    return null;
+  }
+
+  /** 网关强制流式（text/event-stream）时，把 data: 分片拼回一个普通响应。 */
+  JsonNode fromSse(String raw) {
+    if (!raw.contains("data:")) return null;
+    StringBuilder text = new StringBuilder();
+    String finish = null, model = null;
+    boolean any = false;
+    for (String line : raw.split("\\r?\\n")) {
+      line = line.trim();
+      if (!line.startsWith("data:")) continue;
+      String d = line.substring(5).trim();
+      if (d.isEmpty() || "[DONE]".equals(d)) continue;
+      try {
+        JsonNode n = json.readTree(d);
+        JsonNode ch = n.path("choices").path(0);
+        JsonNode piece = ch.path("delta").path("content");
+        if (!piece.isTextual()) piece = ch.path("message").path("content");
+        if (piece.isTextual()) { text.append(piece.asText()); any = true; }
+        if (ch.hasNonNull("finish_reason")) finish = ch.path("finish_reason").asText();
+        if (n.hasNonNull("model")) model = n.path("model").asText();
+      } catch (Exception ignored) { }
+    }
+    if (!any) return null;
+    ObjectNode out = json.createObjectNode();
+    if (model != null) out.put("model", model);
+    ObjectNode ch = out.putArray("choices").addObject();
+    ch.putObject("message").put("role", "assistant").put("content", text.toString());
+    if (finish != null) ch.put("finish_reason", finish);
+    return out;
   }
 
   /** Reasoning models may inline their chain of thought; it is never shown or parsed. */

@@ -133,7 +133,7 @@ const sheetOrder = ['MAP_IBP','SBP_IBP','DBP_IBP','MAP_NIBP','SBP_NIBP','DBP_NIB
                 <td>{{ o.text || (o.value ?? '—') }} {{ o.unit }}</td>
                 <td>{{ o.eventTime | date: 'MM-dd HH:mm' }}<small>{{ o.timeBasis === 'reported' ? '报告 / 审核；采样未知' : '观测时间' }}</small></td>
                 <td>
-                  {{ sourceLabel(o.sourceSystem) }}<button class="source-link" (click)="selectedRecord=o">查看来源</button>
+                  {{ sourceLabel(o.sourceSystem, o.parameterCode) }}<button class="source-link" (click)="selectedRecord=o">查看来源</button>
                 </td>
               </tr>
             </tbody>
@@ -205,7 +205,7 @@ const sheetOrder = ['MAP_IBP','SBP_IBP','DBP_IBP','MAP_NIBP','SBP_NIBP','DBP_NIB
       </button>
       <div class="empty" *ngIf="!history.length">暂无历史评估</div>
     </section></details>
-    <section class="record-source-drawer" *ngIf="selectedRecord"><div class="section-head"><h2><ui-icon name="file"/>{{ label(selectedRecord.parameterCode) }}</h2><button (click)="selectedRecord=null">关闭</button></div><div class="evidence-reading">{{ selectedRecord.value ?? '—' }}<small>{{ selectedRecord.unit }}</small></div><dl><dt>{{ timeLabel(selectedRecord.timeBasis) }}</dt><dd>{{ selectedRecord.eventTime | date:'yyyy-MM-dd HH:mm:ss' }}</dd><dt>来源</dt><dd>{{ sourceLabel(selectedRecord.sourceSystem) }}</dd></dl><p class="context-warning" *ngIf="evidenceNote(selectedRecord)">{{ evidenceNote(selectedRecord) }}</p><details class="ev-tech" *ngIf="selectedRecord.sourceRecordId"><summary>追溯信息（供信息科核对原始记录）</summary><p>记录号 {{ selectedRecord.sourceRecordId }}</p><p>源字段 {{ selectedRecord.sourceParameterCode || selectedRecord.parameterCode }}</p></details></section>`,
+    <section class="record-source-drawer" *ngIf="selectedRecord"><div class="section-head"><h2><ui-icon name="file"/>{{ label(selectedRecord.parameterCode) }}</h2><button (click)="selectedRecord=null">关闭</button></div><div class="evidence-reading">{{ selectedRecord.value ?? '—' }}<small>{{ selectedRecord.unit }}</small></div><dl><dt>{{ timeLabel(selectedRecord.timeBasis) }}</dt><dd>{{ selectedRecord.eventTime | date:'yyyy-MM-dd HH:mm:ss' }}</dd><dt>来源</dt><dd>{{ sourceLabel(selectedRecord.sourceSystem, selectedRecord.parameterCode) }}</dd></dl><p class="context-warning" *ngIf="evidenceNote(selectedRecord)">{{ evidenceNote(selectedRecord) }}</p><details class="ev-tech" *ngIf="selectedRecord.sourceRecordId"><summary>追溯信息（供信息科核对原始记录）</summary><p>记录号 {{ selectedRecord.sourceRecordId }}</p><p>源字段 {{ selectedRecord.sourceParameterCode || selectedRecord.parameterCode }}</p></details></section>`,
 })
 export class Detail implements OnInit, OnDestroy {
   @Input() embedded = false;
