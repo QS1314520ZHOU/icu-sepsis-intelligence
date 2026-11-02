@@ -59,6 +59,8 @@ public class DatabaseSetup implements ApplicationRunner {
                 .on("patientId", Sort.Direction.ASC)
                 .on("encounterId", Sort.Direction.ASC)
                 .on("createdAt", Sort.Direction.DESC));
+    db.indexOps(org.icu.sepsis.ai.AiInteraction.class)
+        .ensureIndex(new Index().on("cacheKey", Sort.Direction.ASC).on("createdAt", Sort.Direction.DESC));
     db.indexOps(Assessment.class)
         .ensureIndex(
             new Index()

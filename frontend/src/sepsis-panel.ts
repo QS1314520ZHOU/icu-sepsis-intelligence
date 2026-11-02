@@ -112,7 +112,7 @@ const units: Record<string, string> = { MAP: 'mmHg', SBP: 'mmHg', LACTATE: 'mmol
           </tr>
         </tbody></table>
       </section>
-      <section class="review-card sx-organ" aria-label="器官功能">
+      <section class="review-card sx-organ" aria-label="器官功能" *ngIf="!nurseFirst">
         <div class="review-card-title">
           <h2><ui-icon name="activity"/>器官功能</h2>
           <span class="sx-sofa-chips">
@@ -197,7 +197,7 @@ const units: Record<string, string> = { MAP: 'mmHg', SBP: 'mmHg', LACTATE: 'mmol
       <summary><ui-icon name="chart"/>生命体征趋势</summary>
       <clinical-trends *ngIf="showTrends" [items]="observations" [asOf]="asOf" [embedded]="true" [availableHours]="24" [compact]="true" [busy]="loading" (openRecords)="openEvidence.emit()" (openHistory)="openTrends.emit()"/>
     </details>
-    <details class="sx-limits" *ngIf="limits.length" aria-label="数据限制"><summary><ui-icon name="info"/>数据限制 {{ limits.length }} 项</summary><ul><li *ngFor="let l of limits">{{ l }}</li></ul>
+    <details class="sx-limits" *ngIf="limits.length && !nurseFirst" aria-label="数据限制"><summary><ui-icon name="info"/>数据限制 {{ limits.length }} 项</summary><ul><li *ngFor="let l of limits">{{ l }}</li></ul>
       <div class="review-table-wrap" *ngIf="data?.contextEvidence?.length"><table><thead><tr><th>未确认归属的报告</th><th>报告值</th><th>报告时间</th><th></th></tr></thead><tbody><tr *ngFor="let e of data!.contextEvidence"><td>{{ featureName(e.code) }}</td><td>{{ e.value }} {{ e.unit || '' }}</td><td>{{ e.eventTime | date:'MM-dd HH:mm' }}</td><td><button class="text-button" (click)="selected=e">来源</button></td></tr></tbody></table></div>
     </details>
     <section class="review-evidence-detail" *ngIf="selected" aria-label="指标详情"><div class="review-card-title"><h2><ui-icon name="file"/>{{ selected.label || featureName(selected.code) }}</h2><button (click)="selected=null">关闭</button></div><div class="evidence-reading">{{ selected.value }}<small>{{ selected.unit || '单位未知' }}</small><span class="ev-word" *ngIf="evWord(selected) as w" [attr.data-level]="evLevel(selected)">{{ w }}</span></div><dl><dt>{{ selected.timeBasis==='reported' ? '报告时间' : '记录时间' }}</dt><dd>{{ selected.eventTime | date:'MM-dd HH:mm' }}<span class="muted"> · {{ evAgo(selected) }}</span></dd><dt>来源</dt><dd>{{ sourceName(selected.sourceSystem, selected.code) }}<ng-container *ngIf="channelName(selected) as c"> · {{ c }}</ng-container></dd><ng-container *ngIf="evRef(selected) as r"><dt>参考</dt><dd>{{ r }}</dd></ng-container></dl><ng-container *ngIf="evStats(selected) as st"><p class="ev-stats">近 24 小时 {{ st.n }} 次 · 最低 <b>{{ st.min }}</b>（{{ st.minAt | date:'HH:mm' }}）· 最高 <b>{{ st.max }}</b>（{{ st.maxAt | date:'HH:mm' }}）<ng-container *ngIf="st.n > 1"> · 首次 {{ st.first }} → 最近 {{ st.last }}</ng-container></p><table class="ev-recent"><thead><tr><th>时间</th><th>数值</th></tr></thead><tbody><tr *ngFor="let o of st.recent"><td>{{ o.eventTime | date:'MM-dd HH:mm' }}</td><td [attr.data-level]="evLevel(o)">{{ o.value }}</td></tr></tbody></table></ng-container><p class="context-warning" *ngIf="selected.qualityNote">{{ selected.qualityNote }}</p><details class="ev-tech" *ngIf="selected.sourceRecordId || selected.sourceParameterCode"><summary>追溯信息（供信息科核对原始记录）</summary><p *ngIf="selected.sourceRecordId">记录号 {{ selected.sourceRecordId }}</p><p *ngIf="selected.sourceParameterCode">源字段 {{ selected.sourceParameterCode }}</p></details></section>
@@ -212,7 +212,7 @@ export class SepsisPanel implements OnChanges, OnDestroy {
   @Output() openTasks = new EventEmitter<void>();
   @Output() status = new EventEmitter<SepsisStatus>();
   api = inject(Api);
-  get canAssist() { return this.api.has('DOCTOR') || this.api.has('NURSE'); }
+  get canAssist() { return (this.api.has('DOCTOR') || this.api.has('NURSE')) && !this.nurseFirst; }
   data: ClinicalReview | null = null;
   icu05: Icu05Result | null = null;
   observations: Observation[] = [];
@@ -241,7 +241,7 @@ export class SepsisPanel implements OnChanges, OnDestroy {
     confirm: ['已复核，符合', '已按集束化处理', '其他'],
     reject: ['不考虑感染性休克', '低血压/乳酸有其他原因', '数据错误或监测干扰', '已在充分治疗', '其他'],
   };
-  get canJudge() { return this.api.has('DOCTOR'); }
+  get canJudge() { return this.api.has('DOCTOR') && !this.nurseFirst; }
   get judgeReason() {
     const n = this.judgeNote.trim();
     if (!this.judgeQuick) return n;
@@ -279,7 +279,8 @@ export class SepsisPanel implements OnChanges, OnDestroy {
   }
   sourceName = sourceLabel;
   abs = Math.abs;
-  get nurseFirst() { return this.api.has('NURSE') && !this.api.has('DOCTOR'); }
+  /** 护士视图：只留执行相关（指标、Bundle 床旁待办、预警/任务入口），隐藏判定、SOFA、AI 与数据口径说明。 */
+  get nurseFirst() { return this.api.nurseView; }
   get hasAnyValue() { return this.tiles.some(t => t.value !== null); }
   get infectionHit() { return !!this.data?.infectionClue && this.data.infectionClue.includes('含感染'); }
   onTrendsToggle(open: boolean) { this.showTrends = open; rememberTrends(open); }

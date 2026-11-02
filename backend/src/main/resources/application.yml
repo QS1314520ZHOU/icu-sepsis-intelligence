@@ -125,6 +125,8 @@ app:
     tls-insecure: ${AI_TLS_INSECURE:false}
     tls-ca-file: ${AI_TLS_CA_FILE:}
     store-prompt: ${AI_STORE_PROMPT:true}
+    # 结果缓存（分钟）：病人数据与知识片段未变时复用上次成功结果；0 = 关闭。界面“重新生成”跳过缓存。
+    cache-minutes: ${AI_CACHE_MINUTES:30}
     knowledge-dir: ${AI_KNOWLEDGE_DIR:}
     time-zone: ${AI_TIME_ZONE:Asia/Shanghai}
 
@@ -135,6 +137,11 @@ app:
     scan-days: ${ALERTS_SCAN_DAYS:30}          # 只巡检近 N 天入科患者
     reject-suppress-hours: ${ALERTS_REJECT_SUPPRESS_HOURS:6}
     close-suppress-minutes: ${ALERTS_CLOSE_SUPPRESS_MINUTES:60}
+    in-ward-only: ${ALERTS_IN_WARD_ONLY:true}      # 只巡检 SmartCare 仍在科（status=admitted）的患者
+    max-patients: ${ALERTS_MAX_PATIENTS:200}       # 单轮最多评估人数
+    icu05-scan-days: ${ALERTS_ICU05_SCAN_DAYS:7}   # ICU-05 门控只算入科 ≤N 天的患者；床旁筛查不受限
+    skip-unchanged: ${ALERTS_SKIP_UNCHANGED:true}  # 床旁数据无变化时跳过本轮 ICU-05 与写库
+    full-eval-minutes: ${ALERTS_FULL_EVAL_MINUTES:60}  # 即使无变化也至少每 N 分钟完整评估一次
 
   # 筛查/复核显示阈值（RuleConfig）。规则自动判定，不是诊断。
   rules:

@@ -412,6 +412,19 @@ public class SmartCareSourceReader {
     return rows;
   }
 
+  /** Of the given host patient ids, those still 在科 (status=admitted) in SmartCare. Invalid ids are ignored. */
+  public java.util.Set<String> admittedAmong(java.util.Collection<String> hostPatientIds) {
+    List<ObjectId> ids = new ArrayList<>();
+    for (String id : hostPatientIds) if (id != null && OBJECT_ID.matcher(id).matches()) ids.add(new ObjectId(id));
+    java.util.Set<String> out = new java.util.HashSet<>();
+    if (ids.isEmpty()) return out;
+    for (Document d : smartcare.getCollection("patient")
+        .find(new Document("_id", new Document("$in", ids)).append("status", "admitted"))
+        .projection(new Document("_id", 1)))
+      out.add(d.getObjectId("_id").toHexString());
+    return out;
+  }
+
   public List<Map<String, Object>> listByDept(String deptCode, int limit) {
     int size = Math.max(1, Math.min(limit, 100));
     List<Map<String, Object>> out = new ArrayList<>();

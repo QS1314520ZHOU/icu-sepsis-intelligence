@@ -47,3 +47,13 @@ test('ignores unrelated messages', () => {
 test('default navigate module is 病情概览', () => {
   assert.equal(DEFAULT_MODULE_ID, 'doctor-diagnosis-patient-review');
 });
+
+test('host account role picks nurse/doctor layout only from explicit hints', async () => {
+  const { hostAccountRole } = await import('../src/smartcare-protocol.ts');
+  assert.equal(hostAccountRole({ name: '渝中', title: '护士' }), 'nurse');
+  assert.equal(hostAccountRole('渝中(护士)'), 'nurse');
+  assert.equal(hostAccountRole({ role: 'doctor' }), 'doctor');
+  assert.equal(hostAccountRole({ name: '张主任' }), 'doctor');
+  assert.equal(hostAccountRole({ id: 42 }), null);
+  assert.equal(hostAccountRole(undefined), null);
+});

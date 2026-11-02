@@ -18,6 +18,8 @@ import org.springframework.web.bind.annotation.*;
 public class AiController {
   public static class BriefRequest {
     @NotBlank @Pattern(regexp = "summary|icu05|trend|handover|note|family") public String kind = "summary";
+    /** true = 跳过缓存重新生成。 */
+    public boolean refresh;
   }
   public static class AskRequest {
     @NotBlank @Size(max = 300) public String question;
@@ -40,7 +42,7 @@ public class AiController {
   @PostMapping("/patients/{id}/ai/brief")
   @PreAuthorize("hasAnyRole('DOCTOR','NURSE')")
   public Envelope<?> brief(@PathVariable String id, @Valid @RequestBody BriefRequest r, Authentication a) {
-    return Envelope.ok(ai.brief(s.patient(id), r.kind, a.getName()));
+    return Envelope.ok(ai.brief(s.patient(id), r.kind, a.getName(), r.refresh));
   }
 
   @PostMapping("/patients/{id}/ai/ask")
@@ -59,7 +61,7 @@ public class AiController {
   @PostMapping("/alerts/{id}/ai")
   @PreAuthorize("hasAnyRole('DOCTOR','NURSE')")
   public Envelope<?> alertAiRun(@PathVariable String id, Authentication a) {
-    return Envelope.ok(ai.explainAlert(s.get(id, org.icu.sepsis.domain.Domain.Alert.class), a.getName()));
+    return Envelope.ok(ai.explainAlert(s.get(id, org.icu.sepsis.domain.Domain.Alert.class), a.getName(), true));
   }
 
   /** Ward prioritisation over all open alerts of the department (patients pseudonymised to the model). */

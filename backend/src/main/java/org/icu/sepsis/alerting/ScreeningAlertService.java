@@ -42,6 +42,22 @@ public class ScreeningAlertService {
   private final int scanDays, rejectSuppressHours, closeSuppressMinutes;
 
   private org.springframework.beans.factory.ObjectProvider<org.icu.sepsis.ai.AiAssistService> ai;
+  private org.springframework.beans.factory.ObjectProvider<org.icu.sepsis.integration.SmartCareSourceReader> source;
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setSource(org.springframework.beans.factory.ObjectProvider<org.icu.sepsis.integration.SmartCareSourceReader> source) { this.source = source; }
+
+  /** 只扫 SmartCare 仍在科（status=admitted）的病人；出科病人不再反复计算。 */
+  @Value("${app.alerts.in-ward-only:true}") boolean inWardOnly = true;
+  /** 单轮最多评估人数，防止一次扫描拖垮源库。 */
+  @Value("${app.alerts.max-patients:200}") int maxPatients = 200;
+  /** ICU-05 门控只对入科不超过 N 天的病人计算（T0 在入科早期）；床旁筛查不受限。 */
+  @Value("${app.alerts.icu05-scan-days:7}") int icu05ScanDays = 7;
+  /** 病人无新观测时跳过（同一病人上轮已评估且数据指纹未变）。 */
+  @Value("${app.alerts.skip-unchanged:true}") boolean skipUnchanged = true;
+  /** 即使数据未变，也至少每 N 分钟完整评估一次（抑制期到期、时窗推进、执行单/医嘱变化）。 */
+  @Value("${app.alerts.full-eval-minutes:60}") int fullEvalMinutes = 60;
+  private final Map<String, String> lastFingerprint = new java.util.concurrent.ConcurrentHashMap<>();
+  private final Map<String, Instant> lastFullEval = new java.util.concurrent.ConcurrentHashMap<>();
   @org.springframework.beans.factory.annotation.Autowired(required = false)
   void setAi(org.springframework.beans.factory.ObjectProvider<org.icu.sepsis.ai.AiAssistService> ai) { this.ai = ai; }
 
@@ -116,17 +132,66 @@ public class ScreeningAlertService {
   @Scheduled(initialDelayString = "${app.alerts.initial-delay-ms:120000}", fixedDelayString = "${app.alerts.scan-ms:600000}")
   public void scan() {
     if (!enabled) return;
+    long started = System.nanoTime();
     Instant now = clock.instant();
     Query q = Query.query(Criteria.where("admittedAt").gte(now.minus(Duration.ofDays(scanDays))))
         .with(Sort.by(Sort.Direction.DESC, "admittedAt")).limit(500);
-    int n = 0;
-    for (Patient p : store.db.find(q, Patient.class)) {
+    List<Patient> candidates = store.db.find(q, Patient.class);
+    List<Patient> ward = filterInWard(candidates);
+    if (ward.size() > maxPatients) ward = ward.subList(0, maxPatients);
+    int n = 0, evaluated = 0, skipped = 0;
+    Set<String> alive = new HashSet<>();
+    for (Patient p : ward) {
+      alive.add(p.id);
       List<Hit> hits = new ArrayList<>();
-      try { hits.addAll(fromReview(sepsis.assess(p, now))); } catch (RuntimeException e) { log.debug("screen review {}", p.id, e); }
-      try { hits.addAll(fromIcu05(icu05.evaluate(p, now))); } catch (RuntimeException e) { log.debug("screen icu05 {}", p.id, e); }
+      Map<String, Object> review = null;
+      try { review = sepsis.assess(p, now); hits.addAll(fromReview(review)); } catch (RuntimeException e) { log.debug("screen review {}", p.id, e); }
+      String fp = fingerprint(review);
+      Instant full = lastFullEval.get(p.id);
+      boolean fresh = full != null && full.isAfter(now.minus(Duration.ofMinutes(fullEvalMinutes)));
+      if (skipUnchanged && fresh && fp != null && fp.equals(lastFingerprint.get(p.id))) { skipped++; continue; }
+      boolean icu05Due = p.admittedAt == null || p.admittedAt.isAfter(now.minus(Duration.ofDays(icu05ScanDays)));
+      if (icu05Due) try { hits.addAll(fromIcu05(icu05.evaluate(p, now))); } catch (RuntimeException e) { log.debug("screen icu05 {}", p.id, e); }
+      evaluated++;
       n += raise(p, hits);
+      if (fp != null) lastFingerprint.put(p.id, fp);
+      lastFullEval.put(p.id, now);
     }
-    if (n > 0) log.info("screening sweep raised {} alert(s)", n);
+    lastFingerprint.keySet().retainAll(alive);
+    lastFullEval.keySet().retainAll(alive);
+    long ms = (System.nanoTime() - started) / 1_000_000;
+    if (n > 0 || ms > 30_000)
+      log.info("screening sweep: candidates={} inWard={} evaluated={} unchanged={} newAlerts={} took={}ms", candidates.size(), ward.size(), evaluated, skipped, n, ms);
+    else log.debug("screening sweep: candidates={} inWard={} evaluated={} unchanged={} took={}ms", candidates.size(), ward.size(), evaluated, skipped, ms);
+  }
+
+  /** SmartCare 模式下只保留仍在科的病人；读取失败时退回全部候选（宁可多扫，不漏扫）。 */
+  List<Patient> filterInWard(List<Patient> candidates) {
+    org.icu.sepsis.integration.SmartCareSourceReader r = source == null ? null : source.getIfAvailable();
+    if (!inWardOnly || r == null || candidates.isEmpty()) return new ArrayList<>(candidates);
+    try {
+      List<String> ids = new ArrayList<>();
+      for (Patient p : candidates) ids.add(p.id);
+      Set<String> admitted = r.admittedAmong(ids);
+      List<Patient> out = new ArrayList<>();
+      for (Patient p : candidates) if (admitted.contains(p.id)) out.add(p);
+      return out;
+    } catch (RuntimeException e) {
+      log.warn("in-ward filter failed, scanning all candidates: {}", e.toString());
+      return new ArrayList<>(candidates);
+    }
+  }
+
+  /** 床旁证据的指纹：各指标最新记录时间+数值、升压药/感染线索。无新数据 → 指纹不变 → 本轮跳过 ICU-05 与预警写入。 */
+  @SuppressWarnings("unchecked")
+  static String fingerprint(Map<String, Object> review) {
+    if (review == null || !Boolean.TRUE.equals(review.get("available"))) return null;
+    StringBuilder b = new StringBuilder();
+    for (Map<String, Object> e : (List<Map<String, Object>>) review.getOrDefault("latestEvidence", List.of()))
+      b.append(e.get("code")).append('@').append(e.get("eventTime")).append('=').append(e.get("value")).append(';');
+    b.append("|v=").append(review.get("vasopressorActive")).append("|i=").append(review.get("infectionClue"))
+        .append("|m=").append(review.get("missingFeatures"));
+    return b.toString();
   }
 
   /** Returns the number of new alerts. */

@@ -21,6 +21,7 @@ interface Turn { q: string; brief: AiBrief | null; error: string; busy: boolean;
     </div>
     <p class="ai-idle" *ngIf="configured && !brief && !busy && !error && !turns.length">按需生成，不会自动运行。</p>
     <p class="review-inline-error" role="alert" *ngIf="error"><ui-icon name="info"/>{{ error }}</p>
+    <p class="ai-idle ai-cached" *ngIf="brief?.cached && !busy">数据未变化，复用 {{ brief?.cachedAt | date:'HH:mm' }} 的结果 · <button type="button" class="text-button" (click)="run(brief!.kind, true)">重新生成</button></p>
     <ai-brief-view [brief]="brief" />
     <div class="ai-chat" *ngIf="configured">
       <div class="ai-turn" *ngFor="let t of turns">
@@ -57,11 +58,11 @@ export class AiAssistCard implements OnChanges {
     if (key === this.lastKey) return;
     this.lastKey = key; ++this.generation; this.brief = null; this.busy = null; this.error = ''; this.turns = []; this.question = '';
   }
-  async run(kind: AiKind) {
+  async run(kind: AiKind, refresh = false) {
     const generation = ++this.generation;
     this.busy = kind; this.error = '';
     try {
-      const b = await this.api.post<AiBrief>('/patients/' + encodeURIComponent(this.patientId) + '/ai/brief', { kind });
+      const b = await this.api.post<AiBrief>('/patients/' + encodeURIComponent(this.patientId) + '/ai/brief', refresh ? { kind, refresh: true } : { kind });
       if (generation !== this.generation) return;
       if (!acceptsBrief(b, this.patientId, this.encounterId)) { this.brief = null; this.error = '患者上下文不一致，已丢弃本次结果。'; return; }
       this.brief = b;
