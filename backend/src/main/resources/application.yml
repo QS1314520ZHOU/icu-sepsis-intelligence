@@ -113,6 +113,8 @@ app:
     max-concurrent: ${AI_MAX_CONCURRENT:4}
     temperature: ${AI_TEMPERATURE:0.2}
     json-mode: ${AI_JSON_MODE:true}
+    # Qwen3 等混合思考模型：true 时请求关闭思考（chat_template_kwargs.enable_thinking=false），避免思考耗尽 max_tokens。
+    disable-thinking: ${AI_DISABLE_THINKING:false}
     # 仅隔离探测用；生产禁止 true。
     tls-insecure: ${AI_TLS_INSECURE:false}
     tls-ca-file: ${AI_TLS_CA_FILE:}

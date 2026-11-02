@@ -29,22 +29,28 @@ export function featureLabel(code: string): string { return names[code] || code;
 
 /** Friendly source labels — never show raw Mongo collection paths (SmartCare.bedside) in clinical UI. */
 const sourceNames: Record<string, string> = {
-  'SmartCare.bedside': '床旁监护记录',
-  'SmartCare.score': '评分记录',
-  'SmartCare.bGATemp': '床旁血气',
-  'SmartCare.drugExe': '给药执行记录',
-  'SmartCare.patient': '患者档案',
+  'SmartCare.bedside': '观察项',
+  'SmartCare.score': '评分',
+  'SmartCare.bGATemp': '血气',
+  'SmartCare.drugExe': '执行用药',
+  'SmartCare.patient': '患者信息',
   'SmartCare.configDrug': '药品字典',
   'DataCenter.VI_ICU_EXAM_ITEM': '检验报告',
   'DataCenter.VI_ICU_EXAM': '检验申请',
-  'DataCenter.VI_ICU_ZYYZ': '医嘱记录',
+  'DataCenter.VI_ICU_ZYYZ': '医嘱',
   MOCK_ONLY: '模拟数据',
   MOCK_MANUAL: '模拟录入',
   SYNTHETIC: '模拟数据',
 };
-export function sourceLabel(sourceSystem: string | null | undefined): string {
+/** Names follow the host menu (观察项 / 出入量 / 执行用药 …); unknown library paths never leak as raw text. */
+export function sourceLabel(sourceSystem: string | null | undefined, code?: string | null): string {
+  if (code === 'URINE_OUTPUT') return '出入量';
   if (!sourceSystem) return '未标注';
-  return sourceNames[sourceSystem] || sourceSystem;
+  const n = sourceNames[sourceSystem];
+  if (n) return n;
+  if (sourceSystem.startsWith('SmartCare.')) return '重症系统记录';
+  if (sourceSystem.startsWith('DataCenter.')) return '数据中心记录';
+  return sourceSystem;
 }
 
 export function yesNoUnknown(value: boolean | null | undefined): string {

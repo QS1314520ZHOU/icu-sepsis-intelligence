@@ -185,7 +185,7 @@ public final class Icu05Rules {
     out.put("ruleSource", RULE_SOURCE);
     out.put("asOf", e.asOf);
     out.put("t0", e.t0);
-    out.put("t0Source", e.t0 == null ? null : "入科后首条医嘱 orderTime（DataCenter.VI_ICU_ZYYZ）");
+    out.put("t0Source", e.t0 == null ? null : "入科后首条医嘱开立时间");
     out.put("t0OrderName", e.t0OrderName);
     out.put("pool", pool(e));
     out.put("limitations", limitations(e));
@@ -497,15 +497,21 @@ public final class Icu05Rules {
     return out;
   }
 
+  private static final Map<String, String> FAILED_NAMES = Map.of(
+      "VI_ICU_EXAM_ITEM", "检验报告", "VI_ICU_EXAM_ITEM.lactate", "检验乳酸", "VI_ICU_ZYYZ", "医嘱",
+      "bGATemp", "血气", "bedside", "观察项", "diagnosis", "诊断", "drugExe", "执行用药", "score", "评分");
+
+  static String failedName(String key) { return FAILED_NAMES.getOrDefault(key, key); }
+
   static List<String> limitations(Evidence e) {
     List<String> l = new ArrayList<>();
-    l.add("乳酸、氧合指数取 SmartCare 血气（bGATemp），按病案号关联，动/静脉标本未区分。");
-    l.add("抗菌药、补液、升压药取执行单开始时间（drugExe.startTime），药名按关键词与药品字典识别。");
-    l.add("血培养取医嘱" + ("orderTime".equals(e.cultureTimeField) ? "开立时间" : "审核时间（reviewTime）") + "，不等于实际采血时间。");
+    l.add("乳酸、氧合指数取血气记录，按病案号关联，动/静脉标本未区分。");
+    l.add("抗菌药、补液、升压药取执行用药的开始时间，药名按关键词与药品字典识别。");
+    l.add("血培养取医嘱" + ("orderTime".equals(e.cultureTimeField) ? "开立时间" : "审核时间") + "，不等于实际采血时间。");
     l.add("补液只计单独输注的晶体/胶体（作为其他药物溶媒、或单袋 <100 ml 的不计），按执行开始时整袋量累计，不是实际输入量；未按体重 30 ml/kg 换算。");
     l.add("先培养后抗菌：比较首剂抗菌药与首次血培养，均自门控起点（T0 前 24h，不早于入院）起查找；多巴酚丁胺、米力农等强心药不计为升压药。");
     l.add("人工覆盖与感染部位确认未接入；结果为质控规则自动判定，不是诊断。");
-    if (!e.failed.isEmpty()) l.add("读取失败的来源：" + String.join("、", new TreeSet<>(e.failed)) + "；相关项显示为“—”，不按未完成处理。");
+    if (!e.failed.isEmpty()) l.add("读取失败的来源：" + String.join("、", new TreeSet<>(e.failed.stream().map(Icu05Rules::failedName).collect(java.util.stream.Collectors.toList()))) + "；相关项显示为“—”，不按未完成处理。");
     return l;
   }
 

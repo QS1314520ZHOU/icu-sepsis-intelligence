@@ -62,7 +62,7 @@ public class PatientContextBuilder {
           StringBuilder s = new StringBuilder(NAMES.getOrDefault(code, code)).append(' ').append(num(e.get("value")));
           if (e.get("unit") != null && !str(e.get("unit")).isEmpty()) s.append(' ').append(e.get("unit"));
           s.append("，").append("reported".equals(e.get("timeBasis")) ? "报告时间 " : "记录时间 ").append(time(t, now));
-          if (e.get("sourceSystem") != null) s.append("，来源 ").append(e.get("sourceSystem"));
+          if (e.get("sourceSystem") != null) s.append("，来源 ").append(SourceLabels.of(e.get("sourceSystem"), code));
           if (!str(e.get("qualityNote")).isEmpty()) s.append("；").append(clip(str(e.get("qualityNote")), 60));
           add(out, "观测", s.toString(), t);
         }
