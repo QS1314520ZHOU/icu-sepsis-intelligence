@@ -55,6 +55,14 @@ public class LlmClient {
   @org.springframework.beans.factory.annotation.Value("${app.ai.thinking.reasoning:on}")
   String thinkingReasoning = "default";
 
+  /** 启动时打印生效的 AI 配置（不含密钥），便于确认服务器跑的是新 jar、配置已读到。 */
+  @javax.annotation.PostConstruct
+  void logConfig() {
+    log.info("AI config v17: enabled={} base={} chat={} embeddings={} fast={} reasoning={} embedding={} thinking(fast={}, reasoning={}) key={}",
+        p.enabled, p.baseUrl, p.chatPath, p.embeddingsPath, p.fastModel, p.reasoningModel, p.embeddingModel,
+        thinkingFor("fast"), thinkingFor("reasoning"), p.apiKey.isEmpty() ? "未配置" : "已配置");
+  }
+
   /** null = 不下发参数。 */
   public Boolean thinkingFor(String role) {
     if (disableThinking) return Boolean.FALSE;
