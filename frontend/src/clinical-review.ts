@@ -24,7 +24,7 @@ export interface ClinicalReview {
 const names: Record<string,string> = {MAP:'平均动脉压',SBP:'收缩压',RR:'呼吸频率',GCS:'意识评分',LACTATE:'乳酸',
   MAP_IBP:'平均动脉压（有创）',MAP_NIBP:'平均动脉压（无创）',SBP_IBP:'收缩压（有创）',SBP_NIBP:'收缩压（无创）',DBP_IBP:'舒张压（有创）',DBP_NIBP:'舒张压（无创）',
   PF_RATIO:'氧合指数 P/F',PLT:'血小板',TBIL:'总胆红素',CREA:'肌酐',URINE_OUTPUT:'尿量',
-  HR:'心率',TEMP:'体温',SPO2:'SpO₂',INFECTION_EVIDENCE:'感染证据'};
+  HR:'心率',TEMP:'体温',SPO2:'SpO₂',INFECTION_EVIDENCE:'感染证据',LACTATE_UNCONFIRMED:'乳酸（有报告但住院归属未确认）'};
 export function featureLabel(code: string): string { return names[code] || code; }
 
 /** Friendly source labels — never show raw Mongo collection paths (SmartCare.bedside) in clinical UI. */

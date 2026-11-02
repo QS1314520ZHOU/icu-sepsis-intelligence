@@ -27,7 +27,10 @@ public class PatientContextBuilder {
       Map.entry("SBP", "收缩压"), Map.entry("SBP_IBP", "收缩压（有创）"), Map.entry("SBP_NIBP", "收缩压（无创）"),
       Map.entry("DBP_IBP", "舒张压（有创）"), Map.entry("DBP_NIBP", "舒张压（无创）"), Map.entry("RR", "呼吸频率"),
       Map.entry("GCS", "GCS"), Map.entry("LACTATE", "乳酸"), Map.entry("HR", "心率"), Map.entry("TEMP", "体温"),
-      Map.entry("SPO2", "SpO2"), Map.entry("SOFA", "SOFA（宿主评分）"), Map.entry("VASOPRESSOR_ACTIVE", "升压药在用标记"));
+      Map.entry("SPO2", "SpO2"), Map.entry("SOFA", "SOFA（宿主评分）"), Map.entry("VASOPRESSOR_ACTIVE", "升压药在用标记"),
+      Map.entry("LACTATE_UNCONFIRMED", "乳酸（有报告但住院归属未确认）"), Map.entry("INFECTION_EVIDENCE", "感染证据"),
+      Map.entry("PF_RATIO", "氧合指数 P/F"), Map.entry("PLT", "血小板"), Map.entry("TBIL", "总胆红素"), Map.entry("CREA", "肌酐"),
+      Map.entry("URINE_OUTPUT", "尿量"));
   static final Map<String, String> REASONS = Map.ofEntries(
       Map.entry("DATA_MISSING_LAC", "未取到乳酸"), Map.entry("DATA_MISSING", "未取到记录"), Map.entry("AB_MISSING", "未见抗菌药执行"),
       Map.entry("BC_MISSING", "未见血培养"), Map.entry("BC_AFTER_AB", "抗菌药早于或同时于血培养"), Map.entry("FLUID_MISSING", "未见补液执行"),
