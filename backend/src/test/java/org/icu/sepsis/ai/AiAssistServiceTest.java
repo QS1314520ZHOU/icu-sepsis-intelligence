@@ -70,8 +70,9 @@ class AiAssistServiceTest {
 
   String url() { return "http://127.0.0.1:" + server.getAddress().getPort(); }
   static AiProperties props(boolean enabled, String url, String fast, String reasoning, String embedding, int timeoutMs, int maxConcurrent) {
-    return new AiProperties(enabled, url, "test-key-not-real", "/v1/chat/completions", "/v1/embeddings", fast, reasoning, embedding,
+    AiProperties p = new AiProperties(enabled, url, "test-key-not-real", "/v1/chat/completions", "/v1/embeddings", fast, reasoning, embedding,
         1000, timeoutMs, timeoutMs, 800, maxConcurrent, 0.2, true, false, "", true, "", "Asia/Shanghai");
+    return p;
   }
   AiAssistService service(AiProperties p) {
     LlmClient llm = new LlmClient(p, JSON);
@@ -139,6 +140,22 @@ class AiAssistServiceTest {
     assertEquals(false, r.get("fallbackUsed"));
     assertEquals("pat-7781234567", r.get("patientId"));
     verify(db).insert(any(AiInteraction.class));
+  }
+
+  @Test void defaultPrivacyPersistsOnlyMetadataAndKeepsImmediateResponse() {
+    models.put("fast-m", r -> ok(GOOD));
+    AiProperties p = new AiProperties(true, url(), "test-key-not-real", "/v1/chat/completions", "/v1/embeddings",
+        "fast-m", "", "", 1000, 2000, 2000, 800, 4, 0.2, true, false, "", false, "", "Asia/Shanghai");
+    AiAssistService svc = service(p);
+    Map<String, Object> response = svc.brief(patient(), "summary", "doctor");
+    assertEquals("ok", response.get("status"));
+    assertFalse(((List<?>) response.get("summary")).isEmpty());
+    org.mockito.ArgumentCaptor<AiInteraction> saved = org.mockito.ArgumentCaptor.forClass(AiInteraction.class);
+    verify(db).insert(saved.capture());
+    AiInteraction audit = saved.getValue();
+    assertNull(audit.prompt); assertNull(audit.rawResponse); assertNull(audit.facts);
+    assertNull(audit.question); assertNull(audit.result); assertTrue(audit.dropped.isEmpty());
+    assertEquals(Boolean.TRUE, svc.brief(patient(), "summary", "doctor").get("cached"));
   }
 
   @Test void unchangedInputsReuseCachedResultUntilRefresh() {
@@ -340,9 +357,13 @@ class AiAssistServiceTest {
     assertEquals(1, r.get("droppedCount"));
   }
 
-  @Test void askPutsQuestionInPromptAndScrubsIds() {
+  @Test void askRejectsIdentifiersAndAllowsSafeQuestion() {
     models.put("fast-m", r -> ok("{\"answer\":[{\"text\":\"当前数据中没有血培养记录\",\"refs\":[\"E1\"]}],\"uncertainties\":[]}"));
-    Map<String, Object> r = full(props(true, url(), "fast-m", "", "", 2000, 4)).ask(patient(), "血培养送了吗？住院号 1234567890", List.of(), "doctor");
+    AiAssistService svc = full(props(true, url(), "fast-m", "", "", 2000, 4));
+    assertThrows(ApiException.class, () -> svc.ask(patient(), "血培养送了吗？住院号 1234567890", List.of(), "doctor"));
+    assertThrows(ApiException.class, () -> svc.ask(patient(), "张三的血培养送了吗？", List.of(), "doctor"));
+    assertThrows(ApiException.class, () -> svc.ask(patient(), "血培养送了吗？", List.of(Map.of("q", "12床情况如何")), "doctor"));
+    Map<String, Object> r = svc.ask(patient(), "血培养送了吗？", List.of(), "doctor");
     assertEquals("ok", r.get("status"));
     String prompt = requests.get(0).path("messages").toString();
     assertTrue(prompt.contains("血培养送了吗"));

@@ -37,7 +37,7 @@ public class AiProperties {
       @Value("${app.ai.json-mode:true}") boolean jsonMode,
       @Value("${app.ai.tls-insecure:false}") boolean tlsInsecure,
       @Value("${app.ai.tls-ca-file:}") String tlsCaFile,
-      @Value("${app.ai.store-prompt:true}") boolean storePrompt,
+      @Value("${app.ai.store-prompt:false}") boolean storePrompt,
       @Value("${app.ai.knowledge-dir:}") String knowledgeDir,
       @Value("${app.ai.time-zone:Asia/Shanghai}") String zone) {
     this.enabled = enabled;

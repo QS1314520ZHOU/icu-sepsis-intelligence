@@ -124,7 +124,7 @@ app:
     # 仅隔离探测用；生产禁止 true。
     tls-insecure: ${AI_TLS_INSECURE:false}
     tls-ca-file: ${AI_TLS_CA_FILE:}
-    store-prompt: ${AI_STORE_PROMPT:true}
+    store-prompt: ${AI_STORE_PROMPT:false}
     # 结果缓存（分钟）：病人数据与知识片段未变时复用上次成功结果；0 = 关闭。界面“重新生成”跳过缓存。
     cache-minutes: ${AI_CACHE_MINUTES:30}
     knowledge-dir: ${AI_KNOWLEDGE_DIR:}

@@ -63,6 +63,8 @@ public class AiAssistService {
   private final Store store;
   private final ObjectMapper json;
   private final Semaphore slots;
+  // Sensitive results stay in bounded process memory only when content persistence is disabled.
+  private final java.util.concurrent.ConcurrentHashMap<String, AiInteraction> transientCache = new java.util.concurrent.ConcurrentHashMap<>();
   private final org.icu.sepsis.integration.ClinicalDataProvider data;
 
   public AiAssistService(AiProperties props, LlmClient llm, KnowledgeBase kb, PatientContextBuilder context,
@@ -102,6 +104,7 @@ public class AiAssistService {
   }
 
   public List<Map<String, Object>> searchKnowledge(String q, int k) {
+    AiPrivacyGuard.check(q, null);
     List<Map<String, Object>> out = new ArrayList<>();
     for (Hit h : kb.search(q, Math.max(1, Math.min(k, 20)))) {
       Map<String, Object> v = h.chunk.view(); v.put("score", Math.round(h.score * 1000) / 1000.0); out.add(v);
@@ -191,8 +194,13 @@ public class AiAssistService {
   public Map<String, Object> ask(Patient p, String question, List<Map<String, String>> history, String actor) {
     String q = question == null ? "" : question.replaceAll("\\s+", " ").trim();
     if (q.isEmpty() || q.length() > 300) throw new ApiException(HttpStatus.BAD_REQUEST, "BAD_QUESTION", "问题不能为空且不超过 300 字");
+    AiPrivacyGuard.check(q, p);
     StringBuilder extra = new StringBuilder();
     List<Map<String, String>> h = history == null ? List.of() : history;
+    for (Map<String, String> turn : h) {
+      AiPrivacyGuard.check(turn.get("q"), p);
+      AiPrivacyGuard.check(turn.get("a"), p);
+    }
     for (Map<String, String> t : h.subList(Math.max(0, h.size() - 4), h.size()))
       extra.append("此前提问：").append(clip(PatientContextBuilder.scrub(String.valueOf(t.getOrDefault("q", ""))), 200))
           .append("\n此前回答：").append(clip(PatientContextBuilder.scrub(String.valueOf(t.getOrDefault("a", ""))), 400)).append('\n');
@@ -222,6 +230,12 @@ public class AiAssistService {
 
   /** Latest stored explanation for an alert, or null. */
   public Map<String, Object> alertExplanation(String alertId) {
+    if (!props.storePrompt && cacheMinutes > 0) {
+      Instant cutoff = Instant.now().minus(Duration.ofMinutes(cacheMinutes));
+      AiInteraction latest = transientCache.values().stream().filter(r -> alertId.equals(r.alertId) && r.createdAt.isAfter(cutoff))
+          .max(Comparator.comparing(r -> r.createdAt)).orElse(null);
+      if (latest != null) return response(latest, SPECS.get("alert"));
+    }
     AiInteraction rec = store.db.findOne(Query.query(Criteria.where("alertId").is(alertId))
         .with(org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.DESC, "createdAt")), AiInteraction.class);
     return rec == null || rec.facts == null ? null : response(rec, SPECS.get("alert"));
@@ -282,6 +296,7 @@ public class AiAssistService {
         }
       }
     }
+    for (Fact f : facts) AiPrivacyGuard.check(f.text, p);
     List<KnowledgeBase.Chunk> chunks = retrieve(spec.kind, facts, extra);
     Map<String, String> kref = new LinkedHashMap<>();
     for (int i = 0; i < chunks.size(); i++) kref.put("K" + (i + 1), chunks.get(i).id);
@@ -303,7 +318,8 @@ public class AiAssistService {
     rec.promptHash = sha(messages.stream().map(m -> m.role + ":" + m.content).collect(Collectors.joining("\n")));
     rec.cacheKey = cacheKey(spec.kind, p, alertId, messages);
     if (!refresh && cacheMinutes > 0 && props.chatConfigured()) {
-      AiInteraction hit = cached(rec.cacheKey, now);
+      AiInteraction hit = props.storePrompt ? cached(rec.cacheKey, now) : transientCache.get(rec.cacheKey);
+      if (hit != null && hit.createdAt.isBefore(now.minus(Duration.ofMinutes(cacheMinutes)))) hit = null;
       if (hit != null) {
         Map<String, Object> out = response(hit, spec);
         out.put("cached", true); out.put("cachedAt", hit.generatedAt != null ? hit.generatedAt : hit.createdAt);
@@ -329,7 +345,7 @@ public class AiAssistService {
             LlmClient.Reply r = call(m[1], m[0], messages, Integer.parseInt(m[2]), tokens(spec));
             attempt.put("latencyMs", r.latencyMs); attempt.put("finishReason", r.finishReason);
             rec.lastFinishReason = r.finishReason;
-            rec.rawResponse = clip(r.content, 20000);
+            if (props.storePrompt) rec.rawResponse = clip(r.content, 20000);
             List<Map<String, Object>> dropped = new ArrayList<>();
             Map<String, Object> parsed = validate(r.content, spec, facts, chunks, kref, dropped);
             for (Map<String, Object> d : dropped) {
@@ -358,8 +374,25 @@ public class AiAssistService {
     rec.result = result;
     rec.droppedKept = keptDropped.size();
     rec.generatedAt = now;
-    store.db.insert(rec);
+    store.db.insert(props.storePrompt ? rec : metadataOnly(rec));
+    if (!props.storePrompt && cacheMinutes > 0 && "ok".equals(rec.status)) {
+      transientCache.entrySet().removeIf(e -> e.getValue().createdAt.isBefore(now.minus(Duration.ofMinutes(cacheMinutes))));
+      if (transientCache.size() >= 256) transientCache.clear();
+      transientCache.put(rec.cacheKey, rec);
+    }
     return response(rec, spec);
+  }
+
+  /** Audit metadata only: clinical facts, responses, prompts and free text are not persisted by default. */
+  static AiInteraction metadataOnly(AiInteraction r) {
+    AiInteraction a = new AiInteraction();
+    a.id = r.id; a.patientId = r.patientId; a.encounterId = r.encounterId; a.department = r.department;
+    a.simulated = r.simulated; a.createdAt = r.createdAt; a.generatedAt = r.generatedAt;
+    a.kind = r.kind; a.status = r.status; a.errorKind = r.errorKind; a.model = r.model; a.modelRole = r.modelRole;
+    a.actor = r.actor; a.traceId = r.traceId; a.alertId = r.alertId; a.fallbackUsed = r.fallbackUsed;
+    a.latencyMs = r.latencyMs; a.promptTokens = r.promptTokens; a.completionTokens = r.completionTokens;
+    a.attempts = r.attempts; a.droppedKept = r.droppedKept;
+    return a;
   }
 
   AiInteraction cached(String key, Instant now) {
@@ -610,8 +643,8 @@ public class AiAssistService {
       throw new ApiException(HttpStatus.BAD_REQUEST, "REASON_REQUIRED", "驳回或修改需填写原因");
     AiInteraction rec = store.get(id, AiInteraction.class);
     Map<String, Object> f = new LinkedHashMap<>();
-    f.put("verdict", verdict); f.put("reason", reason == null ? "" : clip(reason.trim(), 500));
-    f.put("editedText", edited == null ? null : clip(edited.trim(), 2000)); f.put("actor", actor); f.put("at", Instant.now());
+    f.put("verdict", verdict); f.put("reason", props.storePrompt && reason != null ? clip(reason.trim(), 500) : "");
+    f.put("editedText", props.storePrompt && edited != null ? clip(edited.trim(), 2000) : null); f.put("actor", actor); f.put("at", Instant.now());
     store.db.updateFirst(Query.query(Criteria.where("_id").is(rec.id)), new Update().push("feedback", f), AiInteraction.class);
     Map<String, Object> out = new LinkedHashMap<>();
     out.put("interactionId", rec.id); out.put("feedback", f); out.put("count", rec.feedback.size() + 1);

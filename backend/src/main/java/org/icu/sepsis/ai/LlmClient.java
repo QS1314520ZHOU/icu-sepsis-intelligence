@@ -160,7 +160,7 @@ public class LlmClient {
     if (text == null) {
       String finish = choice.path("finish_reason").asText("");
       boolean thought = choice.path("message").hasNonNull("reasoning_content") || choice.path("message").hasNonNull("reasoning");
-      log.warn("AI chat response without content (model={}, finish={}): {}", model, finish, AiAssistService.clip(res.toString(), 400));
+      log.warn("AI chat response without content (model={}, finish={})", model, finish);
       if (thought && ("length".equals(finish) || finish.isEmpty())) {
         LlmException ex = new LlmException("bad_response", "模型思考过程耗尽 max_tokens 未输出正文；可调大 AI_MAX_TOKENS 或设 AI_DISABLE_THINKING=true");
         ex.detail = "thinking_exhausted";
@@ -220,8 +220,7 @@ public class LlmClient {
       } catch (IOException e) {
         // A stale keep-alive connection closed by the gateway is retried once; connect failures are not.
         if (attempt == 0 && !(e instanceof java.net.ConnectException)) continue;
-        throw new LlmException("unreachable", "AI 服务不可达：" + e.getClass().getSimpleName()
-            + (e.getMessage() == null ? "" : " " + AiAssistService.clip(e.getMessage(), 120)));
+        throw new LlmException("unreachable", "AI 服务不可达：" + e.getClass().getSimpleName());
       } catch (RuntimeException e) {
         throw new LlmException("unreachable", "AI 服务不可达：" + e.getClass().getSimpleName());
       }
@@ -234,8 +233,8 @@ public class LlmClient {
     } catch (Exception e) {
       JsonNode sse = fromSse(raw);
       if (sse != null) return sse;
-      log.warn("AI gateway returned non-JSON from {} (HTTP {}): {}", path, res.statusCode(), AiAssistService.clip(raw, 400));
-      throw new LlmException("bad_response", "AI 服务返回非 JSON：" + AiAssistService.clip(raw.replaceAll("\\s+", " "), 80));
+      log.warn("AI gateway returned non-JSON (HTTP {})", res.statusCode());
+      throw new LlmException("bad_response", "AI 服务返回非 JSON。");
     }
   }
 
