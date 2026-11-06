@@ -1,3 +1,4 @@
+import { ClinicalNotesPanel } from '../clinical-notes-panel';
 import { CommonModule } from '@angular/common';
 import { Component, EventEmitter, Input, Output, inject, OnInit, OnDestroy } from '@angular/core';
 import { FormsModule } from '@angular/forms';
@@ -16,7 +17,7 @@ const sheetOrder = ['MAP_IBP','SBP_IBP','DBP_IBP','MAP_NIBP','SBP_NIBP','DBP_NIB
 @Component({
   selector: 'patient-detail',
   standalone: true,
-  imports: [CommonModule, RouterLink, ClinicalTrends, FormsModule, UiIcon],
+  imports: [CommonModule, RouterLink, ClinicalTrends, FormsModule, UiIcon, ClinicalNotesPanel],
   template: `<a *ngIf="!embedded" class="back" routerLink="/patients">← 患者列表</a>
     <div class="pagehead" *ngIf="!embedded">
       <div>
@@ -205,6 +206,7 @@ const sheetOrder = ['MAP_IBP','SBP_IBP','DBP_IBP','MAP_NIBP','SBP_NIBP','DBP_NIB
       </button>
       <div class="empty" *ngIf="!history.length">暂无历史评估</div>
     </section></details>
+    @defer (on immediate) { <clinical-notes-panel [patientId]="id" [encounterId]="patient?.encounterId || ''"/> }
     <section class="record-source-drawer" *ngIf="selectedRecord"><div class="section-head"><h2><ui-icon name="file"/>{{ label(selectedRecord.parameterCode) }}</h2><button (click)="selectedRecord=null">关闭</button></div><div class="evidence-reading">{{ selectedRecord.value ?? '—' }}<small>{{ selectedRecord.unit }}</small></div><dl><dt>{{ timeLabel(selectedRecord.timeBasis) }}</dt><dd>{{ selectedRecord.eventTime | date:'yyyy-MM-dd HH:mm:ss' }}</dd><dt>来源</dt><dd>{{ sourceLabel(selectedRecord.sourceSystem, selectedRecord.parameterCode) }}</dd></dl><p class="context-warning" *ngIf="evidenceNote(selectedRecord)">{{ evidenceNote(selectedRecord) }}</p><details class="ev-tech" *ngIf="selectedRecord.sourceRecordId"><summary>追溯信息（供信息科核对原始记录）</summary><p>记录号 {{ selectedRecord.sourceRecordId }}</p><p>源字段 {{ selectedRecord.sourceParameterCode || selectedRecord.parameterCode }}</p></details></section>`,
 })
 export class Detail implements OnInit, OnDestroy {

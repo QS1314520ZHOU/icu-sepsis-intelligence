@@ -35,9 +35,9 @@ public class PatientContextBuilder {
       Map.entry("DATA_MISSING_LAC", "未取到乳酸"), Map.entry("DATA_MISSING", "未取到记录"), Map.entry("AB_MISSING", "未见抗菌药执行"),
       Map.entry("BC_MISSING", "未见血培养"), Map.entry("BC_AFTER_AB", "抗菌药早于或同时于血培养"), Map.entry("FLUID_MISSING", "未见补液执行"),
       Map.entry("FLUID_INSUFFICIENT", "补液量不足"), Map.entry("FLUID_AMOUNT_INCOMPLETE", "部分补液记录无量"),
-      Map.entry("LACTATE_RECHECK_MISSING", "未复测乳酸"), Map.entry("SOURCE_ERROR", "来源读取失败"), Map.entry("MAP_MISSING", "未取到 MAP"),
-      Map.entry("WINDOW_OPEN", "时窗未结束"), Map.entry("VASO_STATUS_UNKNOWN", "T0 前升压药是否持续未知"), Map.entry("MAP_NOT_MET", "MAP<65"),
-      Map.entry("A1_NOT_MET", "乳酸未测"), Map.entry("NO_ORGAN_DYSFUNCTION", "未见器官功能障碍证据"), Map.entry("NOT_SEPTIC_SHOCK", "未达休克判定"),
+      Map.entry("LACTATE_RECHECK_MISSING", "未复测乳酸"), Map.entry("SOURCE_ERROR", "来源读取失败或不完整"), Map.entry("K1_WINDOW_UNCONFIRMED", "乳酸取值窗口待确认"), Map.entry("MAP_MISSING", "未取到 MAP"),
+      Map.entry("WINDOW_OPEN", "时窗未结束"), Map.entry("VASO_STATUS_UNKNOWN", "T0 前升压药是否持续未知"), Map.entry("MAP_NOT_MET", "MAP≤65"),
+      Map.entry("A1_NOT_MET", "乳酸未测"), Map.entry("NO_ORGAN_DYSFUNCTION", "未见器官功能障碍证据"), Map.entry("NOT_SEPTIC_SHOCK", "未达本地质控候选条件"),
       Map.entry("NO_INFECTION_EVIDENCE", "未取得感染证据"), Map.entry("INSUFFICIENT_EVIDENCE", "证据不全"));
   static final Map<String, String> STATES = Map.of("met", "达标", "not_met", "未达标", "unknown", "无法判定", "in_progress", "进行中");
 
@@ -134,18 +134,24 @@ public class PatientContextBuilder {
   static final Map<String, String> TREND_NAMES = Map.of("PF_RATIO", "氧合指数 P/F", "CREA", "肌酐", "PLT", "血小板", "TBIL", "总胆红素",
       "URINE_OUTPUT", "尿量");
 
-  /** Appends one 【趋势】 fact per parameter: count, first→latest, min/max with time, last-6h mean vs earlier mean; urine totals. */
+  /** Appends one 【趋势】 fact per parameter: count, first→latest, min/max with time, last-6h mean vs earlier mean; no unverified urine sums. */
   public void trends(List<Fact> out, List<org.icu.sepsis.domain.Domain.Observation> rows, Instant now) {
     Map<String, List<org.icu.sepsis.domain.Domain.Observation>> by = new LinkedHashMap<>();
     for (org.icu.sepsis.domain.Domain.Observation o : rows) {
-      if (o == null || o.value == null || o.eventTime == null || o.eventTime.isAfter(now) || o.parameterCode == null) continue;
+      if (o == null || o.value == null || o.eventTime == null || o.eventTime.isAfter(now) || o.eventTime.isBefore(now.minus(Duration.ofHours(24))) || !Double.isFinite(o.value) || o.parameterCode == null) continue;
       if ("context_only".equals(o.clinicalUse) || (o.qualityStatus != null && !"valid".equals(o.qualityStatus))) continue;
+      if(o.ingestTime!=null&&o.ingestTime.isAfter(now))continue;
       by.computeIfAbsent(o.parameterCode, k -> new ArrayList<>()).add(o);
     }
     int n = 0;
     for (String code : TREND_CODES) {
       List<org.icu.sepsis.domain.Domain.Observation> l = by.get(code);
       if (l == null || l.size() < 2) continue;
+      Set<String> units=new HashSet<>();for(var point:l)units.add(Objects.toString(point.unit, "").trim());
+      if(units.size()!=1||units.contains("")){add(out,"数据限制",NAMES.getOrDefault(code,code)+" 趋势单位缺失或不一致，未合并计算",null);continue;}
+      Map<Instant,Double> atTime=new HashMap<>();boolean conflict=false;for(var point:l){Double prior=atTime.putIfAbsent(point.eventTime,point.value);if(prior!=null&&Double.compare(prior,point.value)!=0)conflict=true;}
+      if(conflict){add(out,"数据限制",NAMES.getOrDefault(code,code)+" 同时点存在不同数值，未选择或合并趋势",null);continue;}
+      List<org.icu.sepsis.domain.Domain.Observation> unique=new ArrayList<>();Set<Instant> seenTime=new HashSet<>();for(var point:l)if(seenTime.add(point.eventTime))unique.add(point);l=unique;if(l.size()<2)continue;
       l.sort(Comparator.comparing(o -> o.eventTime));
       org.icu.sepsis.domain.Domain.Observation first = l.get(0), last = l.get(l.size() - 1), lo = first, hi = first;
       double recent = 0, earlier = 0; int nr = 0, ne = 0;
@@ -167,14 +173,7 @@ public class PatientContextBuilder {
     }
     List<org.icu.sepsis.domain.Domain.Observation> urine = by.get("URINE_OUTPUT");
     if (urine != null && !urine.isEmpty()) {
-      double total = 0, six = 0;
-      Set<String> seen = new HashSet<>();
-      for (org.icu.sepsis.domain.Domain.Observation o : urine) {
-        if (!seen.add(o.eventTime + "|" + o.value)) continue;
-        total += o.value;
-        if (!o.eventTime.isBefore(now.minus(Duration.ofHours(6)))) six += o.value;
-      }
-      add(out, "趋势", "尿量 近 24h 累计 " + num(total) + " ml，其中近 6h " + num(six) + " ml（按记录累加，未校正体重）", null);
+      add(out, "数据限制", "取得尿量记录，但记录间隔、累计/增量含义及单位尚未确认，不自动累加为 6h/24h 尿量", null);
     }
     if (n == 0 && urine == null) add(out, "趋势", "近 24 小时可用于趋势的重复记录不足（每项至少 2 次）", null);
   }

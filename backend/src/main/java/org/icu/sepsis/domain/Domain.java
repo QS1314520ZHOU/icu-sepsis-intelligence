@@ -72,6 +72,10 @@ public final class Domain {
     /** Screening alerts: kind = suspected_shock | infection_abnormal; source = bedside | icu05. */
     public String kind, source, patientLabel, bed, trigger;
     public Instant acknowledgedAt, closedAt, lastSeenAt;
+    /** Review outcome is explicit; legacy rejections are not confirmed false positives. */
+    public String reviewOutcome, reviewedBy, evidenceFingerprint, latestTrigger, previousAlertId, reviewChainId;
+    public Instant reviewedAt, evidenceChangedAt;
+    public boolean needsReReview;
   }
 
   @Document("sepsis_bundle_task")

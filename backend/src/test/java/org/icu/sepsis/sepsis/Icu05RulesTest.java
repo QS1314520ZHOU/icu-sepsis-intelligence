@@ -12,14 +12,14 @@ class Icu05RulesTest {
   static final Instant T0 = Instant.parse("2024-03-01T02:00:00Z");
   static Instant at(int minutes) { return T0.plus(Duration.ofMinutes(minutes)); }
   static Drug drug(int minutes, String name, Double ml, String... actions) {
-    Drug d = new Drug(); d.start = at(minutes); d.items.add(new DrugItem(name, ml));
+    Drug d = new Drug(); d.start = at(minutes); d.items.add(new DrugItem(name, ml)); d.items.get(0).actualInfusedMl = ml;
     for (String a : actions) d.actions.add(new Action(at(minutes + 30), a));
     return d;
   }
 
   /** Confirmed septic shock with every element on time. */
   static Evidence full() {
-    Evidence e = new Evidence();
+    Evidence e = new Evidence(); e.k1Selection = "maximum"; e.k1WindowStart = at(-24 * 60); e.k1WindowEnd = at(360); e.k1WindowSource = "synthetic-test-window"; e.vasoDictionary.add("去甲肾上腺素注射液"); e.vasoDictionary.add("去甲肾上腺素");
     e.asOf = at(24 * 60); e.t0 = T0; e.t0OrderName = "一级护理";
     e.icuAdmission = at(-30); e.hospitalAdmission = at(-300); e.admissionType = "入院";
     e.diagnosisText = "肺炎|脓毒症";
@@ -72,7 +72,7 @@ class Icu05RulesTest {
     assertEquals("DATA_MISSING_LAC", item(w, "A1").get("reason"));
     assertNull(w.get("finish"));
     assertEquals("unknown", w.get("state"));
-    assertEquals("septic_shock", r.get("status"), "vasopressor alone confirms shock (rule s3)");
+    assertEquals("unknown", r.get("status"), "missing lactate cannot confirm candidate");
   }
 
   @Test void openWindowIsInProgress() {
@@ -213,21 +213,21 @@ class Icu05RulesTest {
   }
 
   // ---- 2026-10 review regressions ----
-  @Test void repeatAntibioticDoseCannotHideAntibioticBeforeCulture() {
+  @Test void latestRecordsDetermineV3Ordering() {
     Evidence e = full();
     e.cultureOrders.set(0, new Order("血培养", at(5), at(50), "o1")); // culture reviewed at +50, first abx at +40
     e.drugs.add(drug(150, "注射用美罗培南", 100.0, "start"));        // repeat dose after the culture
     Map<String, Object> r = Icu05Rules.evaluate(e);
     for (String k : List.of("1h", "3h", "6h")) {
-      assertEquals(false, item(win(r, k), "B3").get("value"), k);
-      assertEquals("not_met", win(r, k).get("state"), k);
+      assertEquals(!"1h".equals(k), item(win(r, k), "B3").get("value"), k);
+      assertEquals("1h".equals(k) ? "not_met" : "met", win(r, k).get("state"), k);
     }
   }
 
-  @Test void antibioticBeforeT0CountsForCultureOrder() {
+  @Test void antibioticBeforeT0IsOutsideBundleWindow() {
     Evidence e = full();
     e.drugs.add(drug(-60, "头孢曲松钠", 100.0, "start"));
-    assertEquals(false, item(win(Icu05Rules.evaluate(e), "1h"), "B3").get("value"));
+    assertEquals(true, item(win(Icu05Rules.evaluate(e), "1h"), "B3").get("value"));
   }
 
   @Test void inotropesAreNotVasopressors() {
@@ -246,9 +246,117 @@ class Icu05RulesTest {
     e.map.clear(); e.map.add(new Point(at(10), 67, "NIBP", "m"));
     assertEquals(false, gate(Icu05Rules.evaluate(e)).get("isSepticShock"), "MAP 67 is not hypotension");
     e.map.clear(); e.map.add(new Point(at(10), 64, "NIBP", "m"));
-    assertEquals(true, gate(Icu05Rules.evaluate(e)).get("isSepticShock"), "lactate 4.6 and MAP 64");
+    assertEquals(false, gate(Icu05Rules.evaluate(e)).get("isSepticShock"), "MAP cannot replace K2");
   }
 
+  @Test void allK1K2CombinationsPreserveUnknown() {
+    for (Boolean a : new Boolean[] {true, false, null}) for (Boolean b : new Boolean[] {true, false, null}) {
+      Boolean expected; if (Boolean.FALSE.equals(a) || Boolean.FALSE.equals(b)) expected = false; else if (a == null || b == null) expected = null; else expected = true;
+      assertEquals(expected, Icu05Rules.all(a,b));
+    }
+  }
+  @Test void unconfirmedK1NeverEntersDenominator() {
+    Evidence e = full(); e.k1Selection = "unconfirmed";
+    Map<String,Object> g = gate(Icu05Rules.evaluate(e));
+    assertNull(g.get("isSepticShock")); assertEquals(true,g.get("suspectedWarning"));
+  }
+  @Test void k1MaximumIsTracedWithInclusiveBoundsAndIgnoresInvalidOrFutureRecords() {
+    Evidence e = full(); e.lactate.clear();
+    e.k1WindowStart = at(-120); e.k1WindowEnd = at(60); e.asOf = at(40);
+    e.lactate.add(new Point(at(-121),99,null,"before"));
+    e.lactate.add(new Point(at(-120),1.9,null,"start"));
+    e.lactate.add(new Point(at(15),2.0,null,"selected"));
+    e.lactate.add(new Point(at(20),1.5,null,"latest"));
+    e.lactate.add(new Point(at(25),Double.NaN,null,"nan"));
+    e.lactate.add(new Point(at(30),Double.POSITIVE_INFINITY,null,"infinity"));
+    e.lactate.add(new Point(at(35),-3,null,"negative"));
+    e.lactate.add(new Point(at(41),80,null,"future"));
+    e.lactate.add(new Point(at(61),90,null,"after"));
+    Map<String,Object> k = Icu05Rules.k1(e);
+    assertEquals(true,k.get("value")); assertEquals(2.0,k.get("number"));
+    assertEquals(at(15),k.get("time")); assertEquals("selected",k.get("sourceId"));
+    assertEquals(at(-120),k.get("windowFrom")); assertEquals(at(60),k.get("windowTo"));
+    assertEquals(at(40),k.get("evaluatedTo"));
+    e.asOf = at(60);
+    assertEquals("future",Icu05Rules.k1(e).get("sourceId"),"record becomes eligible once its time is reached");
+    e.lactate.removeIf(p -> "future".equals(p.sourceId));
+    e.lactate.add(new Point(at(60),3,null,"end"));
+    assertEquals("end",Icu05Rules.k1(e).get("sourceId"));
+  }
+  @Test void k1BelowThresholdEmptyAndFailedSourcesRemainDistinct() {
+    Evidence e = full(); e.lactate.clear();
+    assertNull(Icu05Rules.k1(e).get("value"));
+    e.lactate.add(new Point(at(20),1.9,null,"low"));
+    assertEquals(false,Icu05Rules.k1(e).get("value"));
+    e.failed.add("bGATemp");
+    assertNull(Icu05Rules.k1(e).get("number"));
+    assertEquals("SOURCE_ERROR",Icu05Rules.k1(e).get("reason"));
+  }
+  @Test void unconfirmedWindowCannotSilentlyUseGeneralGate() {
+    Evidence e = full(); e.k1WindowStart = null; e.k1WindowEnd = null; e.k1WindowSource = null;
+    assertEquals("maximum",e.k1Selection);
+    assertNull(Icu05Rules.k1(e).get("value"));
+    assertEquals("K1_WINDOW_UNCONFIRMED",Icu05Rules.k1(e).get("reason"));
+    assertNull(gate(Icu05Rules.evaluate(e)).get("isSepticShock"));
+    e.k1WindowStart = at(-120); e.k1WindowEnd = at(60);
+    assertNull(Icu05Rules.k1(e).get("value"),"bounds without rule provenance are unconfirmed");
+    e.k1WindowSource = "synthetic-test"; e.k1WindowEnd = at(-121);
+    assertNull(Icu05Rules.k1(e).get("value"),"reversed window is not usable");
+  }
+  @Test void unresolvedWindowPreservesRawRecordsAndTimeMeaning() {
+    Evidence e = full(); e.k1WindowStart = null; e.k1WindowEnd = null; e.k1WindowSource = null;
+    e.lactate.clear();
+    Point report = new Point(at(-300),2.4,"LAB_REPORT_TIME","lab-record");
+    report.rawValue = "2.40"; report.rawUnit = "mmol/L"; report.timeMeaning = "结果时间（authTime，非采样时间）";
+    e.lactate.add(report);
+    e.lactate.add(new Point(e.asOf.plusSeconds(1),5,null,"future"));
+    Map<String,Object> r = Icu05Rules.evaluate(e);
+    assertNull(Icu05Rules.k1(e).get("value"));
+    @SuppressWarnings("unchecked") List<Map<String,Object>> records = (List<Map<String,Object>>) r.get("lactateRecords");
+    assertEquals(1,records.size());
+    assertEquals("2.40",records.get(0).get("rawValue")); assertEquals("mmol/L",records.get(0).get("rawUnit"));
+    assertEquals(at(-300),records.get(0).get("time")); assertEquals("lab-record",records.get(0).get("sourceId"));
+    assertEquals(report.timeMeaning,records.get(0).get("timeMeaning"));
+  }
+  @Test void tiedMaximumSelectionDoesNotDependOnInputOrder() {
+    Evidence e = full(); e.lactate.clear();
+    e.lactate.add(new Point(at(30),3,null,"later"));
+    e.lactate.add(new Point(at(20),3,null,"b"));
+    e.lactate.add(new Point(at(20),3,null,"a"));
+    assertEquals("a",Icu05Rules.k1(e).get("sourceId"));
+    Collections.reverse(e.lactate);
+    assertEquals("a",Icu05Rules.k1(e).get("sourceId"));
+  }
+  @Test void wideDictionaryAndStrictListAreIndependent() {
+    assertTrue(Icu05Rules.isVasoWide("左西孟旦", Set.of("左西孟旦")));
+    assertFalse(Icu05Rules.isVasoStrict("左西孟旦"));
+    assertTrue(Icu05Rules.isVasoStrict("多巴酚丁胺"));
+    assertFalse(Icu05Rules.isVasoWide("多巴酚丁胺", Set.of()));
+    Evidence e = full(); e.failed.add("vasoDictionary");
+    assertNull(gate(Icu05Rules.evaluate(e)).get("isSepticShock"));
+  }
+  @Test void bagCapacityCannotProveActualInfusedVolume() {
+    Evidence e = full();
+    for (Drug d : e.drugs) for (DrugItem i : d.items) i.actualInfusedMl = null;
+    assertNull(item(win(Icu05Rules.evaluate(e),"3h"),"C3").get("value"));
+  }
+  @Test void latestCultureIsTracedAndSameTimeDoesNotPassOrdering() {
+    Evidence e = full(); e.cultureOrders.add(new Order("血培养",at(25),at(40),"latest"));
+    Map<String,Object> w = win(Icu05Rules.evaluate(e),"1h");
+    assertEquals("latest",item(w,"B2").get("sourceId"));
+    assertEquals(at(15),item(w,"B2").get("earliestTime"));
+    assertEquals(false,item(w,"B3").get("value"));
+  }
+  @Test void localMapBoundaryAndMissing() {
+    for (double value : new double[] {64.9, 65.0, 65.1}) {
+      Evidence e = full(); e.map.clear(); e.map.add(new Point(at(10), value, "IBP", "boundary"));
+      assertEquals(value <= 65, item(win(Icu05Rules.evaluate(e), "1h"), "C1").get("value"));
+    }
+    Evidence e = full(); e.map.clear();
+    assertNull(item(win(Icu05Rules.evaluate(e), "1h"), "C1").get("value"));
+    e.map.add(new Point(at(10), 65, "IBP", "failed")); e.failed.add("bedside");
+    assertNull(item(win(Icu05Rules.evaluate(e), "1h"), "C1").get("value"));
+  }
   @Test void carrierSalineIsNotResuscitationFluid() {
     Evidence e = full(); e.drugs.removeIf(d -> fluidName(d));
     Drug carrier = new Drug(); carrier.start = at(20);
@@ -265,5 +373,35 @@ class Icu05RulesTest {
     for (String n : List.of("多西他赛注射液", "替加氟胶囊", "克拉屈滨注射液", "米诺地尔片")) assertFalse(Icu05Rules.isAntibiotic(n, Set.of()), n);
     for (String n : List.of("盐酸多西环素片", "注射用替加环素", "克拉霉素缓释片", "盐酸米诺环素胶囊", "左氧氟沙星注射液", "注射用哌拉西林他唑巴坦"))
       assertTrue(Icu05Rules.isAntibiotic(n, Set.of()), n);
+  }
+
+  @Test void unconfirmedLactateUnitIsRetainedButNeverCalculated() {
+    Evidence e = full(); e.lactate.clear();
+    Point p = new Point(at(20), 40, null, "unit-unknown");
+    p.rawValue = "40"; p.rawUnit = "mg/dL"; p.lactateUnitKnown = false; e.lactate.add(p);
+    Map<String,Object> result = Icu05Rules.evaluate(e);
+    assertNull(((List<Map<String,Object>>) gate(result).get("shock")).stream().filter(i->"K1".equals(i.get("code"))).findFirst().orElseThrow().get("value"));
+    assertNull(item(win(result, "1h"), "A1").get("value"));
+    Map<?,?> raw = ((List<Map<?,?>>) result.get("lactateRecords")).get(0);
+    assertEquals("40", raw.get("rawValue")); assertEquals("mg/dL",raw.get("rawUnit"));
+    assertEquals(false,raw.get("unitConfirmed"));
+  }
+  @Test void unrecognisedDrugActionRequiresNewExplicitStartOrRecovery() {
+    Drug d = drug(-120,"去甲肾上腺素",50.0);
+    d.actions.add(new Action(at(-60), "unknown-host-action"));
+    assertNull(Icu05Rules.vasopressorActiveAt(d,T0));
+    d.actions.add(new Action(at(-30),"add"));
+    assertNull(Icu05Rules.vasopressorActiveAt(d,T0));
+    d.actions.add(new Action(at(-10),"start"));
+    assertEquals(true,Icu05Rules.vasopressorActiveAt(d,T0));
+  }
+
+  @Test void truncatedFallbackLactateSourceCannotConfirmK1OrWindowItems() {
+    Evidence e=full();e.failed.add("VI_ICU_EXAM_ITEM.lactate");e.truncatedSources.add("VI_ICU_EXAM_ITEM.lactate");
+    Map<String,Object> result=Icu05Rules.evaluate(e);
+    Map<?,?> k1=((List<Map<String,Object>>)gate(result).get("shock")).stream().filter(i->"K1".equals(i.get("code"))).findFirst().orElseThrow();
+    assertNull(k1.get("value")); assertEquals("SOURCE_ERROR",k1.get("reason"));
+    assertNull(item(win(result,"1h"),"A1").get("value")); assertNull(item(win(result,"6h"),"A2").get("value"));
+    assertEquals(Set.of("VI_ICU_EXAM_ITEM.lactate"),result.get("truncatedSources"));
   }
 }

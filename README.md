@@ -4,6 +4,14 @@
 
 最终技术补充优先：Java 15 / Spring Boot 2.7.18 / MongoDB / Angular 20.3.34。默认演示模式使用明确标记的模拟数据；真实源模式需要配置医院只读数据源。真实模型未接入。没有风险百分比、训练指标或临床效果承诺。
 
+## 本地规则、病程长期快照与复核流程（2026-11-06）
+
+最新开发状态见 [逐项完成清单与验证](docs/30-source-changes-trend-integrity-and-status.md)，病程能力说明见 [长期保存](docs/27-long-term-clinical-note-snapshots.md)、[证据时点与原文引用](docs/28-clinical-note-evidence-preparation.md)、[本地复核草稿与反馈统计](docs/29-local-review-report-and-feedback.md)。
+
+当前包含本地规则修订、三层人工覆盖/撤销审计、科室统计与基础查看队列、长期加密病程快照、时点版本核对、医生选片段草稿、确定性统计报告及反馈。**K1 窗口未确认，继续“无法判定/乳酸取值窗口待确认”**；未改 ICU-05 分子分母。医院病程适配器及病程 AI 综合复核尚未启用，风险模型未训练；有限文字检查不等于医学语义核验。
+
+最近本地验证：后端 317 项（315 通过、2 原有集成项跳过），前端 69 通过，编译后前端与合成 API 浏览器 45 场景通过，构建成功。病程数据库测试使用独立本机合成数据；不是院内联调、临床验收或部署批准。后续功能分支依赖隐私 PR #20，未自动合并到主分支。
+
 ## 自动打包 · AI 缓存 · 巡检优化 · 护士视图 v11（最新）
 
 见 [docs/19-v11-build-cache-scan-nurse.md](docs/19-v11-build-cache-scan-nurse.md)：GitHub Actions 自动测试并打包（Releases → latest 下载 jar + SHA256SUMS），AI 结果在数据未变时复用 30 分钟，预警巡检只扫在科且数据有变化的患者，护士视图只保留执行相关内容。

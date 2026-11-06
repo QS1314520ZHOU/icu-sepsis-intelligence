@@ -119,7 +119,7 @@ public class SepsisAssessmentService {
       if(src!=null) try { diagnosis=src.diagnosisText(patient.id); } catch(RuntimeException ignored) { /* never fabricate infection */ }
     }
     out.put("infectionClue",SepsisClinicalRules.infectionText(diagnosis)?"诊断文本含感染线索，需核对时效及临床依据":"未取得可确认的感染证据");
-    out.put("latestEvidence",latest.values().stream().map(this::evidence).collect(Collectors.toList()));
+    out.put("latestEvidence",latest.values().stream().sorted(Comparator.comparing(o -> o.parameterCode)).map(this::evidence).collect(Collectors.toList()));
     Observation lac=latest.get("LACTATE");
     out.put("checklist",List.of(
       BundleModels.item("LACTATE","乳酸结果",lac==null?"unknown":"recorded",lac==null?"未取得新鲜有效结果":"已有结果不等于复苏目标达成",lac==null?null:lac.eventTime),

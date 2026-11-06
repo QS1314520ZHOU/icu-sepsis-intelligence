@@ -96,7 +96,7 @@ interface HostPatientSession extends Session {
           [panel]="recordsPanel"
           (openAlerts)="setView('alerts')"
         />
-        <ward-board *ngIf="view === 'ward'" [currentPatientId]="p.id" />
+        @if (view === 'ward') { @defer (on immediate) { <ward-board [currentPatientId]="p.id" /> } @placeholder { <p role="status">正在载入科室质控…</p> } }
         <ng-container *ngIf="view === 'alerts'">
           <patient-alerts [embedded]="true" [patientId]="p.id" (openEvidence)="openRecords()" (changed)="refreshStatus()" />
           <div id="icu-tasks"><patient-bundles [embedded]="true" (openEvidence)="openRecords()" (changed)="refreshStatus()" /></div>
@@ -267,11 +267,11 @@ export class EmbedWorkspace implements OnInit, OnDestroy {
   }
 
   private dirty() {
-    return !!this.alerts?.selected || !!this.bundles?.selected;
+    return this.api.aiDrafts.size > 0 || this.api.icu05ReviewDirty || !!this.alerts?.selected || !!this.bundles?.selected;
   }
 
   private busy() {
-    return !!this.detail?.busy || !!this.alerts?.busy || !!this.bundles?.busy;
+    return this.api.icu05ReviewBusy || !!this.detail?.busy || !!this.alerts?.busy || !!this.bundles?.busy;
   }
 
   setView(v: string) {

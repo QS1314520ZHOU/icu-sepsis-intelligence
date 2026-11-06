@@ -180,6 +180,9 @@ public final class Views {
     v.put("patientLabel", a.patientLabel);
     v.put("bed", a.bed);
     v.put("lastSeenAt", a.lastSeenAt);
+    v.putAll(map("reviewOutcome",a.reviewOutcome,"reviewedAt",a.reviewedAt,"reviewedBy",a.reviewedBy,
+        "needsReReview",a.needsReReview,"latestTrigger",a.latestTrigger,"evidenceChangedAt",a.evidenceChangedAt,
+        "previousAlertId",a.previousAlertId,"reviewChainId",a.reviewChainId));
     return v;
   }
 

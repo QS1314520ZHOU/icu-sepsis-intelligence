@@ -15,6 +15,7 @@ const base: AiBrief = {
 test('reference chips resolve to facts and knowledge only', () => {
   assert.equal(refTarget('E1', base)?.kind, 'fact');
   assert.equal(refTarget('K1', base)?.body, '先培养后抗菌');
+  assert.match(refTarget('K1', base)?.meta || '', /版本 2026/);
   assert.equal(refTarget('E9', base), null);
   assert.equal(refTarget('X1', base), null);
 });
@@ -48,4 +49,17 @@ test('v2 layout, copy text without refs, ward pseudonyms resolved', () => {
   assert.equal(hasContent(b), true);
   assert.equal(resolvePatients('P2 待查', { P1: 'x' }), 'P2 待查');
   assert.deepEqual(layoutOf(null).map(s => s.key), ['summary', 'gaps', 'suggestions', 'uncertainties']);
+});
+
+import { draftCopyText, isDraftOutdated } from '../src/ai-assist.ts';
+test('clinical draft copies are labelled and local edits do not replace original evidence', () => {
+  const b={...base,kind:'handover'} as AiBrief;
+  assert.match(draftCopyText(b,'人工核对后的文本'),/AI 草稿，已人工修改，待核对/);
+  assert.match(draftCopyText(b,null),/生成时间：2026-05-01/);
+  assert.ok(!copyText(b).includes('人工核对后的文本'));
+});
+test('draft staleness follows page read time and invalid times never claim freshness', () => {
+  assert.equal(isDraftOutdated('2026-05-01T00:00:00Z','2026-05-01T00:01:00Z'),true);
+  assert.equal(isDraftOutdated('2026-05-01T00:00:00Z','2026-05-01T00:00:00Z'),false);
+  assert.equal(isDraftOutdated(null,'invalid'),false);
 });

@@ -115,7 +115,7 @@ class AiAssistServiceTest {
       return new Object[] {200, JSON.writeValueAsString(body)};
     } catch (Exception e) { throw new IllegalStateException(e); }
   }
-  static final String GOOD = "<think>内部推理不应展示</think>{\"summary\":[{\"text\":\"有创 MAP 58 mmHg，低于 65 目标\",\"refs\":[\"E2\",\"K3\"]},"
+  static final String GOOD = "<think>内部推理不应展示</think>{\"summary\":[{\"text\":\"有创 MAP 58 mmHg，需核对\",\"refs\":[\"E3\",\"K3\"]},"
       + "{\"text\":\"凭空编号\",\"refs\":[\"E99\"]},{\"text\":\"心率 140 次/分\",\"refs\":[\"E2\"]}],"
       + "\"gaps\":[{\"text\":\"未见血培养与抗菌药执行记录\",\"refs\":[\"E1\"]}],"
       + "\"suggestions\":[{\"text\":\"建议核对去甲肾上腺素 0.1 μg/kg/min\",\"refs\":[\"E2\"],\"urgency\":\"high\"},"
@@ -126,7 +126,7 @@ class AiAssistServiceTest {
     Map<String, Object> r = service(props(true, url(), "fast-m", "reason-m", "", 2000, 4)).brief(patient(), "summary", "doctor");
     assertEquals("ok", r.get("status"));
     List<?> summary = (List<?>) r.get("summary");
-    assertEquals(1, summary.size(), "invalid ref E99 and invented heart rate 140 are dropped");
+    assertEquals(1, summary.size(), "only accurately cited MAP is retained");
     assertTrue(summary.get(0).toString().contains("58"));
     List<?> sug = (List<?>) r.get("suggestions");
     assertEquals(1, sug.size(), "dose instruction dropped");
@@ -333,9 +333,15 @@ class AiAssistServiceTest {
     when(provider.observations(anyString(), anyString(), any(), any())).thenReturn(rows);
   }
 
+  String factRef(String kind,String needle) {
+    Map<String,Object> response=full(props(false,url(),"","","",2000,4)).brief(patient(),kind,"doctor");
+    return ((List<Map<String,Object>>)response.get("facts")).stream().filter(f->f.get("text").toString().contains(needle)).findFirst().orElseThrow().get("id").toString();
+  }
   @Test void trendKindAddsTrendFactsAndOwnLayout() {
     trendData();
-    String answer = "{\"changes\":[{\"text\":\"有创 MAP 由 78 降至 58 mmHg\",\"refs\":[\"E1\"]}],\"concerns\":[{\"text\":\"乳酸 2.1 升至 4.6\",\"refs\":[\"E2\"],\"urgency\":\"high\"}],\"uncertainties\":[]}";
+    String MAP_REF=factRef("trend","平均动脉压（有创） 近 24h");
+    String LAC_REF=factRef("trend","乳酸 近 24h");
+    String answer = "{\"changes\":[{\"text\":\"有创 MAP 由 78 降至 58 mmHg\",\"refs\":[\""+MAP_REF+"\"]}],\"concerns\":[{\"text\":\"乳酸 2.1 升至 4.6\",\"refs\":[\""+LAC_REF+"\"],\"urgency\":\"high\"}],\"uncertainties\":[]}";
     models.put("fast-m", r -> ok(answer));
     Map<String, Object> r = full(props(true, url(), "fast-m", "", "", 2000, 4)).brief(patient(), "trend", "doctor");
     assertEquals("ok", r.get("status"));
@@ -350,7 +356,9 @@ class AiAssistServiceTest {
 
   @Test void handoverInventedNumberIsDropped() {
     trendData();
-    String answer = "{\"situation\":[{\"text\":\"有创 MAP 58 mmHg\",\"refs\":[\"E1\"]},{\"text\":\"心率 150 次/分\",\"refs\":[\"E1\"]}],\"background\":[],\"assessment\":[],\"recommendation\":[],\"uncertainties\":[]}";
+    String MAP_REF=factRef("handover","平均动脉压（有创） 近 24h");
+    String LAC_REF=factRef("handover","乳酸 近 24h");
+    String answer = "{\"situation\":[{\"text\":\"有创 MAP 58 mmHg\",\"refs\":[\""+MAP_REF+"\"]},{\"text\":\"心率 150 次/分\",\"refs\":[\""+MAP_REF+"\"]}],\"background\":[],\"assessment\":[],\"recommendation\":[],\"uncertainties\":[]}";
     models.put("fast-m", r -> ok(answer));
     Map<String, Object> r = full(props(true, url(), "fast-m", "", "", 2000, 4)).brief(patient(), "handover", "doctor");
     assertEquals(1, ((List<?>) r.get("situation")).size());
@@ -391,7 +399,8 @@ class AiAssistServiceTest {
     assertEquals(Map.of("P1", "05床 李四"), r.get("patients"));
     String prompt = requests.get(0).path("messages").toString();
     assertFalse(prompt.contains("李四") || prompt.contains("05床"));
-    assertTrue(prompt.contains("P1 紧急"));
+    assertTrue(prompt.contains("P1；优先查看"));
+    assertTrue(prompt.contains("不得重新排序"));
   }
 
   @Test void sectionKeysNeverCollideWithResponseFields() {
@@ -409,7 +418,9 @@ class AiAssistServiceTest {
 
   @Test void truncatedNoteIsRepairedAndUsesLargerBudget() {
     trendData();
-    models.put("fast-m", r -> ok("{\"record\":[{\"text\":\"有创 MAP 由 78 降至 58 mmHg\",\"refs\":[\"E1\"]},{\"text\":\"乳酸 4.6 mmol/L\",\"refs\":[\"E2\"]}],\"analysis\":[{\"text\":\"低血压伴乳酸升"));
+    String MAP_REF=factRef("note","平均动脉压（有创） 近 24h");
+    String LAC_REF=factRef("note","乳酸 近 24h");
+    models.put("fast-m", r -> ok("{\"record\":[{\"text\":\"有创 MAP 由 78 降至 58 mmHg\",\"refs\":[\""+MAP_REF+"\"]},{\"text\":\"乳酸 4.6 mmol/L\",\"refs\":[\""+LAC_REF+"\"]}],\"analysis\":[{\"text\":\"低血压伴乳酸升"));
     Map<String, Object> r = full(props(true, url(), "fast-m", "", "", 2000, 4)).brief(patient(), "note", "doctor");
     assertEquals("ok", r.get("status"), String.valueOf(r.get("message")));
     assertEquals(2, ((List<?>) r.get("record")).size());
@@ -420,6 +431,18 @@ class AiAssistServiceTest {
     models.put("fast-m", r -> ok("{\"summary\":[{\"text\":\"心率 150\",\"refs\":[\"E1\"]}]}"));
     Map<String, Object> r = full(props(true, url(), "fast-m", "", "", 2000, 4)).brief(patient(), "summary", "doctor");
     assertEquals("invalid_output", r.get("status"));
-    assertTrue(String.valueOf(r.get("message")).contains("数值不在依据中 1 条"), String.valueOf(r.get("message")));
+    assertTrue(String.valueOf(r.get("message")).contains("未获本条引用支持 1 条"), String.valueOf(r.get("message")));
+  }
+
+  @Test void alertExplanationTracksLatestTriggerAndRejectsStaleStoredDraft() {
+    Alert a=new Alert();a.id="al-stale";a.patientId=patient().id;a.trigger="原始旧触发";a.latestTrigger="新证据触发：乳酸 4.6 mmol/L";
+    AiAssistService svc=org.mockito.Mockito.spy(full(props(false,url(),"","","",2000,4)));
+    Map<String,Object> fresh=svc.explainAlert(a,"doctor");
+    assertTrue(((List<Map<String,Object>>)fresh.get("facts")).get(0).get("text").toString().contains("新证据触发"));
+    a.evidenceChangedAt=now;
+    org.mockito.Mockito.doReturn(Map.of("generatedAt",now.minusSeconds(1))).when(svc).alertExplanation("al-stale");
+    assertNull(svc.alertExplanation(a));
+    org.mockito.Mockito.doReturn(Map.of("generatedAt",now.plusSeconds(1))).when(svc).alertExplanation("al-stale");
+    assertNotNull(svc.alertExplanation(a));
   }
 }

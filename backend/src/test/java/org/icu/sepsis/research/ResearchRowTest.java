@@ -22,7 +22,7 @@ class ResearchRowTest {
     return d;
   }
   static Evidence evidence() {
-    Evidence e = new Evidence();
+    Evidence e = new Evidence(); e.k1Selection = "maximum"; e.k1WindowStart = at(-24 * 60); e.k1WindowEnd = at(360); e.k1WindowSource = "synthetic-test-window"; e.vasoDictionary.add("去甲肾上腺素注射液");
     e.asOf = at(48 * 60); e.t0 = T0; e.t0OrderName = "一级护理";
     e.icuAdmission = at(-30); e.hospitalAdmission = at(-30 - 600); e.admissionType = "入院"; e.diagnosisText = "肺炎|脓毒症";
     e.lactate.add(new Point(at(20), 4.6, null, "l1")); e.lactate.add(new Point(at(240), 2.1, null, "l2"));

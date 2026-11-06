@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.util.*;
 import java.util.regex.Pattern;
 import org.bson.Document;
+import com.mongodb.client.FindIterable;
 import org.bson.types.ObjectId;
 import org.icu.sepsis.api.ApiException;
 import org.icu.sepsis.sepsis.Icu05Rules;
@@ -33,6 +34,8 @@ public class Icu05SourceReader {
   private final SmartCareSourceReader patients;
   private final List<String> bloodCultureKeywords;
   private final String cultureTimeField;
+  @Value("${app.icu05.k1-selection:maximum}")
+  private String k1Selection = "maximum";
   private volatile Set<String> vasoDict = null, abxDict = null;
   private volatile Instant dictLoaded = Instant.EPOCH;
 
@@ -65,7 +68,9 @@ public class Icu05SourceReader {
     if (p == null) throw ApiException.notFound();
     if (encounterId != null && !SmartCareSourceReader.encounterIdOf(p).equals(encounterId))
       throw ApiException.conflict("住院上下文已变化，请重新选择患者。");
-    Evidence e = new Evidence();
+    Evidence e = new Evidence(); e.k1Selection = k1Selection;
+    // V3 leaves K1 window unspecified; inherited specification conflicts (-24h/+6h vs -2h/+1h).
+    // Leave K1 bounds/source unset until that conflict is resolved. Do not use the general gate as K1.
     e.asOf = asOf;
     e.bloodCultureKeywords = bloodCultureKeywords;
     e.cultureTimeField = cultureTimeField;
@@ -80,7 +85,7 @@ public class Icu05SourceReader {
       Document first = dataCenter.getCollection("VI_ICU_ZYYZ")
           .find(new Document("pid", hisPid).append("orderTime", new Document("$gte", Date.from(e.icuAdmission)).append("$lte", Date.from(asOf))))
           .projection(new Document("orderTime", 1).append("orderName", 1)).sort(new Document("orderTime", 1)).limit(1).first();
-      if (first != null) { e.t0 = toInstant(first.get("orderTime")); e.t0OrderName = first.getString("orderName"); }
+      if (first != null) { e.t0 = toInstant(first.get("orderTime")); e.t0OrderName = first.getString("orderName"); e.t0SourceId = "DataCenter.VI_ICU_ZYYZ:" + first.get("_id"); }
     } catch (RuntimeException ex) { e.failed.add("VI_ICU_ZYYZ"); return e; }
     if (e.t0 == null) return e;
     Instant from = e.t0.minus(Duration.ofHours(24)), to = e.t0.plus(after);
@@ -105,12 +110,11 @@ public class Icu05SourceReader {
             new Document("code", new Document("$in", List.of("param_bg_Lac", "param_bg_P/Fratio")))
                 .append("valid", "valid")
                 .append("time", new Document("$gte", from).append("$lte", to));
-        for (Document d :
-            smartcare
+        for (Document d : bounded(smartcare
                 .getCollection("bGATemp")
                 .find(new Document("mrn", mrn).append("bedsides", new Document("$elemMatch", match)))
                 .projection(new Document("bedsides", 1))
-                .limit(500)) {
+                ,500,e,"bGATemp")) {
           Object raw = d.get("bedsides");
           if (!(raw instanceof List)) continue;
           for (Object o : (List<?>) raw) {
@@ -126,7 +130,12 @@ public class Icu05SourceReader {
             String key = code + "|" + t + "|" + v;
             if (!seen.add(key)) continue;
             Point pt = new Point(t, v, null, "SmartCare.bGATemp:" + d.get("_id"));
-            if ("param_bg_Lac".equals(code)) e.lactate.add(pt);
+            pt.rawValue = num(b.get("fVal")) != null ? b.get("fVal") : b.get("strVal");
+            pt.timeMeaning = "血气记录时间（采样或结果时间类型未确认）";
+            if ("param_bg_Lac".equals(code)) {
+              pt.rawUnit = b.get("unit") == null ? null : String.valueOf(b.get("unit"));
+              pt.lactateUnitKnown = confirmedLactateUnit(pt.rawUnit); e.lactate.add(pt);
+            }
             else if ("param_bg_P/Fratio".equals(code)) e.pf.add(pt);
           }
         }
@@ -138,8 +147,7 @@ public class Icu05SourceReader {
     // (authTime = report time, later than sampling, so the two are not mixed). itemCode LAC/LAC1 only (no LDH).
     if (!blank(hisPid) && e.lactate.isEmpty()) {
       try {
-        for (Document d :
-            dataCenter
+        for (Document d : bounded(dataCenter
                 .getCollection("VI_ICU_EXAM_ITEM")
                 .find(
                     new Document("hisPid", hisPid)
@@ -151,7 +159,7 @@ public class Icu05SourceReader {
                         .append("unit", 1)
                         .append("authTime", 1)
                         .append("_id", 1))
-                .limit(400)) {
+                ,400,e,"VI_ICU_EXAM_ITEM.lactate")) {
           Double v = num(d.get("result"));
           Instant t = toInstant(d.get("authTime"));
           if (v == null || t == null) continue;
@@ -162,8 +170,11 @@ public class Icu05SourceReader {
                           Math.abs(p.value - v) < 1e-9
                               && Math.abs(Duration.between(p.time, t).toSeconds()) < 60);
           if (dup) continue;
-          e.lactate.add(
-              new Point(t, v, "LAB_REPORT_TIME", "DataCenter.VI_ICU_EXAM_ITEM:" + d.get("_id")));
+          Point point = new Point(t, v, "LAB_REPORT_TIME", "DataCenter.VI_ICU_EXAM_ITEM:" + d.get("_id"));
+          point.rawValue = d.get("result"); point.rawUnit = d.get("unit") == null ? null : String.valueOf(d.get("unit"));
+          point.timeMeaning = "结果时间（authTime，非采样时间）";
+          point.lactateUnitKnown = confirmedLactateUnit(point.rawUnit);
+          e.lactate.add(point);
         }
       } catch (RuntimeException ex) {
         e.failed.add("VI_ICU_EXAM_ITEM.lactate");
@@ -173,15 +184,15 @@ public class Icu05SourceReader {
 
   private void readGcs(Evidence e, String pid, Date from, Date to) {
     try {
-      for (Document d : smartcare.getCollection("score").find(new Document("pid", pid).append("scoreType", "gcsScore").append("valid", true)
-          .append("time", new Document("$gte", from).append("$lte", to))).projection(new Document("total", 1).append("time", 1)).limit(300)) {
+      for (Document d : bounded(smartcare.getCollection("score").find(new Document("pid", pid).append("scoreType", "gcsScore").append("valid", true)
+          .append("time", new Document("$gte", from).append("$lte", to))).projection(new Document("total", 1).append("time", 1)),300,e,"score")) {
         Double v = num(d.get("total")); Instant t = toInstant(d.get("time"));
         if (v != null && t != null) e.gcs.add(new Point(t, v, null, "SmartCare.score:" + d.get("_id")));
       }
       if (!e.gcs.isEmpty()) return;
       // Fallback: bedside GCS observation, numeric or E?V?M? text.
-      for (Document d : smartcare.getCollection("bedside").find(new Document("pid", pid).append("code", "param_score_gcs_obs").append("valid", true)
-          .append("time", new Document("$gte", from).append("$lte", to))).projection(new Document("strVal", 1).append("time", 1)).limit(300)) {
+      for (Document d : bounded(smartcare.getCollection("bedside").find(new Document("pid", pid).append("code", "param_score_gcs_obs").append("valid", true)
+          .append("time", new Document("$gte", from).append("$lte", to))).projection(new Document("strVal", 1).append("time", 1)),300,e,"score")) {
         Double v = gcsValue(d.get("strVal")); Instant t = toInstant(d.get("time"));
         if (v != null && t != null) e.gcs.add(new Point(t, v, null, "SmartCare.bedside:" + d.get("_id")));
       }
@@ -200,8 +211,8 @@ public class Icu05SourceReader {
 
   private void readMap(Evidence e, String pid, Date from, Date to) {
     try {
-      for (Document d : smartcare.getCollection("bedside").find(new Document("pid", pid).append("code", new Document("$in", List.of("param_nibp_m", "param_ibp_m")))
-          .append("valid", true).append("time", new Document("$gte", from).append("$lte", to))).projection(new Document("code", 1).append("strVal", 1).append("time", 1)).sort(new Document("time", 1)).limit(20000)) {
+      for (Document d : bounded(smartcare.getCollection("bedside").find(new Document("pid", pid).append("code", new Document("$in", List.of("param_nibp_m", "param_ibp_m")))
+          .append("valid", true).append("time", new Document("$gte", from).append("$lte", to))).projection(new Document("code", 1).append("strVal", 1).append("time", 1)).sort(new Document("time", 1)),20000,e,"bedside")) {
         Double v = num(d.get("strVal")); Instant t = toInstant(d.get("time"));
         if (v == null || t == null || v <= 0) continue;
         e.map.add(new Point(t, v, "param_ibp_m".equals(d.getString("code")) ? "IBP" : "NIBP", "SmartCare.bedside:" + d.get("_id")));
@@ -211,9 +222,9 @@ public class Icu05SourceReader {
 
   private void readHeartRate(Evidence e, String pid, Date from, Date to) {
     try {
-      for (Document d : smartcare.getCollection("bedside").find(new Document("pid", pid).append("code", "param_HR").append("valid", true)
+      for (Document d : bounded(smartcare.getCollection("bedside").find(new Document("pid", pid).append("code", "param_HR").append("valid", true)
           .append("time", new Document("$gte", from).append("$lte", to))).projection(new Document("strVal", 1).append("time", 1))
-          .sort(new Document("time", 1)).limit(20000)) {
+          .sort(new Document("time", 1)),20000,e,"bedside")) {
         Double v = num(d.get("strVal")); Instant t = toInstant(d.get("time"));
         if (v != null && t != null && v > 0) e.hr.add(new Point(t, v, null, "SmartCare.bedside:" + d.get("_id")));
       }
@@ -223,8 +234,8 @@ public class Icu05SourceReader {
   private void readDrugs(Evidence e, String pid, Date from, Date to) {
     try {
       Document q = new Document("pid", new Document("$in", List.of(pid, new ObjectId(pid)))).append("startTime", new Document("$gte", from).append("$lte", to));
-      for (Document d : smartcare.getCollection("drugExe").find(q)
-          .projection(new Document("startTime", 1).append("drugList", 1).append("drugActionList", 1)).limit(2000)) {
+      for (Document d : bounded(smartcare.getCollection("drugExe").find(q)
+          .projection(new Document("startTime", 1).append("drugList", 1).append("drugActionList", 1).append("liquidAmountUnit", 1)),2000,e,"drugExe")) {
         Drug drug = new Drug();
         drug.start = toInstant(d.get("startTime"));
         drug.sourceId = "SmartCare.drugExe:" + d.get("_id");
@@ -232,7 +243,7 @@ public class Icu05SourceReader {
         Object list = d.get("drugList");
         // 父级 liquidAmountUnit 作默认容量单位（本院常见 ml）；子项 liquidUnit 缺省时视为已知 ml
         String parentUnit = d.getString("liquidAmountUnit");
-        boolean parentUnitMl = parentUnit == null || parentUnit.isBlank() || "ml".equalsIgnoreCase(parentUnit.trim());
+        boolean parentUnitMl = parentUnit != null && "ml".equalsIgnoreCase(parentUnit.trim());
         if (list instanceof List) for (Object o : (List<?>) list) {
           if (!(o instanceof Document)) continue;
           Document it = (Document) o;
@@ -257,9 +268,9 @@ public class Icu05SourceReader {
 
   private void readCultures(Evidence e, String hisPid, Date from, Date to) {
     try {
-      for (Document d : dataCenter.getCollection("VI_ICU_ZYYZ").find(new Document("pid", hisPid)
+      for (Document d : bounded(dataCenter.getCollection("VI_ICU_ZYYZ").find(new Document("pid", hisPid)
           .append("orderName", new Document("$regex", Icu05Rules.CULTURE_REGEX)).append("orderTime", new Document("$gte", from).append("$lte", to)))
-          .projection(new Document("orderName", 1).append("orderTime", 1).append("reviewTime", 1)).limit(500)) {
+          .projection(new Document("orderName", 1).append("orderTime", 1).append("reviewTime", 1)),500,e,"VI_ICU_ZYYZ")) {
         e.cultureOrders.add(new Order(d.getString("orderName"), toInstant(d.get("orderTime")), toInstant(d.get("reviewTime")), "DataCenter.VI_ICU_ZYYZ:" + d.get("_id")));
       }
     } catch (RuntimeException ex) { e.failed.add("VI_ICU_ZYYZ"); }
@@ -269,22 +280,38 @@ public class Icu05SourceReader {
     if (vasoDict == null || Instant.now().isAfter(dictLoaded.plus(CACHE_TTL))) {
       try {
         Set<String> vaso = new HashSet<>(), abx = new HashSet<>();
-        for (Document d : smartcare.getCollection("configDrug").find(new Document("classification", new Document("$regex", "血管活性|抗菌|抗生素|抗感染")))
-            .projection(new Document("name", 1).append("classification", 1)).limit(5000)) {
+        for (Document d : bounded(smartcare.getCollection("configDrug").find(new Document("classification", new Document("$regex", "血管活性|抗菌|抗生素|抗感染")))
+            .projection(new Document("name", 1).append("classification", 1)),5000,e,"vasoDictionary")) {
           String name = d.getString("name"), cls = String.valueOf(d.get("classification"));
           if (blank(name)) continue;
           String n = name.trim().toLowerCase(Locale.ROOT);
-          if (cls.contains("血管活性")) vaso.add(n); else abx.add(n);
+          if ("血管活性".equals(cls)) vaso.add(n); else abx.add(n);
         }
+        if(e.failed.contains("vasoDictionary")) throw new IllegalStateException("dictionary truncated");
         vasoDict = vaso; abxDict = abx; dictLoaded = Instant.now();
       } catch (RuntimeException ex) {
         // Dictionary is supplementary; keyword matching still applies.
+        e.failed.add("vasoDictionary");
         if (vasoDict == null) { vasoDict = Set.of(); abxDict = Set.of(); }
+        dictLoaded = Instant.EPOCH;
       }
     }
     e.vasoDictionary = vasoDict; e.antibioticDictionary = abxDict;
   }
 
+  /** Read one extra record to distinguish an exact limit from silent truncation. */
+  static List<Document> bounded(FindIterable<Document> query,int limit,Evidence e,String source) {
+    List<Document> result=new ArrayList<>();
+    try (var cursor = query.limit(limit + 1).iterator()) {
+      while (cursor.hasNext()) {
+        Document d = cursor.next();
+        if (result.size() == limit) { e.failed.add(source); e.truncatedSources.add(source); break; }
+        result.add(d);
+      }
+    }
+    return result;
+  }
+  static boolean confirmedLactateUnit(String unit) { return unit != null && "mmol/l".equals(unit.trim().toLowerCase(Locale.ROOT)); }
   private static boolean blank(String s) { return s == null || s.isBlank(); }
   private static Instant toInstant(Object raw) {
     if (raw instanceof Date) return ((Date) raw).toInstant();

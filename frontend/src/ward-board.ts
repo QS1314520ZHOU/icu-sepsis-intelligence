@@ -13,8 +13,10 @@ export interface BoardCase {
 }
 export interface Icu05Board {
   asOf: string; from: string; to: string; days: number; ruleSource: string; screened: number; unavailable: number; septicShock: number; suspected: number;
+  sourceIncomplete?: number; classificationUnknown?: number; oldestEvaluatedAt?: string | null; updateMode?: string;
+  manualReviews?: {denominator: number; reviewedCases: number; caseExclusions: number; judgementCases: number; sofaCases: number; requiresReview: number; rate: number | null; rule: string};
   denominator: number; excluded: number; poolUnknown: number; windows: BoardWindow[]; indicators: BoardIndicator[]; cases: BoardCase[]; limitations: string[];
-  readFailed?: number; truncated?: boolean;
+  readFailed?: number; truncated?: boolean; complete?: boolean; scope?: string;
 }
 
 /** Director view: department ICU-05 completion rates, process sub-indicators and the cases that need attention now. Read-only. */
@@ -31,7 +33,10 @@ export interface Icu05Board {
     <p class="review-inline-error" role="alert" *ngIf="error"><ui-icon name="info"/>{{ error }}</p>
     <div class="review-loading" *ngIf="busy && !b" role="status"><span class="spinner"></span>正在按 ICU-05 规则重算科室病例…</div>
     <ng-container *ngIf="b">
-      <p class="wb-pool">入科 {{ b.screened }} 例 · 感染性休克 <b>{{ b.septicShock }}</b> 例（纳入分母 <b>{{ b.denominator }}</b><ng-container *ngIf="b.excluded"> · 不符合纳入 {{ b.excluded }}</ng-container><ng-container *ngIf="b.poolUnknown"> · 纳入待确认 {{ b.poolUnknown }}</ng-container>）<ng-container *ngIf="b.suspected"> · 疑似待复核 <b>{{ b.suspected }}</b> 例</ng-container><ng-container *ngIf="b.unavailable"> · 数据未接入 {{ b.unavailable }}</ng-container></p>
+      <p class="wb-pool">入科 {{ b.screened }} 例 · 本地质控候选 <b>{{ b.septicShock }}</b> 例（纳入分母 <b>{{ b.denominator }}</b><ng-container *ngIf="b.excluded"> · 不符合纳入 {{ b.excluded }}</ng-container><ng-container *ngIf="b.poolUnknown"> · 纳入待确认 {{ b.poolUnknown }}</ng-container>）<ng-container *ngIf="b.suspected"> · 疑似待复核 <b>{{ b.suspected }}</b> 例</ng-container><ng-container *ngIf="b.unavailable"> · 数据未接入 {{ b.unavailable }}</ng-container></p>
+      <p *ngIf="b.classificationUnknown" class="wb-pool">候选条件无法判定 {{ b.classificationUnknown }} 例，未作为不符合条件处理。</p>
+      <p *ngIf="b.manualReviews as r" class="wb-pool" [title]="r.rule">有生效人工覆盖 {{ r.reviewedCases }}/{{ r.denominator }} 例（{{ pct(r.rate) }}） · 病例排除 {{ r.caseExclusions }} · 判定项 {{ r.judgementCases }} · SOFA 分项 {{ r.sofaCases }}<ng-container *ngIf="r.requiresReview"> · 旧覆盖待复核 {{ r.requiresReview }}</ng-container><br><small>{{ r.rule }}</small></p>
+      <p *ngIf="b.updateMode" class="wb-pool">{{ b.updateMode }}<ng-container *ngIf="b.oldestEvaluatedAt"> 本批最早计算：{{ b.oldestEvaluatedAt | date:'MM-dd HH:mm:ss' }}</ng-container></p>
       <div class="wb-kpis">
         <div class="wb-kpi" *ngFor="let w of b.windows" [attr.data-tone]="tone(w.rate)">
           <span class="wb-kpi-k">{{ w.key }} 完成率</span>
@@ -52,13 +57,13 @@ export interface Icu05Board {
       </div>
       <div class="review-card wb-cases">
         <div class="review-card-title"><h2>需要关注的病例</h2><span class="ai-label">进行中按剩余时间排序</span></div>
-        <div class="work-empty" *ngIf="!b.cases.length"><span>统计范围内无感染性休克或疑似病例</span></div>
+        <div class="work-empty" *ngIf="!b.cases.length"><span>统计范围内无质控候选或疑似病例</span></div>
         <div class="review-table-wrap" *ngIf="b.cases.length"><table class="wb-table">
           <thead><tr><th>床号</th><th>患者</th><th>判定</th><th>T0</th><th *ngFor="let k of keys">{{ k }}</th><th>下一步 / 问题</th></tr></thead>
-          <tbody><tr *ngFor="let c of b.cases" [class.current]="c.patientId === currentPatientId" [attr.data-status]="c.status">
+          <tbody><tr *ngFor="let c of b.cases.slice(page * pageSize, (page + 1) * pageSize)" [class.current]="c.patientId === currentPatientId" [attr.data-status]="c.status">
             <td class="wb-bed">{{ c.bed || '—' }}</td>
             <td>{{ c.label || '—' }}<small *ngIf="c.patientId === currentPatientId">当前患者</small></td>
-            <td><span class="wb-status" [attr.data-status]="c.status">{{ c.status === 'septic_shock' ? '感染性休克' : '疑似待复核' }}</span><small *ngIf="c.status === 'septic_shock' && !c.counted">{{ c.eligible === false ? '不计入分母' : '纳入待确认' }}</small></td>
+            <td><span class="wb-status" [attr.data-status]="c.status">{{ c.status === 'septic_shock' ? '本地质控候选' : '疑似待复核' }}</span><small *ngIf="c.status === 'septic_shock' && !c.counted">{{ c.eligible === false ? '不计入分母' : '纳入待确认' }}</small></td>
             <td class="wb-t0">{{ c.t0 ? (c.t0 | date:'MM-dd HH:mm') : '—' }}</td>
             <td *ngFor="let k of keys" class="wb-w"><ng-container *ngIf="win(c, k) as w"><i [attr.data-state]="w.state" [title]="'截止 ' + (w.deadline | date:'MM-dd HH:mm')">{{ stateText(w.state) }}</i></ng-container></td>
             <td class="wb-next">
@@ -69,19 +74,25 @@ export interface Icu05Board {
           </tr></tbody>
         </table></div>
       </div>
-      <details class="sx-limits"><summary><ui-icon name="info"/>统计口径</summary><ul><li>{{ b.ruleSource }}</li><li *ngFor="let l of b.limitations">{{ l }}</li><li *ngIf="b.readFailed">{{ b.readFailed }} 例读取失败，未计入。</li><li *ngIf="b.truncated">病例数超过 300，仅统计最近 300 例。</li></ul></details>
+      <div *ngIf="b.cases.length > pageSize" role="group" aria-label="病例分页">
+        <button type="button" [disabled]="page === 0" (click)="page = page - 1">上一页</button>
+        <span>第 {{ page + 1 }} 页 · 共 {{ b.cases.length }} 例</span>
+        <button type="button" [disabled]="(page + 1) * pageSize >= b.cases.length" (click)="page = page + 1">下一页</button>
+      </div>
+      <p class="review-inline-error" *ngIf="b.complete === false">部分病例或证据来源读取不完整，请核对后再使用。</p>
+      <details class="sx-limits"><summary><ui-icon name="info"/>统计口径</summary><ul><li>{{ b.ruleSource }}</li><li *ngIf="b.scope">{{ b.scope }}</li><li *ngFor="let l of b.limitations">{{ l }}</li><li *ngIf="b.sourceIncomplete">{{ b.sourceIncomplete }} 例存在证据来源读取失败或截断，受影响判定按无法判定处理。</li><li *ngIf="b.readFailed">{{ b.readFailed }} 例读取失败，未计入。</li><li *ngIf="b.truncated">结果被截断，统计不完整。</li></ul></details>
     </ng-container>
   </section>`,
 })
 export class WardBoard implements OnInit {
   @Input() currentPatientId = '';
   api = inject(Api);
-  b: Icu05Board | null = null; busy = false; error = ''; days = 7;
+  b: Icu05Board | null = null; busy = false; error = ''; days = 7; page = 0; readonly pageSize = 20;
   readonly keys = ['1h', '3h', '6h'];
   left = fmtLeft;
   ngOnInit() { void this.load(); }
   async load() {
-    this.busy = true; this.error = '';
+    this.busy = true; this.error = ''; this.page = 0;
     try { this.b = await this.api.get<Icu05Board>('/quality/icu05-board?days=' + this.days); }
     catch (e) { this.error = '质控统计读取失败：' + errorMessage(e); }
     finally { this.busy = false; }

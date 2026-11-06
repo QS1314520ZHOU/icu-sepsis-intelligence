@@ -29,14 +29,13 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class AiAssistService {
-  public static final String PROMPT_VERSION = "ai-brief-v2";
+  public static final String PROMPT_VERSION = "citation-v2-ai-brief-v2";
   public static final String DISCLAIMER = "AI 生成，仅供核对参考，须由医生结合原始记录判断；不构成诊断或医嘱。";
   static final int MAX_KNOWLEDGE = 8;
   static final Pattern REF = Pattern.compile("^[EK]\\d{1,3}$");
   static final Pattern DOSE = Pattern.compile(
       "\\d+(\\.\\d+)?\\s*(mg|μg|µg|ug|mcg|g|iu|u|单位|毫克|微克|克)(\\s*/\\s*(kg|min|h|小时|分钟?|d|天))*(?![a-z])",
       Pattern.CASE_INSENSITIVE);
-  static final Pattern NUMBER = Pattern.compile("\\d+(\\.\\d+)?");
   static final List<String> SECTIONS = List.of("summary", "gaps", "suggestions", "uncertainties");
   /** Fact keyword → retrieval query; keeps retrieval focused instead of dumping every fact into BM25. */
   static final Map<String, String> TOPICS = new LinkedHashMap<>();
@@ -103,6 +102,8 @@ public class AiAssistService {
     return m;
   }
 
+  public List<Map<String,Object>> knowledgeHistory(String docId) { return kb.history(docId); }
+
   public List<Map<String, Object>> searchKnowledge(String q, int k) {
     AiPrivacyGuard.check(q, null);
     List<Map<String, Object>> out = new ArrayList<>();
@@ -160,9 +161,9 @@ public class AiAssistService {
     spec(new Spec("ask", "提问", "fast", true, true,
         "任务：回答医生关于当前患者的问题。只依据给出的事实和知识条目；事实中没有的信息直接说明“当前数据中没有”，并指出可在哪类原始记录中核对。",
         s("answer", "回答", 6), UNCERTAIN));
-    spec(new Spec("ward", "科室优先级", "fast", false, false,
-        "任务：根据全科室当前未结束的自动预警，给出建议优先查看的患者顺序（用 P# 编号指代患者）及理由；归纳多名患者共同存在的问题（如乳酸未复测、预警长时间未处理）。不做诊断。",
-        u("priority", "建议优先查看", 6), s("pattern", "共性问题", 3), UNCERTAIN));
+    spec(new Spec("ward", "科室队列解释", "fast", false, false,
+        "任务：只解释事实中系统已经排定的科室复核队列（P# 顺序），不得改变顺序或分级，不得根据预警条数推断临床风险。可归纳有明确事实支持的共性问题。不能把未见执行记录写成肯定未执行。每项引用对应事实；不做诊断。",
+        u("priority", "系统队列说明", 6), s("pattern", "共性问题", 3), UNCERTAIN));
   }
   static final Set<String> RESERVED = Set.of("cached", "cachedAt", "interactionId", "patientId", "encounterId", "kind", "label", "status", "message", "model",
       "modelRole", "fallbackUsed", "latencyMs", "generatedAt", "promptVersion", "alertId", "layout", "facts", "knowledge", "droppedCount",
@@ -216,7 +217,7 @@ public class AiAssistService {
   public Map<String, Object> explainAlert(Alert a, String actor, boolean refresh) {
     Patient p = store.db.findById(a.patientId, Patient.class);
     if (p == null) throw ApiException.notFound();
-    String trig = a.trigger != null ? a.trigger : a.reason;
+    String trig = a.latestTrigger != null ? a.latestTrigger : a.trigger != null ? a.trigger : a.reason;
     List<String[]> pre = new ArrayList<>(); pre.add(new String[] {"预警", ("critical".equals(a.severity) ? "紧急" : "优先") + "预警：" + trig});
     return generate(p, SPECS.get("alert"), actor, pre, null, a.id, true, refresh);
   }
@@ -229,6 +230,17 @@ public class AiAssistService {
   }
 
   /** Latest stored explanation for an alert, or null. */
+  public Map<String,Object> alertExplanation(Alert alert) {
+    Map<String,Object> result=alertExplanation(alert.id);
+    if(result==null)return null;
+    if(alert.evidenceChangedAt!=null) {
+      Object generated=result.get("generatedAt");
+      if(generated==null)return null;
+      try {if(Instant.parse(String.valueOf(generated)).isBefore(alert.evidenceChangedAt))return null;}
+      catch(java.time.format.DateTimeParseException ex){return null;}
+    }
+    return result;
+  }
   public Map<String, Object> alertExplanation(String alertId) {
     if (!props.storePrompt && cacheMinutes > 0) {
       Instant cutoff = Instant.now().minus(Duration.ofMinutes(cacheMinutes));
@@ -244,19 +256,22 @@ public class AiAssistService {
   /** Ward-level prioritisation from open alerts. Patients are pseudonymised P1..Pn; the map back stays server→client. */
   public Map<String, Object> ward(List<Alert> open, Patient anchor, String actor) {
     List<String[]> pre = new ArrayList<>();
-    Map<String, String> tags = new LinkedHashMap<>(), names = new LinkedHashMap<>();
-    Instant now = Instant.now();
-    for (Alert a : open) {
-      String key = a.patientId + "|" + a.encounterId;
-      String tag = tags.computeIfAbsent(key, k -> "P" + (tags.size() + 1));
-      names.putIfAbsent(tag, ((a.bed == null ? "" : a.bed + "床 ") + (a.patientLabel == null ? "" : a.patientLabel)).trim());
-      long h = Duration.between(a.createdAt, now).toHours();
-      pre.add(new String[] {"预警 " + tag, tag + " " + ("critical".equals(a.severity) ? "紧急" : "优先") + "：" + (a.trigger != null ? a.trigger : a.reason)
-          + "；状态 " + STATUS_CN.getOrDefault(a.status, a.status) + "；已持续约 " + h + " 小时"});
+    Map<String, String> names = new LinkedHashMap<>();
+    List<org.icu.sepsis.alerting.WardPriorityService.Group> ordered=org.icu.sepsis.alerting.WardPriorityService.aggregate(open);
+    // Summarise after aggregation and ranking; the complete deterministic list remains available without AI.
+    int count=0;
+    for (org.icu.sepsis.alerting.WardPriorityService.Group group : ordered) {
+      if(count++>=20)break;
+      String tag="P"+count;
+      names.put(tag,((group.bed==null?"":group.bed+"床 ")+(group.label==null?"":group.label)).trim());
+      pre.add(new String[]{"系统队列 "+tag,"系统顺序 "+count+"："+tag+"；"+group.category+"；依据："+String.join("；",group.reasons)
+        +"；需重新复核："+group.needsReReview+"。只解释该顺序，不得重新排序或推断风险分。"});
     }
-    if (pre.isEmpty()) pre.add(new String[] {"预警", "当前科室没有未结束的自动预警"});
+    pre.add(new String[]{"队列范围","完整队列共 "+ordered.size()+" 个患者住院，本次 AI 最多解释系统顺序前 20 个；完整列表不依赖 AI。"});
+    if (ordered.isEmpty()) pre.add(new String[] {"预警", "当前科室没有未结束的自动预警；不能据此推断临床正常"});
     Map<String, Object> out = generate(anchor, SPECS.get("ward"), actor, pre, null, null, false);
     out.put("patients", names);
+    out.put("queueRuleVersion",org.icu.sepsis.alerting.WardPriorityService.VERSION);out.put("queuePatients",ordered.size());
     out.put("patientId", null); out.put("encounterId", null);
     return out;
   }
@@ -310,7 +325,7 @@ public class AiAssistService {
     for (int i = 0; i < chunks.size(); i++) {
       KnowledgeBase.Chunk c = chunks.get(i);
       Map<String, Object> v = new LinkedHashMap<>();
-      v.put("ref", "K" + (i + 1)); v.put("id", c.id); v.put("docId", c.docId); v.put("version", c.version);
+      v.put("revisionId",c.revisionId); v.put("ref", "K" + (i + 1)); v.put("id", c.id); v.put("docId", c.docId); v.put("version", c.version);
       rec.knowledge.add(v);
       Map<String, Object> full = c.view(); full.put("ref", "K" + (i + 1)); rec.knowledgeFull.add(full);
     }
@@ -546,12 +561,10 @@ public class AiAssistService {
     if (root == null || !root.isObject()) return null;
     Set<String> refs = new HashSet<>(kref.keySet());
     facts.forEach(f -> refs.add(f.id));
-    StringBuilder corpus = new StringBuilder();
-    facts.forEach(f -> corpus.append(f.text).append(' '));
-    chunks.forEach(c -> corpus.append(c.text).append(' ').append(c.section).append(' '));
-    Set<String> known = new HashSet<>();
-    Matcher nm = NUMBER.matcher(corpus);
-    while (nm.find()) known.add(normalize(nm.group()));
+    Map<String,String> referenceText=new HashMap<>();
+    facts.forEach(f->referenceText.put(f.id,f.text));
+    for(Map.Entry<String,String> ref:kref.entrySet())chunks.stream().filter(c->c.id.equals(ref.getValue())).findFirst()
+      .ifPresent(c->referenceText.put(ref.getKey(),c.text+" "+c.section));
     Map<String, Object> out = new LinkedHashMap<>();
     int kept = 0;
     for (Section sec : spec.sections) {
@@ -570,7 +583,10 @@ public class AiAssistService {
         String reason = null;
         if (sec.needRef && r.isEmpty()) reason = "无有效引用";
         else if (DOSE.matcher(text).find()) reason = "含具体剂量";
-        else { String bad = unknownNumber(text, known); if (bad != null) reason = "数值 " + bad + " 不在依据中"; }
+        else {
+          List<String> cited=new ArrayList<>();for(String ref:r)if(referenceText.get(ref)!=null)cited.add(referenceText.get(ref));
+          reason=CitationEvidenceGuard.check(text,cited);
+        }
         if (reason != null) { dropped.add(Map.of("section", section, "text", clip(text, 200), "reason", reason)); continue; }
         Map<String, Object> item = new LinkedHashMap<>();
         item.put("text", clip(text, 200)); item.put("refs", r);
@@ -585,24 +601,6 @@ public class AiAssistService {
       if (sec.needRef) kept += items.size();
     }
     return kept == 0 ? null : out;
-  }
-
-  static String unknownNumber(String text, Set<String> known) {
-    // E#/K# references are not values; small integer counts (≤10) are tolerated.
-    String t = text.replaceAll("[EK]\\d{1,3}", " ");
-    Matcher m = NUMBER.matcher(t);
-    while (m.find()) {
-      String v = normalize(m.group());
-      double d = Double.parseDouble(v);
-      if (d <= 10 && !v.contains(".")) continue;
-      if (!known.contains(v)) return m.group();
-    }
-    return null;
-  }
-  private static String normalize(String n) {
-    if (!n.contains(".")) return n.replaceFirst("^0+(?=\\d)", "");
-    String s = n.replaceFirst("0+$", "").replaceFirst("\\.$", "");
-    return s.replaceFirst("^0+(?=\\d)", "");
   }
 
   JsonNode parseJson(String content) {
@@ -637,6 +635,10 @@ public class AiAssistService {
   }
 
   public Map<String, Object> feedback(String id, String verdict, String reason, String edited, String actor) {
+    return feedback(id,verdict,reason,edited,actor,null);
+  }
+  public Map<String, Object> feedback(String id, String verdict, String reason, String edited, String actor, Integer reviewSeconds) {
+    if(reviewSeconds!=null&&(reviewSeconds<0||reviewSeconds>14400))throw new ApiException(HttpStatus.BAD_REQUEST,"INVALID_REVIEW_TIME","人工核对耗时超出允许范围");
     if (!Set.of("accept", "reject", "edit").contains(verdict))
       throw new ApiException(HttpStatus.BAD_REQUEST, "BAD_VERDICT", "verdict 仅支持 accept / reject / edit");
     if (("reject".equals(verdict) || "edit".equals(verdict)) && (reason == null || reason.isBlank()))
@@ -645,6 +647,7 @@ public class AiAssistService {
     Map<String, Object> f = new LinkedHashMap<>();
     f.put("verdict", verdict); f.put("reason", props.storePrompt && reason != null ? clip(reason.trim(), 500) : "");
     f.put("editedText", props.storePrompt && edited != null ? clip(edited.trim(), 2000) : null); f.put("actor", actor); f.put("at", Instant.now());
+    f.put("reviewSeconds", reviewSeconds); f.put("durationBasis", reviewSeconds==null?"not_reported":"self_reported");
     store.db.updateFirst(Query.query(Criteria.where("_id").is(rec.id)), new Update().push("feedback", f), AiInteraction.class);
     Map<String, Object> out = new LinkedHashMap<>();
     out.put("interactionId", rec.id); out.put("feedback", f); out.put("count", rec.feedback.size() + 1);

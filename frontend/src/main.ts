@@ -9,10 +9,7 @@ import { Alerts } from './pages/alerts';
 import { Bundles } from './pages/bundles';
 import { Detail } from './pages/detail';
 import { Login } from './pages/login';
-import { Models } from './pages/models';
 import { Overview } from './pages/overview';
-import { Patients } from './pages/patients';
-import { QualityPage } from './pages/qualitypage';
 const authGuard: CanActivateFn = () => {
   const api = inject(Api);
   return !!api.user || inject(Router).createUrlTree(['/login']);
@@ -28,12 +25,12 @@ bootstrapApplication(App, {
       { path: 'embed', component: EmbedWorkspace },
       { path: 'login', component: Login },
       { path: 'overview', component: Overview, canActivate: [authGuard] },
-      { path: 'patients', component: Patients, canActivate: [authGuard] },
+      { path: 'patients', loadComponent: () => import('./pages/patients').then(m => m.Patients), canActivate: [authGuard] },
       { path: 'patients/:id', component: Detail, canActivate: [authGuard] },
       { path: 'alerts', component: Alerts, canActivate: [authGuard] },
       { path: 'bundles', component: Bundles, canActivate: [authGuard] },
-      { path: 'quality', component: QualityPage, canActivate: [authGuard, qualityGuard] },
-      { path: 'models', component: Models, canActivate: [authGuard] },
+      { path: 'quality', loadComponent: () => import('./pages/qualitypage').then(m => m.QualityPage), canActivate: [authGuard, qualityGuard] },
+      { path: 'models', loadComponent: () => import('./pages/models').then(m => m.Models), canActivate: [authGuard] },
       // 现场 iframe：根路径直接进 embed，不出现登录页
       { path: '', pathMatch: 'full', redirectTo: 'embed' },
       { path: '**', redirectTo: 'embed' },

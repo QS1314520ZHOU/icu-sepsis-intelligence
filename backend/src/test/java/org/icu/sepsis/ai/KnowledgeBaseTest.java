@@ -58,4 +58,44 @@ class KnowledgeBaseTest {
     Files.writeString(dir.resolve("dup.json"), "{\"docId\":\"x\",\"chunks\":[{\"id\":\"ssc26-7\",\"text\":\"重复\"}]}");
     assertThrows(IllegalStateException.class, () -> kb(dir.toString()));
   }
+
+  static void writeVersion(Path dir,String filename,String version,String status,String text) throws Exception {
+    Map<String,Object> doc=new LinkedHashMap<>();doc.put("docId","test-sop");doc.put("version",version);doc.put("status",status);
+    doc.put("category","department");doc.put("source","合成规范");doc.put("chunks",List.of(Map.of("id","test-sop-1","text",text)));
+    Files.writeString(dir.resolve(filename),JSON.writeValueAsString(doc));
+  }
+  @Test void historyRetainsTextAndStableRevisionAfterReplacement(@TempDir Path dir) throws Exception {
+    writeVersion(dir,"a.json","v1","active","旧版本合成规范");writeVersion(dir,"b.json","v2","active","新版本合成规范");
+    KnowledgeBase kb=kb(dir.toString());List<Map<String,Object>> history=kb.history("test-sop");
+    assertEquals(2,history.size());assertEquals(false,history.get(0).get("current"));assertEquals(true,history.get(1).get("current"));
+    Map<?,?> old=(Map<?,?>)((List<?>)history.get(0).get("items")).get(0);
+    assertEquals("旧版本合成规范",old.get("text"));assertNotEquals(old.get("revisionId"),kb.get("test-sop-1").orElseThrow().revisionId);
+    assertEquals("新版本合成规范",kb.get("test-sop-1").orElseThrow().text);
+    assertEquals("",kb.get("test-sop-1").orElseThrow().evidenceQuality,"never invent evidence quality");
+  }
+  @Test void draftDoesNotReplaceActiveRetrieval(@TempDir Path dir) throws Exception {
+    writeVersion(dir,"a.json","v1","active","当前规范");writeVersion(dir,"b.json","v2","draft","待审核内容");
+    KnowledgeBase kb=kb(dir.toString());assertEquals("当前规范",kb.get("test-sop-1").orElseThrow().text);
+    assertEquals(false,kb.history("test-sop").get(1).get("current"));
+    assertTrue(kb.search("待审核内容",20).stream().noneMatch(h->"待审核内容".equals(h.chunk.text)));
+  }
+  @Test void changingContentWithoutVersionIncrementIsRejected(@TempDir Path dir) throws Exception {
+    writeVersion(dir,"a.json","v1","active","原文");writeVersion(dir,"b.json","v1","active","悄悄改变");
+    assertThrows(IllegalStateException.class,()->kb(dir.toString()));
+  }
+  @Test void bundledLocalRulesKeepHistoricalVersionsAndPendingK1() {
+    KnowledgeBase kb=kb("");assertEquals(2,kb.history("icu05-rules").size());
+    String gate=kb.get("icu05-gate").orElseThrow().text;
+    assertTrue(gate.contains("乳酸取值窗口待确认"));assertTrue(gate.contains("K1 且 K2"));assertTrue(gate.contains("MAP≤65"));
+    assertFalse(gate.contains("MAP<65"));assertTrue(kb.get("icu05-windows").orElseThrow().text.contains("最新"));
+  }
+
+  @Test void futureEffectiveVersionIsArchivedWithoutReplacingCurrent(@TempDir Path dir) throws Exception {
+    writeVersion(dir,"a.json","v1","active","当前规范");writeVersion(dir,"b.json","v2","active","未来规范");
+    var future=(com.fasterxml.jackson.databind.node.ObjectNode)JSON.readTree(Files.readString(dir.resolve("b.json")));
+    future.put("effectiveFrom","2999-01-01");Files.writeString(dir.resolve("b.json"),JSON.writeValueAsString(future));
+    KnowledgeBase kb=kb(dir.toString());assertEquals("当前规范",kb.get("test-sop-1").orElseThrow().text);
+    assertEquals(false,kb.history("test-sop").get(1).get("current"));
+    assertThrows(UnsupportedOperationException.class,()->((Map) ((List<?>)kb.history("test-sop").get(0).get("items")).get(0)).put("text","篡改"));
+  }
 }

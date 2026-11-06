@@ -21,13 +21,14 @@ import org.springframework.stereotype.Service;
 @Service
 public class ScreeningAlertService {
   public static final String SHOCK = "suspected_shock", INFECTION = "infection_abnormal";
-  public static final String RULE_VERSION = "screen-alert-v1";
+  public static final String RULE_VERSION = "screen-alert-v2";
   static final Set<String> OPEN = Set.of("pending", "acknowledged", "deferred", "confirmed");
   private static final Logger log = LoggerFactory.getLogger(ScreeningAlertService.class);
 
   /** One screening hit. */
   public static final class Hit {
     public final String kind, severity, reason, source;
+    public String evidenceFingerprint;
     Hit(String kind, String severity, String reason, String source) {
       this.kind = kind; this.severity = severity; this.reason = reason; this.source = source;
     }
@@ -40,6 +41,16 @@ public class ScreeningAlertService {
   private final Clock clock;
   private final boolean enabled;
   private final int scanDays, rejectSuppressHours, closeSuppressMinutes;
+  @Value("${app.alerts.auto-ai-explanation:false}") boolean autoAiExplanation = false;
+
+  /** Local review changes invalidate the next scheduled evaluation; no hospital event feed is assumed. */
+  @org.springframework.context.event.EventListener
+  public void sourceChanged(org.icu.sepsis.integration.SourceChangeDispatcher.Change event) { lastFingerprint.remove(event.patientId); lastFullEval.remove(event.patientId); }
+
+  @org.springframework.transaction.event.TransactionalEventListener
+  public void reviewChanged(org.icu.sepsis.sepsis.Icu05CaseReviewService.Changed event) {
+    lastFingerprint.remove(event.patientId); lastFullEval.remove(event.patientId);
+  }
 
   private org.springframework.beans.factory.ObjectProvider<org.icu.sepsis.ai.AiAssistService> ai;
   private org.springframework.beans.factory.ObjectProvider<org.icu.sepsis.integration.SmartCareSourceReader> source;
@@ -83,7 +94,8 @@ public class ScreeningAlertService {
       String code = String.valueOf(f.get("code"));
       if ("LACTATE".equals(code)) lac = f;
       if (code.equals("MAP") || code.startsWith("MAP_")) {
-        if (map == null || num(f.get("value")) < num(map.get("value"))) map = f;
+        if (map == null || num(f.get("value")) < num(map.get("value"))
+            || num(f.get("value")) == num(map.get("value")) && code.compareTo(String.valueOf(map.get("code"))) < 0) map = f;
       }
     }
     boolean vaso = Boolean.TRUE.equals(review.get("vasopressorActive"));
@@ -91,14 +103,16 @@ public class ScreeningAlertService {
       List<String> why = new ArrayList<>();
       if (vaso) why.add("正在使用升压药");
       if (lac != null && map != null) why.add("乳酸 " + fmt(lac.get("value")) + " mmol/L 且 " + map.get("label") + " " + fmt(map.get("value")) + " mmHg");
-      out.add(new Hit(SHOCK, "critical", "床旁筛查疑似休克：" + String.join("；", why) + "（规则：需要升压药，或 乳酸≥2 且 MAP<65）", "bedside"));
+      out.add(new Hit(SHOCK, "critical", "床旁筛查疑似休克：" + String.join("；", why) + "（本地候选须 K1 且 K2；K1 或 K2 仅疑似预警）", "bedside"));
     }
     String clue = String.valueOf(review.getOrDefault("infectionClue", ""));
     if (clue.contains("含感染") && !findings.isEmpty()) {
       List<String> items = new ArrayList<>();
       for (Map<String, Object> f : findings) items.add(f.get("label") + " " + fmt(f.get("value")));
+      Collections.sort(items);
       out.add(new Hit(INFECTION, "high", "诊断文本含感染线索，且存在异常：" + String.join("、", items), "bedside"));
     }
+    for (Hit h : out) h.evidenceFingerprint = signature(RULE_VERSION+"|"+h.source+"|"+h.reason, reviewEvidence(review,h.kind));
     return out;
   }
 
@@ -111,13 +125,44 @@ public class ScreeningAlertService {
     if (!(g instanceof Map)) return out;
     Map<String, Object> gate = (Map<String, Object>) g;
     String status = String.valueOf(gate.get("status"));
-    if ("septic_shock".equals(status) || "suspected_review".equals(status)) {
+    if ("septic_shock".equals(status) || "suspected_review".equals(status) || Boolean.TRUE.equals(gate.get("suspectedWarning"))) {
       String extra = gate.get("mapMin") == null ? "" : "；门控期最低 MAP " + fmt(gate.get("mapMin")) + " mmHg";
-      out.add(new Hit(SHOCK, "critical", "ICU-05 门控：" + gate.get("statusLabel") + extra + "（规则：需要升压药，或 乳酸≥2 且 MAP<65）", "icu05"));
+      out.add(new Hit(SHOCK, "critical", "ICU-05 门控：" + gate.get("statusLabel") + extra + "（本地质控候选须 K1 且 K2；K1 或 K2 仅疑似预警，需人工复核）", "icu05"));
     } else if (Boolean.TRUE.equals(gate.get("hasInfection")) && Boolean.TRUE.equals(gate.get("hasOrganDysfunction"))) {
-      out.add(new Hit(INFECTION, "high", "ICU-05 门控：有感染证据且存在器官功能障碍，未达休克判定", "icu05"));
+      out.add(new Hit(INFECTION, "high", "ICU-05 门控：有感染证据且存在器官功能障碍，未达本地质控候选条件", "icu05"));
     }
+    List<Map<String,Object>> evidence = new ArrayList<>();
+    for (String group : List.of("organ","infection","shock")) {
+      Object values=gate.get(group); if(values instanceof List) for(Object raw:(List<?>)values) if(raw instanceof Map) evidence.add(select((Map<?,?>)raw));
+    }
+    for(Hit h:out) h.evidenceFingerprint=signature(RULE_VERSION+"|"+h.source+"|"+h.reason,evidence);
     return out;
+  }
+
+  static Map<String,Object> select(Map<?,?> value) {
+    Map<String,Object> selected=new TreeMap<>();
+    for(String key:List.of("code","value","number","unit","time","eventTime","sourceId","sourceRecordId","reason","windowConfirmed"))
+      if(value.containsKey(key)) selected.put(key,value.get(key));
+    return selected;
+  }
+  static List<Map<String,Object>> reviewEvidence(Map<String,Object> review,String kind) {
+    List<Map<String,Object>> selected=new ArrayList<>();Object raw=review.get("findings");
+    if(raw instanceof List)for(Object item:(List<?>)raw)if(item instanceof Map){Map<?,?> map=(Map<?,?>)item;String code=String.valueOf(map.get("code"));
+      if(!SHOCK.equals(kind)||"LACTATE".equals(code)||code.startsWith("MAP"))selected.add(select(map));}
+    return selected;
+  }
+  static String canonical(Object value) {
+    if(value instanceof Map){TreeMap<String,String> sorted=new TreeMap<>();((Map<?,?>)value).forEach((k,v)->sorted.put(String.valueOf(k),canonical(v)));return sorted.toString();}
+    if(value instanceof Collection){List<String> sorted=new ArrayList<>();for(Object item:(Collection<?>)value)sorted.add(canonical(item));Collections.sort(sorted);return sorted.toString();}
+    String text=Objects.toString(value,"null");return text.length()+":"+text;
+  }
+  static String signature(String reason,Object evidence) {
+    try {return Base64.getUrlEncoder().withoutPadding().encodeToString(java.security.MessageDigest.getInstance("SHA-256")
+        .digest((reason+"|"+canonical(evidence)).getBytes(java.nio.charset.StandardCharsets.UTF_8)));}
+    catch(java.security.NoSuchAlgorithmException ex){throw new IllegalStateException(ex);}
+  }
+  static boolean changed(Alert alert,Hit hit) {
+    return alert.evidenceFingerprint!=null && hit.evidenceFingerprint!=null && !alert.evidenceFingerprint.equals(hit.evidenceFingerprint);
   }
 
   // ---------------------------------------------------------------- persistence
@@ -208,27 +253,34 @@ public class ScreeningAlertService {
         Criteria same = Criteria.where("patientId").is(p.id).and("encounterId").is(p.encounterId).and("kind").is(h.kind);
         Alert open = store.db.findOne(Query.query(Criteria.where("status").in(OPEN).andOperator(same)), Alert.class);
         if (open != null) {
+          boolean changed=changed(open,h);
           open.lastSeenAt = now;
+          if(changed){open.needsReReview=true;open.evidenceChangedAt=now;open.latestTrigger=h.reason;open.evidenceFingerprint=h.evidenceFingerprint;}
+          // Legacy rows establish a baseline without claiming new evidence.
+          if(open.evidenceFingerprint==null)open.evidenceFingerprint=h.evidenceFingerprint;
           store.db.save(open);
+          if(changed)store.recordSystem(open,p,"alert","evidence_changed","system","触发证据变化，请重新复核；原处置意见保留",now);
           continue;
         }
         Alert last = store.db.findOne(Query.query(same).with(Sort.by(Sort.Direction.DESC, "createdAt")), Alert.class);
         if (last != null && last.closedAt != null) {
           Duration hold = "rejected".equals(last.status) ? Duration.ofHours(rejectSuppressHours) : Duration.ofMinutes(closeSuppressMinutes);
-          if (last.closedAt.plus(hold).isAfter(now)) continue;
+          if (last.closedAt.plus(hold).isAfter(now) && !changed(last,h)) continue;
         }
         Alert a = new Alert();
         store.init(a, p, now);
         a.kind = h.kind; a.source = h.source; a.severity = h.severity; a.status = "pending";
         a.ruleVersion = RULE_VERSION; a.reason = h.reason; a.trigger = h.reason; a.lastSeenAt = now;
-        a.patientLabel = p.label; a.bed = p.bed;
+        a.patientLabel = p.label; a.bed = p.bed; a.evidenceFingerprint=h.evidenceFingerprint;
+        a.latestTrigger=h.reason; a.reviewChainId=last==null?a.id:(last.reviewChainId==null?last.id:last.reviewChainId);
+        if(last!=null){a.previousAlertId=last.id;a.needsReReview=changed(last,h);if(a.needsReReview)a.evidenceChangedAt=now;}
         store.db.insert(a);
         store.recordSystem(a, p, "alert", "created", "system", h.reason, now);
         created++;
-        // Background AI explanation (no-op when no model is configured); never blocks or fails the alert.
+        // AI explanation is on demand by default; explicit configuration enables background generation.
         try {
           org.icu.sepsis.ai.AiAssistService svc = ai == null ? null : ai.getIfAvailable();
-          if (svc != null) svc.explainAlertAsync(a);
+          if (autoAiExplanation && svc != null) svc.explainAlertAsync(a);
         } catch (RuntimeException ignored) { }
       }
     } catch (RuntimeException e) {

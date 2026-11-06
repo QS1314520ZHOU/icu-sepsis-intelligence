@@ -2,7 +2,10 @@
 export interface Icu05Item {
   code: string; label: string; value: boolean | null; time: string | null; detail: string; reason: string | null;
   /** Optional display threshold (not shown in body text; used in tooltip only). */
-  threshold?: string;
+  manual?: boolean; autoValue?: boolean | null; autoReason?: string | null; overrideId?: string;
+  threshold?: string; sourceId?: string | null; earliestTime?: string | null; timeMeaning?: string; selection?: string;
+  number?: number | null; unit?: string; windowConfirmed?: boolean; windowFrom?: string | null; windowTo?: string | null;
+  evaluatedTo?: string | null; windowSource?: string | null; scope?: string;
 }
 export interface Icu05Window {
   key: string; hours: number; deadline: string; closed: boolean; finish: boolean | null;
@@ -18,21 +21,42 @@ export interface Icu05CultureOrder {
   reviewTime: string | null;
   sourceId?: string;
 }
+export interface Icu05CaseReview {
+  id: string; version: number; ruleVersion: string; t0: string; autoValue: boolean | null; manualValue: boolean;
+  reasonCode: string; reasonText: string; operator: string; createdAt: string; revokedAt: string | null; revokedBy: string | null; revokeReason: string | null;
+}
+export interface Icu05OverrideRecord {
+  id: string; version: number; scope: 'judgement' | 'sofa_component'; targetId: string; windowKey: string;
+  ruleVersion: string; autoValue: boolean | number | null; manualValue: boolean | number; reasonText: string;
+  operator: string; createdAt: string; revokedAt?: string | null; revokedBy?: string; revokeReason?: string; applied?: boolean;
+}
+export interface Icu05SofaReview {
+  components: {key: string; autoScore: number | null; score: number | null; manual: boolean; reason: string}[];
+  scored: number; partial: number | null; total: number | null; experimental: boolean; note: string;
+}
 export interface Icu05Result {
   schemaVersion: number; patientId: string; encounterId: string; available: boolean; message: string; asOf: string;
   ruleVersion: string; ruleSource: string; status: string; statusLabel: string; applicable?: boolean;
   t0: string | null; t0OrderName: string | null; t0Source: string | null;
+  overrides?: Icu05OverrideRecord[];
+  experimentalSofa?: {classic: Icu05SofaReview; sofa2: Icu05SofaReview};
+  automaticResult?: Icu05Result;
+  automaticFingerprint?: string;
+  automaticPool?: { eligible: boolean | null };
+  caseReview?: { active: Icu05CaseReview | null; applied: boolean; requiresReview: boolean; message: string };
   cultureOrders?: Icu05CultureOrder[];
+  lactateRecords?: { rawValue: string | number | null; rawUnit: string | null; unitConfirmed?: boolean; value: number | null; time: string; timeMeaning: string; sourceId: string | null }[];
   pool?: { eligible: boolean | null; icuWithin24h: boolean | null; admissionType: string | null; rule: string };
   gate: Icu05Gate | null; windows: Icu05Window[]; limitations?: string[];
   lactateSeries?: { time: string; value: number; minutesFromT0: number; period?: string }[];
 }
 
 export const icu05Reason: Record<string, string> = {
+  B3_REVIEW_NOT_MET: '第二步经复核未满足',
   DATA_MISSING_LAC: '未取到乳酸', DATA_MISSING: '未取到记录', AB_MISSING: '未见抗菌药执行', BC_MISSING: '未见血培养', BC_AFTER_AB: '抗菌药早于血培养',
   FLUID_MISSING: '未见补液执行', FLUID_INSUFFICIENT: '补液量不足', FLUID_AMOUNT_INCOMPLETE: '部分补液记录无量', LACTATE_RECHECK_MISSING: '未复测乳酸',
-  SOURCE_ERROR: '来源读取失败', MAP_MISSING: '未取到 MAP', WINDOW_OPEN: '时窗未结束', VASO_STATUS_UNKNOWN: 'T0 前用药是否持续未知',
-  MAP_NOT_MET: 'MAP<65', A1_NOT_MET: '乳酸未测',
+  SOURCE_ERROR: '来源读取失败或不完整', MAP_MISSING: '未取到 MAP', WINDOW_OPEN: '时窗未结束', VASO_STATUS_UNKNOWN: 'T0 前用药是否持续未知',
+  K1_SELECTION_UNCONFIRMED: 'K1 选值配置需更新为最高值', K1_WINDOW_UNCONFIRMED: '乳酸取值窗口待确认', K1_WINDOW_NOT_AVAILABLE: 'K1 窗口尚无可评估时间', MAP_NOT_MET: 'MAP≤65', A1_NOT_MET: '乳酸未测',
   NO_ORGAN_DYSFUNCTION: '未见器官功能障碍证据', NOT_SEPTIC_SHOCK: '未达休克判定', NO_INFECTION_EVIDENCE: '未取得感染证据', INSUFFICIENT_EVIDENCE: '证据不全',
 };
 

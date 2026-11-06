@@ -6,6 +6,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.icu.sepsis.application.Store;
 import org.icu.sepsis.domain.Domain.Patient;
 import org.icu.sepsis.sepsis.Icu05Service;
+import org.icu.sepsis.sepsis.Icu05Rules;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Sort;
@@ -35,8 +36,8 @@ public class Icu05BoardService {
   public Map<String, Object> board(int days) {
     int d = Math.max(1, Math.min(31, days));
     Instant now = clock.instant(), from = now.minus(Duration.ofDays(d));
-    Query q = Query.query(store.departmentScope().and("admittedAt").gte(from))
-        .with(Sort.by(Sort.Direction.DESC, "admittedAt")).limit(300);
+    Query q = Query.query(store.departmentScope().and("admittedAt").gte(from).lte(now))
+        .with(Sort.by(Sort.Direction.DESC, "admittedAt", "id"));
     List<Patient> ps = store.db.find(q, Patient.class);
     List<Case> cases = new ArrayList<>();
     int failed = 0;
@@ -46,15 +47,25 @@ public class Icu05BoardService {
     }
     Map<String, Object> out = aggregate(cases, now);
     out.put("from", from); out.put("to", now); out.put("days", d); out.put("readFailed", failed);
-    out.put("truncated", ps.size() >= 300);
+    out.put("truncated", false); out.put("matched", ps.size());
+    out.put("complete", failed == 0 && ((Number)out.get("sourceIncomplete")).intValue() == 0);
+    out.put("scope", "按入科时间、当前宿主科室权限范围筛选；不代表医院源库已完整同步");
     return out;
   }
 
+  @org.springframework.context.event.EventListener
+  public void sourceChanged(org.icu.sepsis.integration.SourceChangeDispatcher.Change event) { cache.remove(event.patientId + ":" + event.encounterId + ":" + Icu05Rules.RULE_VERSION); }
+
+  @org.springframework.transaction.event.TransactionalEventListener
+  public void reviewChanged(org.icu.sepsis.sepsis.Icu05CaseReviewService.Changed event) {
+    cache.remove(event.patientId + ":" + event.encounterId + ":" + Icu05Rules.RULE_VERSION);
+  }
+
   private Map<String, Object> cached(Patient p, Instant now) {
-    Cached c = cache.get(p.id);
+    Cached c = cache.get(p.id + ":" + p.encounterId + ":" + Icu05Rules.RULE_VERSION);
     if (c != null && Duration.between(c.at, now).compareTo(CACHE) < 0) return c.result;
     Map<String, Object> r = icu05.evaluate(p, now);
-    cache.put(p.id, new Cached(now, r));
+    cache.put(p.id + ":" + p.encounterId + ":" + Icu05Rules.RULE_VERSION, new Cached(now, r));
     if (cache.size() > 2000) cache.clear();
     return r;
   }
@@ -97,12 +108,33 @@ public class Icu05BoardService {
     for (String k : WINDOWS) win.put(k, new int[4]);
     // abx within 1h, culture before abx, lactate within 1h: true, false, unknown
     int[] abx = new int[3], cult = new int[3], lac = new int[3];
+    int reviewEligible=0, reviewed=0, caseExcluded=0, judgementReviewed=0, sofaReviewed=0, staleReview=0, classificationUnknown=0, sourceIncomplete=0;
+    Instant oldestEvaluation=null;
+    Map<String,Map<String,Set<String>>> reasonCases=new LinkedHashMap<>();
+    for(String key:WINDOWS)reasonCases.put(key,new TreeMap<>());
     List<Map<String, Object>> rows = new ArrayList<>();
     for (Case c : cases) {
       Map<String, Object> r = c.r;
       screened++;
       if (!Boolean.TRUE.equals(r.get("available"))) { unavailable++; continue; }
+      reviewEligible++;
+      if (r.get("failedSources") instanceof Collection && !((Collection<?>)r.get("failedSources")).isEmpty()) sourceIncomplete++;
+      Instant evaluated = instant(r.get("asOf"));
+      if (evaluated != null && (oldestEvaluation == null || evaluated.isBefore(oldestEvaluation))) oldestEvaluation = evaluated;
+      Map<String,Object> caseReview = r.get("caseReview") instanceof Map ? (Map<String,Object>)r.get("caseReview") : Map.of();
+      boolean caseApplied=Boolean.TRUE.equals(caseReview.get("applied")), judgement=false, sofa=false;
+      boolean stale=Boolean.TRUE.equals(caseReview.get("requiresReview"));
+      Object overrides=r.get("overrides");
+      if (overrides instanceof List) for(Object value:(List<?>)overrides) if(value instanceof Map) {
+        Map<?,?> record=(Map<?,?>)value;
+        if(Boolean.TRUE.equals(record.get("applied"))) {
+          judgement |= "judgement".equals(record.get("scope")); sofa |= "sofa_component".equals(record.get("scope"));
+        } else if(record.get("revokedAt")==null) stale=true;
+      }
+      if(caseApplied)caseExcluded++; if(judgement)judgementReviewed++; if(sofa)sofaReviewed++;
+      if(caseApplied||judgement||sofa)reviewed++; if(stale)staleReview++;
       String status = String.valueOf(r.get("status"));
+      if("unknown".equals(status))classificationUnknown++;
       boolean isShock = "septic_shock".equals(status), isSuspected = "suspected_review".equals(status);
       if (isSuspected) suspected++;
       if (!isShock && !isSuspected) continue;
@@ -116,6 +148,7 @@ public class Icu05BoardService {
         for (String k : WINDOWS) {
           Map<String, Object> w = window(r, k);
           int[] a = win.get(k);
+          if(w!=null&&"not_met".equals(w.get("state"))&&w.get("reasons") instanceof List)for(Object reason:(List<?>)w.get("reasons")){String code=String.valueOf(reason);reasonCases.get(k).computeIfAbsent(code,x->new HashSet<>()).add(c.p.id+"|"+c.p.encounterId); }
           String s = w == null ? "unknown" : String.valueOf(w.get("state"));
           switch (s) { case "met" -> a[0]++; case "not_met" -> a[1]++; case "in_progress" -> a[3]++; default -> a[2]++; }
         }
@@ -130,8 +163,16 @@ public class Icu05BoardService {
     rows.sort(Comparator.comparingInt((Map<String, Object> m) -> (int) m.get("rank"))
         .thenComparing(m -> String.valueOf(m.getOrDefault("nextDeadline", "~"))));
     Map<String, Object> out = new LinkedHashMap<>();
-    out.put("asOf", now);
-    out.put("ruleSource", "ICU-05 感染性休克 Bundle（科室主任规则 v3）；国家重症质控指标 2024 版 ICU-05");
+    out.put("asOf", now); out.put("ruleVersion", Icu05Rules.RULE_VERSION);
+    out.put("ruleSource", "ICU-05 本地质控候选规则；可判定病例达标率，非正式上报率");
+    Map<String,Object> reviews=new LinkedHashMap<>();
+    reviews.put("denominator",reviewEligible); reviews.put("reviewedCases",reviewed);
+    reviews.put("caseExclusions",caseExcluded); reviews.put("judgementCases",judgementReviewed); reviews.put("sofaCases",sofaReviewed);
+    reviews.put("requiresReview",staleReview); reviews.put("rate",reviewEligible==0?null:(double)reviewed/reviewEligible);
+    reviews.put("rule","分母为本次统计成功取得可用结果的病例；分子为至少一条生效人工覆盖的病例，同一病例去重。各层可重叠；未覆盖不等于未复核。");
+    out.put("sourceIncomplete",sourceIncomplete); out.put("manualReviews",reviews); out.put("classificationUnknown",classificationUnknown);
+    out.put("oldestEvaluatedAt",oldestEvaluation); out.put("maxCacheAgeSeconds",CACHE.toSeconds());
+    out.put("updateMode","按请求重算，最长缓存 5 分钟；未接入可靠来源事件，不保证实时。");
     out.put("screened", screened); out.put("unavailable", unavailable);
     out.put("septicShock", shock); out.put("suspected", suspected);
     out.put("denominator", inPool); out.put("excluded", excluded); out.put("poolUnknown", poolUnknown);
@@ -144,15 +185,19 @@ public class Icu05BoardService {
       ws.add(m);
     }
     out.put("windows", ws);
+    List<Map<String,Object>> breakdown=new ArrayList<>();
+    for(String key:WINDOWS)for(var entry:reasonCases.get(key).entrySet())breakdown.add(Map.of("window",key,"code",entry.getKey(),"label",REASON.getOrDefault(entry.getKey(),"原因代码待核对"),"cases",entry.getValue().size()));
+    out.put("failureReasons",breakdown);
+    out.put("failureReasonDefinition","仅纳入分母且窗口未达标病例，按窗口/原因/患者住院去重；同一病例可有多个原因，各原因数不可相加作为未达标分母。未知及进行中不计为未达标原因。");
     out.put("indicators", List.of(
         indicator("abx1h", "1h 内给予抗菌药物", abx, "1h 时窗 B1：T0 后 1 小时内有抗菌药执行记录"),
-        indicator("cultureBeforeAbx", "抗菌药前留取血培养", cult, "B3：首次血培养早于首剂抗菌药；血培养时间取医嘱审核时间"),
+        indicator("cultureBeforeAbx", "抗菌药前留取血培养", cult, "B3：窗口内最新血培养审核时间早于最新抗菌药执行时间"),
         indicator("lactate1h", "1h 内监测乳酸", lac, "1h 时窗 A1：T0 后 1 小时内有乳酸结果"),
         unavailableIndicator("oxygenMetabolism", "氧代谢监测", "ScvO₂ / 静脉-动脉 CO₂ 差值数据源未接入")));
     out.put("cases", rows);
     out.put("limitations", List.of(
         "按当前时刻用床旁同一规则重算，非上报口径的最终结果；“—”无法判定单列，不计为未完成。",
-        "分母：符合感染性休克判定且入院 24h 内进 ICU（不含 ICU 期间新发）；纳入条件无法确认的病例单列。",
+        "分母：符合本地质控候选条件且入院 24h 内进 ICU（不含 ICU 期间新发）；纳入条件无法确认的病例单列。",
         "统计范围按入科时间；结果缓存 5 分钟。"));
     return out;
   }

@@ -109,6 +109,9 @@ class ScreeningAlertServiceTest {
     verify(sepsis, times(2)).assess(eq(a), any());
     verify(sepsis, never()).assess(eq(gone), any());
     verify(icu05, times(1)).evaluate(any(), any()); // second sweep: data unchanged within full-eval window
+    s.reviewChanged(new org.icu.sepsis.sepsis.Icu05CaseReviewService.Changed(a));
+    s.scan();
+    verify(icu05, times(2)).evaluate(any(), any());
   }
 
   @Test void inWardFilterFailureScansAll() {
@@ -119,5 +122,43 @@ class ScreeningAlertServiceTest {
     when(prov.getIfAvailable()).thenReturn(reader);
     svc.setSource(prov);
     assertEquals(1, svc.filterInWard(List.of(patient())).size());
+  }
+
+  @Test void unknownK1MayWarnIndependentlyWithoutClaimingCandidateOrDiagnosis() {
+    Map<String,Object> gate=new HashMap<>();gate.put("status","unknown");gate.put("statusLabel","乳酸取值窗口待确认");gate.put("suspectedWarning",true);
+    List<ScreeningAlertService.Hit> hits=ScreeningAlertService.fromIcu05(Map.of("available",true,"gate",gate));
+    assertEquals(1,hits.size());assertTrue(hits.get(0).reason.contains("K1 且 K2"));
+    assertTrue(hits.get(0).reason.contains("需人工复核")); assertFalse(hits.get(0).reason.contains("MAP<65"));
+    assertEquals("unknown",gate.get("status"));
+  }
+  @Test @SuppressWarnings("unchecked") void aiExplanationIsOnDemandUnlessExplicitlyEnabled() {
+    org.icu.sepsis.ai.AiAssistService ai=mock(org.icu.sepsis.ai.AiAssistService.class);
+    org.springframework.beans.factory.ObjectProvider<org.icu.sepsis.ai.AiAssistService> provider=mock(org.springframework.beans.factory.ObjectProvider.class);
+    when(provider.getIfAvailable()).thenReturn(ai); svc.setAi(provider);
+    assertEquals(1,svc.raise(patient(),shock()));verify(ai,never()).explainAlertAsync(any());
+    svc.autoAiExplanation=true;assertEquals(1,svc.raise(patient(),shock()));verify(ai).explainAlertAsync(any());
+  }
+
+  @Test void sameEvidenceNeverReopensReviewButChangedEvidencePreservesReviewerReason() {
+    Alert open=new Alert();open.id="open";open.status="confirmed";open.reason="既往人工处置意见";open.evidenceFingerprint=shock().get(0).evidenceFingerprint;
+    when(db.findOne(any(Query.class),eq(Alert.class))).thenReturn(open);
+    svc.raise(patient(),shock());assertFalse(open.needsReReview);
+    List<ScreeningAlertService.Hit> changed=ScreeningAlertService.fromReview(review(true,CLUE,f("LACTATE","乳酸",4),f("MAP","平均动脉压",60)));
+    svc.raise(patient(),changed);assertTrue(open.needsReReview);assertEquals("既往人工处置意见",open.reason);assertEquals(now,open.evidenceChangedAt);
+    verify(db).insert(argThat((Object o)->o instanceof History&&"evidence_changed".equals(((History)o).action)));
+    svc.raise(patient(),changed);verify(db,times(1)).insert(argThat((Object o)->o instanceof History&&"evidence_changed".equals(((History)o).action)));
+  }
+  @Test void newEvidenceBypassesRejectionHoldAndLinksOriginalWithoutChangingIt() {
+    Alert old=new Alert();old.id="old";old.status="rejected";old.reviewChainId="root";old.closedAt=now.minusSeconds(60);old.evidenceFingerprint="older";
+    when(db.findOne(any(Query.class),eq(Alert.class))).thenReturn(null,old);
+    assertEquals(1,svc.raise(patient(),shock()));assertEquals("rejected",old.status);
+    verify(db).insert(argThat((Object o)->o instanceof Alert&&"old".equals(((Alert)o).previousAlertId)&&"root".equals(((Alert)o).reviewChainId)&&((Alert)o).needsReReview));
+  }
+  @Test void evidenceOrderAndRefreshTimeDoNotTriggerReReview() {
+    Map<String,Object> a=review(true,CLUE,f("MAP","MAP",60),f("LACTATE","乳酸",3));
+    Map<String,Object> b=review(true,CLUE,f("MAP","MAP",60),f("LACTATE","乳酸",3));
+    a.put("asOf",now);b.put("asOf",now.plusSeconds(60));
+    assertEquals(ScreeningAlertService.fromReview(a).get(0).evidenceFingerprint,ScreeningAlertService.fromReview(b).get(0).evidenceFingerprint);
+    assertEquals(ScreeningAlertService.signature("same",List.of(Map.of("code","MAP"),Map.of("code","LACTATE"))),ScreeningAlertService.signature("same",List.of(Map.of("code","LACTATE"),Map.of("code","MAP"))));
   }
 }

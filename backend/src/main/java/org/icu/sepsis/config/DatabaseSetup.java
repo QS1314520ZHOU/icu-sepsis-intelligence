@@ -37,6 +37,10 @@ public class DatabaseSetup implements ApplicationRunner {
     for (Class<?> t :
         List.of(
             Patient.class,
+            org.icu.sepsis.notes.ClinicalNoteSnapshot.class,
+            org.icu.sepsis.notes.ClinicalNoteSyncState.class,
+            org.icu.sepsis.sepsis.Icu05CaseReview.class,
+            org.icu.sepsis.sepsis.Icu05Override.class,
             Observation.class,
             Assessment.class,
             Alert.class,
@@ -53,6 +57,9 @@ public class DatabaseSetup implements ApplicationRunner {
                   .on("department", Sort.Direction.ASC)
                   .on("createdAt", Sort.Direction.DESC));
     }
+    db.indexOps(org.icu.sepsis.notes.ClinicalNoteSnapshot.class).ensureIndex(new Index().on("department",Sort.Direction.ASC).on("patientId",Sort.Direction.ASC).on("encounterId",Sort.Direction.ASC).on("versionKey",Sort.Direction.ASC).unique());
+    db.indexOps(org.icu.sepsis.notes.ClinicalNoteSnapshot.class).ensureIndex(new Index().on("department",Sort.Direction.ASC).on("patientId",Sort.Direction.ASC).on("encounterId",Sort.Direction.ASC).on("syncedAt",Sort.Direction.DESC).on("_id",Sort.Direction.DESC));
+    db.indexOps(org.icu.sepsis.notes.ClinicalNoteSyncState.class).ensureIndex(new Index().on("department",Sort.Direction.ASC).on("patientId",Sort.Direction.ASC).on("encounterId",Sort.Direction.ASC).unique());
     db.indexOps(org.icu.sepsis.ai.AiInteraction.class)
         .ensureIndex(
             new Index()
@@ -79,6 +86,9 @@ public class DatabaseSetup implements ApplicationRunner {
                 .on("sourceSystem", Sort.Direction.ASC)
                 .on("sourceRecordId", Sort.Direction.ASC)
                 .unique());
+    db.indexOps(org.icu.sepsis.sepsis.Icu05Override.class).ensureIndex(new Index().on("activeKey",Sort.Direction.ASC).unique().partial(PartialIndexFilter.of(Criteria.where("activeKey").type(2))));
+    db.indexOps(org.icu.sepsis.sepsis.Icu05CaseReview.class).ensureIndex(new Index().on("activeKey",Sort.Direction.ASC)
+        .unique().partial(PartialIndexFilter.of(Criteria.where("activeKey").type(2))));
     db.indexOps(Alert.class)
         .ensureIndex(
             new Index()

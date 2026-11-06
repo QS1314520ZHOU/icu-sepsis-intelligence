@@ -16,12 +16,12 @@ import java.util.stream.Collectors;
 public final class Icu05Rules {
   private Icu05Rules() {}
 
-  public static final String RULE_VERSION = "ICU-05 v3";
+  public static final String RULE_VERSION = "ICU-05 v3-local-k1-max-20261106";
   public static final String RULE_SOURCE = "科室主任 ICU-05 感染性休克 Bundle 判定规则（需求文档 v3）";
   static final Duration GATE_BEFORE = Duration.ofHours(24);
   static final Duration GATE_AFTER = Duration.ofHours(6);
   static final double FLUID_THRESHOLD_ML = 1500;
-  /** Hypotension threshold for the shock gate, organ item and C1 trigger (department decision: MAP<65). */
+  /** Hypotension threshold for the shock gate, organ item and C1 trigger (local S3/C1 decision: MAP<=65). */
   public static final double MAP_LOW = 65;
   /** Lactate threshold for the shock gate (K1). */
   public static final double LACTATE_HIGH = 2;
@@ -31,6 +31,8 @@ public final class Icu05Rules {
   // ---------------- input model ----------------
   public static final class Point {
     public Instant time; public double value; public String channel; public String sourceId;
+    public Object rawValue; public String rawUnit; public boolean lactateUnitKnown = true;
+    public String timeMeaning = "记录时间（采样或结果时间类型未确认）";
     public Point() {}
     public Point(Instant time, double value, String channel, String sourceId) { this.time=time; this.value=value; this.channel=channel; this.sourceId=sourceId; }
   }
@@ -40,7 +42,7 @@ public final class Icu05Rules {
     public Action(Instant time, String action) { this.time=time; this.action=action; }
   }
   public static final class DrugItem {
-    public String name; public Double liquidMl; public boolean liquidUnitKnown = true;
+    public String name; public Double actualInfusedMl; public Double liquidMl; public boolean liquidUnitKnown = true;
     public DrugItem() {}
     public DrugItem(String name, Double liquidMl) { this.name=name; this.liquidMl=liquidMl; }
   }
@@ -53,8 +55,12 @@ public final class Icu05Rules {
     public Order(String name, Instant orderTime, Instant reviewTime, String sourceId) { this.name=name; this.orderTime=orderTime; this.reviewTime=reviewTime; this.sourceId=sourceId; }
   }
   public static final class Evidence {
+    public String k1Selection = "maximum";
+    /** K1 window must be supplied with a verified rule source; never inherit the general gate implicitly. */
+    public Instant k1WindowStart, k1WindowEnd;
+    public String k1WindowSource;
     public Instant asOf;
-    public Instant t0; public String t0OrderName;
+    public Instant t0; public String t0OrderName; public String t0SourceId;
     public Instant icuAdmission; public Instant hospitalAdmission; public String admissionType;
     public String diagnosisText;
     public List<Point> lactate = new ArrayList<>(), pf = new ArrayList<>(), gcs = new ArrayList<>(), map = new ArrayList<>(), hr = new ArrayList<>();
@@ -63,6 +69,7 @@ public final class Icu05Rules {
     public Set<String> vasoDictionary = new HashSet<>(), antibioticDictionary = new HashSet<>();
     /** Source names whose read failed: bGATemp, score, bedside, drugExe, VI_ICU_ZYYZ, diagnosis. */
     public Set<String> failed = new HashSet<>();
+    public Set<String> truncatedSources = new HashSet<>();
     public List<String> bloodCultureKeywords = List.of("血培养");
     /** reviewTime (director doc) or orderTime. */
     public String cultureTimeField = "reviewTime";
@@ -106,7 +113,7 @@ public final class Icu05Rules {
     if (d.actions == null || d.actions.isEmpty()) return null;
     List<Action> acts = new ArrayList<>(d.actions);
     acts.sort(Comparator.comparing(a -> a.time == null ? d.start : a.time));
-    boolean on = true;
+    Boolean on = true;
     for (Action a : acts) {
       Instant t = a.time == null ? d.start : a.time;
       if (t.isAfter(at)) break;
@@ -114,8 +121,9 @@ public final class Icu05Rules {
       if ("stop".equals(raw) || "cancel".equals(raw) || "停止".equals(raw) || "取消".equals(raw) || "停用".equals(raw))
         on = false;
       else if ("pause".equals(raw) || "暂停".equals(raw)) on = false;
-      else if (RESUME_ACTIONS.contains(raw)) on = true;
-      // start / add / minus / quickAdd keep state
+      else if (RESUME_ACTIONS.contains(raw) || Set.of("start", "开始").contains(raw)) on = true;
+      else if (!Set.of("start","开始","add","minus","quickadd").contains(raw)) on = null;
+      // Known dose-change actions keep state; unrecognised actions make it unknown.
     }
     return on;
   }
@@ -165,6 +173,17 @@ public final class Icu05Rules {
     if (any(n, VASO_KEYWORDS)) return true;
     return dictionary != null && dictionary.contains(n) && !any(n, VASO_DICTIONARY_EXCLUDE);
   }
+  public static boolean isVasoWide(String name, Set<String> dictionary) {
+    return dictionary != null && dictionary.stream().anyMatch(n -> norm(n).equals(norm(name))) && !norm(name).isEmpty();
+  }
+  public static boolean isVasoStrict(String name) {
+    return any(name, List.of("去甲肾上腺素", "肾上腺素", "多巴胺", "多巴酚丁胺", "血管加压素", "去氧肾上腺素", "苯肾上腺素", "米力农", "异丙肾上腺素",
+      "norepinephrine", "epinephrine", "dopamine", "dobutamine", "vasopressin", "phenylephrine", "milrinone", "isoproterenol"));
+  }
+  static Boolean all(Boolean a, Boolean b) {
+    if (Boolean.FALSE.equals(a) || Boolean.FALSE.equals(b)) return false;
+    return a == null || b == null ? null : true;
+  }
   public static boolean isAntibiotic(String name, Set<String> dictionary) {
     String n = norm(name);
     if (n.isEmpty() || any(n, NON_ANTIBIOTIC)) return false;
@@ -183,11 +202,15 @@ public final class Icu05Rules {
     Map<String, Object> out = new LinkedHashMap<>();
     out.put("ruleVersion", RULE_VERSION);
     out.put("ruleSource", RULE_SOURCE);
+    out.put("t0SourceId", e.t0SourceId); out.put("t0TimeMeaning", "入科后首条医嘱开立时间");
     out.put("asOf", e.asOf);
     out.put("t0", e.t0);
     out.put("t0Source", e.t0 == null ? null : "入科后首条医嘱开立时间");
     out.put("t0OrderName", e.t0OrderName);
     out.put("pool", pool(e));
+    out.put("lactateRecords", lactateRecords(e));
+    out.put("truncatedSources", new TreeSet<>(e.truncatedSources));
+    out.put("failedSources", new TreeSet<>(e.failed));
     out.put("limitations", limitations(e));
     if (e.t0 == null) {
       out.put("status", "no_t0");
@@ -207,7 +230,7 @@ public final class Icu05Rules {
     // ---- organ dysfunction S1-S4 ----
     Map<String, Object> s1 = minItem("S1", "氧合指数 <300", e.pf, gateFrom, gateTo, e.failed.contains("bGATemp"), v -> v < 300, "");
     Map<String, Object> s2 = minItem("S2", "GCS <13", e.gcs, gateFrom, gateTo, e.failed.contains("score"), v -> v < 13, "分");
-    Map<String, Object> s3 = minItem("S3", "MAP <65", e.map, gateFrom, gateTo, e.failed.contains("bedside"), v -> v < MAP_LOW, "mmHg");
+    Map<String, Object> s3 = minItem("S3", "MAP ≤65", e.map, gateFrom, gateTo, e.failed.contains("bedside"), v -> v <= MAP_LOW, "mmHg");
     Map<String, Object> s4 = vasopressor("S4", "血管活性药", e, gateFrom, gateTo);
     List<Map<String, Object>> organ = List.of(s1, s2, s3, s4);
     Boolean hasOrgan = anyTrue(organ);
@@ -219,32 +242,25 @@ public final class Icu05Rules {
     List<Map<String, Object>> infection = List.of(i1, i2, i3);
     Boolean hasInfection = anyTrue(infection);
     // ---- shock K1 / K2 ----
-    Point lacInitial = initialLactate(e.lactate, t0, e.asOf);
-    Boolean k1v = e.failed.contains("bGATemp") ? null : lacInitial == null ? null : lacInitial.value >= LACTATE_HIGH;
-    Map<String, Object> k1 = item("K1", "首次乳酸", k1v, lacInitial == null ? null : lacInitial.time,
-        lacInitial == null ? "" : fmt(lacInitial.value) + " mmol/L", lacInitial == null ? "DATA_MISSING_LAC" : null);
-    // Threshold is not shown in the label; UI colours by value (true = meets ≥2).
-    k1.put("threshold", "≥2 mmol/L");
-    Map<String, Object> k2 = new LinkedHashMap<>(s4); k2.put("code", "K2"); k2.put("label", "需要升压药");
+    Map<String, Object> k1 = k1(e);
+    Boolean k1v = (Boolean) k1.get("value");
+    Map<String, Object> k2 = new LinkedHashMap<>(s4); k2.put("code", "K2"); k2.put("label", "血管活性药执行（宽口径）");
     Boolean k2v = (Boolean) s4.get("value");
     Double mapMin = (Double) s3.get("number");
-    Boolean hypotension = mapMin == null ? null : mapMin < MAP_LOW;
-    // SHOCK_RULE = s3: K2 OR (K1 AND MAP<65)
-    Boolean shock;
-    if (Boolean.TRUE.equals(k2v) || (Boolean.TRUE.equals(k1v) && Boolean.TRUE.equals(hypotension))) shock = true;
-    else if (Boolean.FALSE.equals(k2v) && (Boolean.FALSE.equals(k1v) || Boolean.FALSE.equals(hypotension))) shock = false;
-    else shock = null;
+    Boolean shock = all(k1v, k2v);
+    gate.put("suspectedWarning", anyTrue(List.of(k1, k2)));
+    gate.put("suspectedRule", "K1 或 K2，仅疑似预警，不计入质控分母");
 
     String status, label, reason;
     if (Boolean.FALSE.equals(hasOrgan)) { status = "not_met"; label = "未见器官功能障碍"; reason = "NO_ORGAN_DYSFUNCTION"; }
-    else if (Boolean.FALSE.equals(shock)) { status = "not_met"; label = "未达休克判定"; reason = "NOT_SEPTIC_SHOCK"; }
-    else if (Boolean.TRUE.equals(shock) && Boolean.TRUE.equals(hasOrgan) && Boolean.TRUE.equals(hasInfection)) { status = "septic_shock"; label = "符合感染性休克判定"; reason = null; }
+    else if (Boolean.FALSE.equals(shock)) { status = "not_met"; label = "未达本地质控候选条件"; reason = "NOT_SEPTIC_SHOCK"; }
+    else if (Boolean.TRUE.equals(shock) && Boolean.TRUE.equals(hasOrgan) && Boolean.TRUE.equals(hasInfection)) { status = "septic_shock"; label = "符合本地质控候选条件"; reason = null; }
     else if (Boolean.TRUE.equals(shock) && !Boolean.TRUE.equals(hasInfection)) { status = "suspected_review"; label = "疑似，待复核感染证据"; reason = "NO_INFECTION_EVIDENCE"; }
     else { status = "unknown"; label = "证据不全，无法判定"; reason = "INSUFFICIENT_EVIDENCE"; }
     gate.put("organ", organ); gate.put("hasOrganDysfunction", hasOrgan);
     gate.put("infection", infection); gate.put("hasInfection", hasInfection);
     gate.put("shock", List.of(k1, k2)); gate.put("mapMin", mapMin); gate.put("isSepticShock", shock);
-    gate.put("rule", "休克 = 需要升压药，或 乳酸≥2 且 MAP<65");
+    gate.put("rule", "本地质控候选 = K1（乳酸≥2）且 K2（宽口径血管活性药执行）");
     gate.put("status", status); gate.put("statusLabel", label); gate.put("reason", reason);
     out.put("gate", gate);
     out.put("status", status);
@@ -274,7 +290,56 @@ public final class Icu05Rules {
     return out;
   }
 
-  /** T0-24h, but not earlier than hospital (or ICU) admission. */
+  /** Local candidate screening only: maximum valid normalized lactate in an explicitly verified window. */
+  static Map<String, Object> k1(Evidence e) {
+    boolean selectionConfirmed = "maximum".equals(e.k1Selection);
+    boolean windowConfirmed = e.k1WindowStart != null && e.k1WindowEnd != null
+        && !e.k1WindowEnd.isBefore(e.k1WindowStart)
+        && e.k1WindowSource != null && !e.k1WindowSource.isBlank();
+    Instant limit = windowConfirmed && e.asOf != null ? min(e.k1WindowEnd, e.asOf) : null;
+    String reason = !selectionConfirmed ? "K1_SELECTION_UNCONFIRMED"
+        : !windowConfirmed ? "K1_WINDOW_UNCONFIRMED"
+        : lactateFailed(e) ? "SOURCE_ERROR"
+        : limit == null || limit.isBefore(e.k1WindowStart) ? "K1_WINDOW_NOT_AVAILABLE" : null;
+    Point selected = null;
+    if (reason == null) {
+      // Values are normalized to mmol/L by the input contract. No missing/invalid value is replaced by zero.
+      selected = within(validLactate(e.lactate), e.k1WindowStart, limit).stream()
+          .filter(p -> Double.isFinite(p.value) && p.value >= 0)
+          .min(Comparator.comparingDouble((Point p) -> -p.value).thenComparing(p -> p.time)
+              .thenComparing(p -> Objects.toString(p.sourceId, ""))).orElse(null);
+      if (selected == null) reason = "DATA_MISSING_LAC";
+    }
+    Map<String, Object> k1 = item("K1", "质控候选乳酸最高值", selected == null ? null : selected.value >= LACTATE_HIGH,
+        selected == null ? null : selected.time, selected == null ? "" : fmt(selected.value) + " mmol/L", reason);
+    k1.put("threshold", "≥2 mmol/L"); k1.put("selection", e.k1Selection);
+    k1.put("number", selected == null ? null : selected.value); k1.put("unit", "mmol/L");
+    k1.put("sourceId", selected == null ? null : selected.sourceId);
+    k1.put("timeMeaning", selected == null ? null : selected.timeMeaning);
+    k1.put("windowConfirmed", windowConfirmed); k1.put("windowFrom", e.k1WindowStart);
+    k1.put("windowTo", e.k1WindowEnd); k1.put("evaluatedTo", limit); k1.put("windowSource", e.k1WindowSource);
+    k1.put("scope", "仅本地质控候选筛查；需结合 K2、感染证据及人工复核，不等同临床确诊");
+    return k1;
+  }
+
+  /** Collected records for review; independent of the unresolved K1 calculation window. */
+  static List<Map<String,Object>> lactateRecords(Evidence e) {
+    List<Map<String,Object>> records = new ArrayList<>();
+    for (Point p : e.lactate) {
+      if (p.time == null || e.asOf == null || p.time.isAfter(e.asOf)) continue;
+      Map<String,Object> record = new LinkedHashMap<>();
+      record.put("rawValue", p.rawValue != null ? p.rawValue : Double.isFinite(p.value) ? p.value : null);
+      record.put("rawUnit", p.rawUnit); record.put("unitConfirmed", p.lactateUnitKnown);
+      record.put("value", Double.isFinite(p.value) ? p.value : null);
+      record.put("time", p.time); record.put("timeMeaning", p.timeMeaning);
+      record.put("sourceId", p.sourceId);
+      records.add(record);
+    }
+    records.sort(Comparator.comparing(r -> (Instant) r.get("time")));
+    return records;
+  }
+
+  /** T0-24h, but not earlier than hospital (or ICU) admission; not the K1 window. */
   static Instant gateFrom(Evidence e) {
     Instant floor = e.hospitalAdmission != null ? e.hospitalAdmission : e.icuAdmission;
     Instant from = e.t0.minus(GATE_BEFORE);
@@ -300,40 +365,52 @@ public final class Icu05Rules {
   static Map<String, Object> window(Evidence e, int hours) {
     Instant t0 = e.t0, end = t0.plus(Duration.ofHours(hours)), limit = min(end, e.asOf);
     boolean closed = !e.asOf.isBefore(end);
-    boolean lacFail = e.failed.contains("bGATemp"), drugFail = e.failed.contains("drugExe"), orderFail = e.failed.contains("VI_ICU_ZYYZ"), mapFail = e.failed.contains("bedside");
-    List<Point> lac = within(e.lactate, t0, limit);
+    boolean lacFail = lactateFailed(e), drugFail = e.failed.contains("drugExe"), orderFail = e.failed.contains("VI_ICU_ZYYZ"), mapFail = e.failed.contains("bedside");
+    List<Point> lac = within(validLactate(e.lactate), t0, limit);
     // A1 lactate measured (earliest in window, record max)
     Point first = lac.isEmpty() ? null : lac.get(0);
     Double lacMax = lac.stream().map(p -> p.value).max(Double::compare).orElse(null);
     Boolean a1 = lacFail ? null : first == null ? null : true;
     Map<String, Object> a1m = item("A1", "乳酸测定", a1, first == null ? null : first.time,
         first == null ? "" : fmt(first.value) + " mmol/L" + (lac.size() > 1 ? "，最高 " + fmt(lacMax) : ""), a1 == null ? (lacFail ? "SOURCE_ERROR" : "DATA_MISSING_LAC") : null);
-    // B1 antibiotic execution start (first dose in window)
-    Map.Entry<Instant, String> abx = drugFail ? null : firstDrug(e, t0, limit, n -> isAntibiotic(n, e.antibioticDictionary));
+    a1m.put("sourceId", first == null ? null : first.sourceId);
+    a1m.put("maximum", lacMax);
+    a1m.put("timeMeaning", first == null ? null : first.timeMeaning);
+    // V3 B1: latest execution start in the window
+    Map.Entry<Instant, String> abx = drugFail ? null : latestDrug(e, t0, limit, n -> isAntibiotic(n, e.antibioticDictionary));
     Boolean b1 = abx == null ? null : true;
     Map<String, Object> b1m = item("B1", "抗菌药物执行", b1, abx == null ? null : abx.getKey(), abx == null ? "" : abx.getValue(), b1 == null ? (drugFail ? "SOURCE_ERROR" : "AB_MISSING") : null);
-    // B2 blood culture (first in window)
-    Order bc = orderFail ? null : firstCulture(e, t0, limit);
+    // V3 B2: latest culture timestamp in the window
+    Order bc = orderFail ? null : latestCulture(e, t0, limit);
     Boolean b2 = bc == null ? null : true;
     Map<String, Object> b2m = item("B2", "血培养", b2, bc == null ? null : cultureTime(e, bc), bc == null ? "" : bc.name, b2 == null ? (orderFail ? "SOURCE_ERROR" : "BC_MISSING") : null);
-    // B3 = B1 & B2 & the FIRST antibiotic dose later than the FIRST blood culture. Both are searched from the gate
-    // start (T0-24h / admission) so a dose given before T0 or a later repeat dose cannot turn a violation into "met".
+    // V3 B3 compares the selected B1 and B2 in this same window.
     Boolean b3; String b3reason;
-    Instant lookback = gateFrom(e);
-    Map.Entry<Instant, String> abxFirst = abx == null ? null : firstDrug(e, lookback, limit, n -> isAntibiotic(n, e.antibioticDictionary));
-    Order bcFirst = bc == null ? null : firstCulture(e, lookback, limit);
+    Map.Entry<Instant, String> abxFirst = abx;
+    Order bcFirst = bc;
     if (b1 == null) { b3 = null; b3reason = "AB_MISSING"; }
     else if (b2 == null) { b3 = null; b3reason = "BC_MISSING"; }
     else if (abxFirst.getKey().isAfter(cultureTime(e, bcFirst))) { b3 = true; b3reason = null; }
     else { b3 = false; b3reason = "BC_AFTER_AB"; }
-    String b3detail = b3reason == null ? "首剂抗菌药晚于首次血培养"
-        : "BC_AFTER_AB".equals(b3reason) ? "首剂抗菌药 " + hhmm(abxFirst.getKey()) + " 早于或同时于首次血培养 " + hhmm(cultureTime(e, bcFirst)) : "";
+    String b3detail = b3reason == null ? "所选抗菌药晚于所选血培养"
+        : "BC_AFTER_AB".equals(b3reason) ? "所选抗菌药 " + hhmm(abxFirst.getKey()) + " 早于或同时于所选血培养 " + hhmm(cultureTime(e, bcFirst)) : "";
     Map<String, Object> b3m = item("B3", "先培养后抗菌", b3, null, b3detail, b3reason);
-    // C1 MAP<65 trigger, C2 lactate>=4 trigger (opposite semantics: TRUE = abnormal)
+    b1m.put("sourceId", abx == null ? null : e.drugs.stream().filter(d -> abx.getKey().equals(d.start) && d.items.stream().anyMatch(i -> abx.getValue().equals(i.name))).map(d -> d.sourceId).filter(Objects::nonNull).findFirst().orElse(null));
+    b1m.put("selection", "latest"); b2m.put("selection", "latest");
+    Map.Entry<Instant, String> earliestAbx = drugFail ? null : firstDrug(e, t0, limit, n -> isAntibiotic(n, e.antibioticDictionary));
+    Order earliestBc = orderFail ? null : firstCulture(e, t0, limit);
+    b1m.put("earliestTime", earliestAbx == null ? null : earliestAbx.getKey());
+    b2m.put("earliestTime", earliestBc == null ? null : cultureTime(e, earliestBc));
+    b2m.put("sourceId", bc == null ? null : bc.sourceId);
+    b2m.put("timeMeaning", "orderTime".equals(e.cultureTimeField) ? "开立时间" : "审核时间");
+    b3m.put("selection", "latest_in_window");
+    b3m.put("antibioticTime", abx == null ? null : abx.getKey());
+    b3m.put("cultureTime", bc == null ? null : cultureTime(e, bc));
+    // C1 MAP<=65 trigger, C2 lactate>=4 trigger (opposite semantics: TRUE = abnormal)
     List<Point> maps = within(e.map, t0, limit);
     Point mapLow = maps.stream().min(Comparator.comparingDouble(p -> p.value)).orElse(null);
-    Boolean c1 = mapFail ? null : mapLow == null ? null : mapLow.value < MAP_LOW;
-    Map<String, Object> c1m = item("C1", "MAP <65（触发）", c1, mapLow == null ? null : mapLow.time,
+    Boolean c1 = mapFail ? null : mapLow == null ? null : mapLow.value <= MAP_LOW;
+    Map<String, Object> c1m = item("C1", "MAP ≤65（触发）", c1, mapLow == null ? null : mapLow.time,
         mapLow == null ? "" : "最低 " + fmt(mapLow.value) + (mapLow.channel == null ? "" : "（" + ("IBP".equals(mapLow.channel) ? "有创" : "无创") + "）"), c1 == null ? "MAP_MISSING" : null);
     Boolean c2 = lacFail ? null : lacMax == null ? null : lacMax >= 4;
     Map<String, Object> c2m = item("C2", "乳酸 ≥4（触发）", c2, null, lacMax == null ? "" : "最高 " + fmt(lacMax), c2 == null ? "DATA_MISSING_LAC" : null);
@@ -355,12 +432,12 @@ public final class Icu05Rules {
     if (Boolean.TRUE.equals(c1)) reasons.add("MAP_NOT_MET");
     Map<String, Object> recheck = null;
     if (hours == 6) {
-      List<Point> re = within(e.lactate, t0.plus(Duration.ofHours(1)), limit);
+      List<Point> re = within(validLactate(e.lactate), t0.plus(Duration.ofHours(1)), limit);
       Point last = re.isEmpty() ? null : re.get(re.size() - 1);
       Boolean rv;
       if (lacFail) rv = null; else if (last != null) rv = Boolean.TRUE; else rv = closed ? Boolean.FALSE : null;
-      recheck = item("A2", "复测乳酸（1h 后）", rv, last == null ? null : last.time, last == null ? "" : fmt(last.value) + " mmol/L", last == null ? "LACTATE_RECHECK_MISSING" : null);
-      if (Boolean.TRUE.equals(finish) && last == null) { finish = null; reasons.add("LACTATE_RECHECK_MISSING"); }
+      recheck = item("A2", "复测乳酸（暂定项，1h 后）", rv, last == null ? null : last.time, last == null ? "" : fmt(last.value) + " mmol/L", last == null ? "LACTATE_RECHECK_MISSING" : null);
+      recheck.put("provisional", true);
     }
     String state;
     if (Boolean.TRUE.equals(finish)) state = "met";
@@ -390,7 +467,7 @@ public final class Icu05Rules {
         if (it.liquidMl != null && it.liquidUnitKnown && it.liquidMl < FLUID_MIN_BAG_ML) continue;
         count++;
         if (firstTime == null || d.start.isBefore(firstTime)) firstTime = d.start;
-        if (it.liquidMl == null || !it.liquidUnitKnown) incomplete = true; else sum += it.liquidMl;
+        if (it.actualInfusedMl == null || !it.liquidUnitKnown || it.actualInfusedMl < 0) incomplete = true; else sum += it.actualInfusedMl;
       }
     }
     if (hours == 1) {
@@ -407,7 +484,7 @@ public final class Icu05Rules {
   }
 
   static Map<String, Object> vasopressor(String code, String label, Evidence e, Instant from, Instant to) {
-    if (e.failed.contains("drugExe")) return item(code, label, null, null, "", "SOURCE_ERROR");
+    if (e.failed.contains("drugExe") || e.failed.contains("vasoDictionary")) return item(code, label, null, null, "", "SOURCE_ERROR");
     Instant t0 = e.t0;
     boolean unknown = false;
     String unknownName = null;
@@ -420,7 +497,7 @@ public final class Icu05Rules {
     for (Drug d : sorted) {
       if (d.start.isBefore(from) || d.start.isAfter(to)) continue;
       for (DrugItem it : d.items) {
-        if (!isVasopressor(it.name, e.vasoDictionary)) continue;
+        if (!isVasoWide(it.name, e.vasoDictionary)) continue;
         // Started after T0 inside the window: any use counts (director rule). Started at/before T0: must run after T0.
         Boolean active = d.start.isAfter(t0) ? Boolean.TRUE : vasopressorRunningDuring(d, t0, to, false);
         if (active == null) {
@@ -433,7 +510,10 @@ public final class Icu05Rules {
         }
         if (!active) continue;
         String note = d.start.isAfter(t0) ? it.name : it.name + "（T0 前开始，按执行动作 T0 后仍在用）";
-        return item(code, label, true, d.start, note, null);
+        Map<String, Object> result = item(code, label, true, d.start, note, null);
+        result.put("sourceId", d.sourceId); result.put("drugName", it.name);
+        result.put("classification", "VASO_WIDE"); result.put("strict", isVasoStrict(it.name));
+        result.put("executionState", "有执行"); return result;
       }
     }
     if (unknown)
@@ -460,6 +540,19 @@ public final class Icu05Rules {
     return item("I3", "病原学送检", hit != null, hit == null ? null : hit.orderTime, hit == null ? "" : hit.name, null);
   }
 
+  static Order latestCulture(Evidence e, Instant from, Instant to) {
+    return e.cultureOrders.stream().filter(o -> o.name != null && e.bloodCultureKeywords.stream().anyMatch(o.name::contains))
+        .filter(o -> cultureTime(e,o) != null && !cultureTime(e,o).isBefore(from) && !cultureTime(e,o).isAfter(to))
+        .max(Comparator.comparing(o -> cultureTime(e,o))).orElse(null);
+  }
+  static Map.Entry<Instant, String> latestDrug(Evidence e, Instant from, Instant to, Predicate<String> match) {
+    Map.Entry<Instant,String> best = null;
+    for (Drug d : e.drugs) {
+      if (d.start == null || d.start.isBefore(from) || d.start.isAfter(to)) continue;
+      for (DrugItem it : d.items) if (match.test(it.name) && (best == null || d.start.isAfter(best.getKey()))) best = Map.entry(d.start,it.name);
+    }
+    return best;
+  }
   static Order firstCulture(Evidence e, Instant from, Instant to) {
     return e.cultureOrders.stream().filter(o -> o.name != null && e.bloodCultureKeywords.stream().anyMatch(o.name::contains))
         .filter(o -> { Instant t = cultureTime(e, o); return t != null && !t.isBefore(from) && !t.isAfter(to); })
@@ -479,15 +572,15 @@ public final class Icu05Rules {
   /** Initial lactate: last value at or before T0+1h (from T0-2h); else first in [T0, T0+6h]. */
   static Point initialLactate(List<Point> lactate, Instant t0, Instant asOf) {
     Instant cap = min(t0.plus(Duration.ofHours(1)), asOf);
-    List<Point> early = within(lactate, t0.minus(Duration.ofHours(2)), cap);
+    List<Point> early = within(validLactate(lactate), t0.minus(Duration.ofHours(2)), cap);
     if (!early.isEmpty()) return early.get(early.size() - 1);
-    List<Point> later = within(lactate, t0, min(t0.plus(GATE_AFTER), asOf));
+    List<Point> later = within(validLactate(lactate), t0, min(t0.plus(GATE_AFTER), asOf));
     return later.isEmpty() ? null : later.get(0);
   }
 
   static List<Map<String, Object>> lactateSeries(List<Point> lactate, Instant t0, Instant asOf) {
     List<Map<String, Object>> out = new ArrayList<>();
-    for (Point p : within(lactate, t0.minus(Duration.ofHours(2)), min(t0.plus(GATE_AFTER), asOf))) {
+    for (Point p : within(validLactate(lactate), t0.minus(Duration.ofHours(2)), min(t0.plus(GATE_AFTER), asOf))) {
       Map<String, Object> m = new LinkedHashMap<>();
       long min = Duration.between(t0, p.time).toMinutes();
       m.put("time", p.time); m.put("value", p.value); m.put("minutesFromT0", min);
@@ -505,13 +598,15 @@ public final class Icu05Rules {
 
   static List<String> limitations(Evidence e) {
     List<String> l = new ArrayList<>();
+    l.add("K1 暂按确认窗口内有效乳酸最高值判定 ≥2 mmol/L；窗口起止尚未确认时保持无法判定。仅用于本地质控候选筛查，需结合 K2、感染证据与人工复核，不等同临床确诊。");
     l.add("乳酸、氧合指数取血气记录，按病案号关联，动/静脉标本未区分。");
     l.add("抗菌药、补液、升压药取执行用药的开始时间，药名按关键词与药品字典识别。");
     l.add("血培养取医嘱" + ("orderTime".equals(e.cultureTimeField) ? "开立时间" : "审核时间") + "，不等于实际采血时间。");
-    l.add("补液只计单独输注的晶体/胶体（作为其他药物溶媒、或单袋 <100 ml 的不计），按执行开始时整袋量累计，不是实际输入量；未按体重 30 ml/kg 换算。");
+    l.add("补液只计单独输注的晶体/胶体（作为其他药物溶媒、或单袋 <100 ml 的不计），仅累计单位已确认的实际输入量；整袋容量不视为实际输入量；未按体重 30 ml/kg 换算。");
     l.add("先培养后抗菌：比较首剂抗菌药与首次血培养，均自门控起点（T0 前 24h，不早于入院）起查找；多巴酚丁胺、米力农等强心药不计为升压药。");
-    l.add("人工覆盖与感染部位确认未接入；结果为质控规则自动判定，不是诊断。");
-    if (!e.failed.isEmpty()) l.add("读取失败的来源：" + String.join("、", new TreeSet<>(e.failed.stream().map(Icu05Rules::failedName).collect(java.util.stream.Collectors.toList()))) + "；相关项显示为“—”，不按未完成处理。");
+    l.add("自动判定与人工覆盖分别保留；感染部位确认未接入；质控候选结果不是临床诊断。");
+    if (!e.truncatedSources.isEmpty()) l.add("来源读取达到上限并已截断：" + String.join("、",new TreeSet<>(e.truncatedSources)) + "；相关自动判定保持无法判定。");
+    if (!e.failed.isEmpty()) l.add("读取失败或不完整的来源：" + String.join("、", new TreeSet<>(e.failed.stream().map(Icu05Rules::failedName).collect(java.util.stream.Collectors.toList()))) + "；相关项显示为“—”，不按未完成处理。");
     return l;
   }
 
@@ -523,7 +618,7 @@ public final class Icu05Rules {
     if (low == null) return item(code, label, null, null, "", "DATA_MISSING");
     String ch = low.channel == null ? "" : "（" + ("IBP".equals(low.channel) ? "有创" : "无创") + "）";
     Map<String, Object> m = item(code, label, hit.test(low.value), low.time, "最低 " + fmt(low.value) + (unit.isEmpty() ? "" : " " + unit) + ch, null);
-    m.put("number", low.value);
+    m.put("number", low.value); m.put("sourceId", low.sourceId);
     return m;
   }
   static Map<String, Object> item(String code, String label, Boolean value, Instant time, String detail, String reason) {
@@ -536,6 +631,13 @@ public final class Icu05Rules {
     boolean unknown = false;
     for (Map<String, Object> m : items) { Object v = m.get("value"); if (Boolean.TRUE.equals(v)) return true; if (v == null) unknown = true; }
     return unknown ? null : false;
+  }
+  static boolean lactateFailed(Evidence e) {
+    return e.failed.contains("bGATemp") || e.failed.contains("VI_ICU_EXAM_ITEM.lactate");
+  }
+  static List<Point> validLactate(List<Point> points) {
+    if(points==null)return List.of();
+    return points.stream().filter(p->p!=null&&p.lactateUnitKnown&&Double.isFinite(p.value)&&p.value>=0).collect(Collectors.toList());
   }
   static List<Point> within(List<Point> pts, Instant from, Instant to) {
     if (pts == null) return List.of();

@@ -23,3 +23,6 @@ __pycache__/
 *.pyc
 research-export/
 research-report/
+
+# Local verification logs and synthetic browser captures
+/work/

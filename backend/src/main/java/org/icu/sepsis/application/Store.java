@@ -117,7 +117,10 @@ public class Store {
     r.put("version", b.version);
     if (b instanceof Alert) {
       Alert a = (Alert) b;
-      r.put("status", a.status);
+      r.put("status", a.status); r.put("reviewOutcome",a.reviewOutcome); r.put("reviewedAt",a.reviewedAt);
+      r.put("reviewedBy",a.reviewedBy); r.put("needsReReview",a.needsReReview); r.put("latestTrigger",a.latestTrigger);
+      r.put("evidenceFingerprint",a.evidenceFingerprint); r.put("evidenceChangedAt",a.evidenceChangedAt);
+      r.put("previousAlertId",a.previousAlertId); r.put("reviewChainId",a.reviewChainId);
       r.put("reason", a.reason);
     }
     if (b instanceof Task) {
@@ -127,6 +130,15 @@ public class Store {
       r.put("targetStatus", t.targetStatus);
       r.put("clinicalReviewStatus", t.clinicalReviewStatus);
       r.put("completedAt", t.completedAt);
+    }
+    if(b instanceof org.icu.sepsis.sepsis.Icu05Override) {
+      org.icu.sepsis.sepsis.Icu05Override review=(org.icu.sepsis.sepsis.Icu05Override)b;
+      r.putAll(org.icu.sepsis.sepsis.Icu05OverrideService.view(review));
+    }
+    if (b instanceof org.icu.sepsis.sepsis.Icu05CaseReview) {
+      org.icu.sepsis.sepsis.Icu05CaseReview review=(org.icu.sepsis.sepsis.Icu05CaseReview)b;
+      r.put("autoValue",review.autoValue); r.put("manualValue",review.manualValue); r.put("ruleVersion",review.ruleVersion);
+      r.put("t0",review.t0); r.put("reasonCode",review.reasonCode); r.put("revokedAt",review.revokedAt); r.put("revokedBy",review.revokedBy);
     }
     return r;
   }

@@ -1,5 +1,7 @@
+import { AlertReviewStatsPanel } from '../alert-review-stats-panel';
 import { CommonModule } from '@angular/common';
 import { Component, EventEmitter, Input, Output, inject, OnInit } from '@angular/core';
+import { WardPriorityPanel } from '../ward-priority-panel';
 import { UiIcon } from '../ui-icon';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
@@ -10,7 +12,7 @@ import { AiBrief } from '../ai-assist';
 @Component({
   selector: 'patient-alerts',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, UiIcon, AiBriefView],
+  imports: [CommonModule, FormsModule, RouterLink, UiIcon, AiBriefView, WardPriorityPanel, AlertReviewStatsPanel],
   template: `<header class="embedded-section-head" *ngIf="embedded"><h1><ui-icon name="bell"/>预警处理</h1><div class="al-scope" role="group" aria-label="预警范围"><button type="button" [class.on]="scope === 'patient'" [attr.aria-pressed]="scope === 'patient'" (click)="setScope('patient')">本患者</button><button type="button" [class.on]="scope === 'department'" [attr.aria-pressed]="scope === 'department'" (click)="setScope('department')">全科室</button></div><button (click)="load()" [disabled]="busy"><ui-icon name="refresh"/>刷新</button></header><div class="pagehead">
       <div>
         <p class="eyebrow">ALERT REVIEW CENTER</p>
@@ -34,8 +36,10 @@ import { AiBrief } from '../ai-assist';
       </div>
       <p class="error" role="alert" *ngIf="error">{{ error }}</p>
       <div class="al-ward" *ngIf="scope === 'department' || !embedded">
-        <button type="button" (click)="wardBrief()" [disabled]="wardBusy">{{ wardBusy ? '生成中…' : 'AI 科室优先级' }}</button>
-        <small class="muted"> 按未结束预警排序建议优先查看的患者（发送给模型时患者以编号代替）</small>
+        @defer (on immediate) { <ward-priority-panel/> }
+        @if (api.has('DOCTOR') || api.has('QUALITY')) { @defer (on immediate) { <alert-review-stats/> } }
+        <button type="button" (click)="wardBrief()" [disabled]="wardBusy">{{ wardBusy ? '生成中…' : 'AI 解释系统队列' }}</button>
+        <small class="muted"> 系统先汇总全部未结束预警并按患者住院排序；AI 最多解释前 20 个，故障不影响队列（发送给模型时患者以编号代替）</small>
         <p class="review-inline-error" *ngIf="wardError">{{ wardError }}</p>
         <ai-brief-view *ngIf="ward" [brief]="ward" [single]="true" />
       </div>
@@ -48,6 +52,11 @@ import { AiBrief } from '../ai-assist';
         </div>
         <div>
           <strong>{{ text(a.status) }}</strong>
+          <p *ngIf="a.needsReReview" class="review-inline-error" role="status">触发证据已变化，需重新复核（{{ a.evidenceChangedAt | date:'MM-dd HH:mm' }}）</p>
+          <p *ngIf="a.latestTrigger && a.latestTrigger !== a.trigger">最新触发依据：{{ a.latestTrigger }}</p>
+          <p *ngIf="a.reviewOutcome">复核结果：{{ outcome(a) }}<ng-container *ngIf="a.reviewedAt"> · {{ a.reviewedBy }} · {{ a.reviewedAt | date:'MM-dd HH:mm' }}</ng-container></p>
+          <p *ngIf="a.status === 'rejected' && !a.reviewOutcome">既往驳回记录，未确认是否误报。</p>
+          <p *ngIf="a.previousAlertId" class="muted">关联既往复核链；原处置意见保留。</p>
           <p class="al-trigger" *ngIf="a.trigger">{{ a.trigger }}</p>
           <p *ngIf="!a.trigger || a.reason !== a.trigger">{{ a.trigger ? '处理说明：' : '' }}{{ a.reason }}</p>
           <a
@@ -73,7 +82,7 @@ import { AiBrief } from '../ai-assist';
               ['pending', 'acknowledged', 'deferred', 'confirmed'].includes(a.status)
             "
             class="primary"
-            (click)="selected = a; reason = ''; quick = ''; action = 'confirm'"
+            (click)="selected = a; reason = ''; quick = ''; action = a.status === 'confirmed' ? 'reconfirm' : 'confirm'"
           >
             处置
           </button>
@@ -102,11 +111,13 @@ import { AiBrief } from '../ai-assist';
               <option *ngIf="selected.status !== 'confirmed'" value="confirm">
                 {{ selected.simulated ? '确认筛查并创建演示复评任务' : '确认筛查（已复核）' }}
               </option>
-              <option *ngIf="selected.status !== 'confirmed'" value="reject">驳回</option>
+              <option *ngIf="selected.status !== 'confirmed'" value="reject">驳回（未确认误报）</option>
+              <option value="false_positive">确认误报（已复核原始依据）</option>
               <option *ngIf="['pending', 'acknowledged'].includes(selected.status)" value="defer">
                 暂缓（需人工复评）
               </option>
               <option *ngIf="selected.status !== 'confirmed'" value="acknowledge">确认接收</option>
+              <option *ngIf="selected.status === 'confirmed'" value="reconfirm">再次复核确认（保留原状态）</option>
               <option *ngIf="selected.status === 'confirmed'" value="close">关闭预警</option>
             </select></label
           ><fieldset class="quick-reasons"><legend>处理原因</legend><button type="button" *ngFor="let q of quickReasons" [class.selected]="quick === q" [attr.aria-pressed]="quick === q" (click)="quick = q">{{ q }}</button></fieldset><label
@@ -117,7 +128,7 @@ import { AiBrief } from '../ai-assist';
               rows="2"
             ></textarea>
           </label>
-          <p class="muted small">保存操作者、时间和前后状态。</p>
+          <p class="muted small">保存操作者、时间和前后状态。只有明确选择“确认误报”才记录为经复核确认误报；原因文字不自动认定。</p>
           <div class="actions">
             <button type="button" (click)="selected = null" [disabled]="busy">取消</button
             ><button class="primary" [disabled]="busy || !finalReason">
@@ -184,7 +195,7 @@ export class Alerts implements OnInit {
   async wardBrief() {
     this.wardBusy = true; this.wardError = '';
     try { this.ward = await this.api.post<AiBrief>('/ai/ward-brief', {}); }
-    catch (e) { this.wardError = 'AI 科室优先级生成失败：' + errorMessage(e); }
+    catch (e) { this.wardError = 'AI 队列解释生成失败：' + errorMessage(e); }
     finally { this.wardBusy = false; }
   }
   setScope(s: 'patient' | 'department') {
@@ -207,6 +218,9 @@ export class Alerts implements OnInit {
     if (a.kind === 'infection_abnormal') return '感染 + 异常';
     return text(a.severity);
   }
+  outcome(a: Alert) {
+    return a.reviewOutcome === 'confirmed_false_positive' ? '经复核确认误报' : a.reviewOutcome === 'rejected_only' ? '已驳回，未确认误报' : a.reviewOutcome === 'confirmed_screen' ? '已复核确认筛查' : '未记录明确结论';
+  }
   sourceLabel(a: Alert) {
     if (a.source === 'icu05') return 'ICU-05 门控';
     if (a.source === 'bedside') return '床旁筛查';
@@ -223,6 +237,7 @@ export class Alerts implements OnInit {
       const p = await this.api.get<Page<Alert>>(
         '/alerts?status=' + this.status + '&page=' + this.page + (this.scope === 'department' ? '&scope=department' : ''),
       );
+      this.aiBrief = {}; this.aiOpen = {}; this.aiError = {};
       this.alerts = p.items;
       this.total = p.total;
     } catch (e) {
@@ -238,7 +253,7 @@ export class Alerts implements OnInit {
     this.error = '';
     try {
       await this.api.post('/alerts/' + this.selected.id + '/review', {
-        action: this.selected.status === 'confirmed' ? 'close' : this.action,
+        action: this.action,
         reason,
         expectedVersion: this.selected.version,
       });

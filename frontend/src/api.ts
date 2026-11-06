@@ -84,6 +84,9 @@ export interface Alert extends Base {
   patientLabel?: string | null;
   bed?: string | null;
   lastSeenAt?: string | null;
+  reviewOutcome?: string | null; reviewedAt?: string | null; reviewedBy?: string | null;
+  needsReReview?: boolean; latestTrigger?: string | null; evidenceChangedAt?: string | null;
+  previousAlertId?: string | null; reviewChainId?: string | null;
 }
 export interface Task extends Base {
   itemName: string;
@@ -132,6 +135,8 @@ export class Api {
   token = '';
   user = '';
   roles: string[] = [];
+  readonly aiDrafts = new Set<symbol>();
+  icu05ReviewDirty = false; icu05ReviewBusy = false;
   /** Layout override (embed toggle / host account); null = derive from roles. Not a permission. */
   viewAs: 'doctor' | 'nurse' | null = null;
   get nurseView(): boolean {

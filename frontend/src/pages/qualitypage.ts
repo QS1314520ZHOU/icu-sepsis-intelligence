@@ -1,3 +1,5 @@
+import { QualityLocalReports } from '../quality-local-reports';
+import { AlertReviewStatsPanel } from '../alert-review-stats-panel';
 import { CommonModule } from '@angular/common';
 import { Component, inject, OnInit } from '@angular/core';
 import { RouterLink } from '@angular/router';
@@ -6,7 +8,7 @@ import { percentage } from '../presentation';
 import { WardBoard } from '../ward-board';
 @Component({
   standalone: true,
-  imports: [CommonModule, RouterLink, WardBoard],
+  imports: [CommonModule, RouterLink, WardBoard, AlertReviewStatsPanel, QualityLocalReports],
   template: `<div class="pagehead">
       <div>
         <p class="eyebrow">QUALITY & TRACEABILITY</p>
@@ -15,7 +17,9 @@ import { WardBoard } from '../ward-board';
       </div>
       <button (click)="load()">刷新统计</button>
     </div>
-    <ward-board class="quality-board"></ward-board>
+    @defer (on immediate) { <ward-board class="quality-board"></ward-board> } @placeholder { <p role="status">正在载入科室质控…</p> }
+    @defer (on immediate) { <alert-review-stats/> }
+    @defer (on immediate) { <quality-local-reports/> }
     <p class="error" *ngIf="error">{{ error }}</p>
     <ng-container *ngIf="q && !error"
       ><div class="metrics">

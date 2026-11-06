@@ -3,7 +3,7 @@ export type AiKind = 'summary' | 'icu05' | 'trend' | 'handover' | 'note' | 'fami
 export type AiStatus = 'ok' | 'disabled' | 'busy' | 'unavailable' | 'invalid_output';
 export interface AiItem { text: string; refs: string[]; urgency?: 'high' | 'medium' | 'low'; }
 export interface AiFact { id: string; category: string; text: string; time: string | null; }
-export interface AiKnowledge { ref: string; id: string; docId: string; title: string; source: string; version: string; section: string; strength: string; text: string; url?: string | null; }
+export interface AiKnowledge { ref: string; id: string; revisionId?: string; category?: string; status?: string; applicableScope?: string; evidenceQuality?: string; docId: string; title: string; source: string; version: string; section: string; strength: string; text: string; url?: string | null; }
 export interface AiBrief {
   interactionId: string; patientId: string; encounterId: string; kind: AiKind; status: AiStatus; message: string;
   model: string | null; modelRole: string | null; fallbackUsed: boolean; latencyMs: number | null; generatedAt: string;
@@ -26,7 +26,7 @@ export const sectionTitles: { key: SectionKey; title: string }[] = [
 ];
 export const kindLabel: Record<AiKind, string> = {
   summary: '病情摘要', icu05: 'ICU-05 缺项分析', trend: '趋势解读', handover: '交班摘要', note: '病程记录草稿', family: '家属沟通要点',
-  alert: '预警解读', ask: '提问', ward: '科室优先级',
+  alert: '预警解读', ask: '提问', ward: '科室队列解释',
 };
 /** Buttons on the patient card, in display order. */
 export const patientKinds: { kind: AiKind; label: string; hint: string; needsIcu05?: boolean }[] = [
@@ -73,7 +73,7 @@ export function refTarget(ref: string, b: Pick<AiBrief, 'facts' | 'knowledge'>):
   }
   if (/^K\d+$/.test(ref)) {
     const k = b.knowledge.find(x => x.ref === ref);
-    return k ? { ref, kind: 'knowledge', title: k.title + ' · ' + k.section, body: k.text, meta: [k.strength, k.source].filter(Boolean).join('；') } : null;
+    return k ? { ref, kind: 'knowledge', title: k.title + ' · ' + k.section, body: k.text, meta: [k.version ? '版本 ' + k.version : '', k.strength, k.evidenceQuality, k.source, k.applicableScope].filter(Boolean).join('；') } : null;
   }
   return null;
 }
@@ -99,3 +99,14 @@ export function acceptsBrief(b: Pick<AiBrief, 'patientId' | 'encounterId'> | nul
 }
 
 export const rejectReasons = ['内容与原始记录不符', '引用依据不对应', '遗漏关键问题', '表述不当或越界', '对当前处置无帮助'];
+
+/** A newer page read means the draft may be stale; this does not assert a clinical change. */
+export function isDraftOutdated(generatedAt: string | null | undefined, dataAsOf: string | null | undefined): boolean {
+  const generated=Date.parse(generatedAt || ''), current=Date.parse(dataAsOf || '');
+  return Number.isFinite(generated) && Number.isFinite(current) && current > generated;
+}
+export function draftCopyText(b: AiBrief, edited: string | null): string {
+  const body=edited === null ? copyText(b) : edited.trim();
+  if (b.kind !== 'handover' && b.kind !== 'note') return body;
+  return '【AI 草稿'+(edited === null ? '，待人工核对' : '，已人工修改，待核对')+'】\n生成时间：'+b.generatedAt+'\n'+body;
+}

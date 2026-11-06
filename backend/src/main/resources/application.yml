@@ -130,9 +130,21 @@ app:
     knowledge-dir: ${AI_KNOWLEDGE_DIR:}
     time-zone: ${AI_TIME_ZONE:Asia/Shanghai}
 
+  # 病程来源快照独立长期保存；默认不接入医院源接口，不改变 AI_STORE_PROMPT。
+  clinical-notes:
+    sync-enabled: ${CLINICAL_NOTES_SYNC_ENABLED:false}
+    keys-json: ${CLINICAL_NOTES_KEYS_JSON:}
+    active-key-id: ${CLINICAL_NOTES_ACTIVE_KEY_ID:}
+    fingerprint-key-id: ${CLINICAL_NOTES_FINGERPRINT_KEY_ID:}
+    max-documents: ${CLINICAL_NOTES_MAX_DOCUMENTS:1000}
+    max-body-characters: ${CLINICAL_NOTES_MAX_BODY_CHARACTERS:100000}
+    max-sync-patients: ${CLINICAL_NOTES_MAX_SYNC_PATIENTS:100}
+    scan-ms: ${CLINICAL_NOTES_SCAN_MS:900000}
+
   # 自动预警：床旁筛查 / ICU-05 门控判定为"疑似休克"或"感染 + 异常"时生成待处理预警。
   alerts:
     auto: ${ALERTS_AUTO:true}
+    auto-ai-explanation: ${ALERTS_AUTO_AI_EXPLANATION:false} # 默认按需生成解释；AI 不影响规则预警
     scan-ms: ${ALERTS_SCAN_MS:600000}          # 后台巡检间隔（默认 10 分钟）
     scan-days: ${ALERTS_SCAN_DAYS:30}          # 只巡检近 N 天入科患者
     reject-suppress-hours: ${ALERTS_REJECT_SUPPRESS_HOURS:6}

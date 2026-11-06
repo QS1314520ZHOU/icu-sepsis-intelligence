@@ -16,19 +16,19 @@ interface Turn { q: string; brief: AiBrief | null; error: string; busy: boolean;
       <h2><ui-icon name="file"/>AI 辅助</h2>
       <span class="ai-label" [title]="configured ? '仅依据本页规则结果、近 24 小时记录与指南条目' : '未接入院内模型时，可查看本次核对依据与相关指南条目'">{{ configured ? '生成内容需医生核对' : 'AI 未配置' }}</span>
       <span class="ai-actions">
-        <ng-container *ngFor="let k of kinds"><button type="button" *ngIf="!k.needsIcu05 || icu05Available" [class.on]="brief?.kind === k.kind" (click)="run(k.kind)" [disabled]="!!busy" [title]="k.hint">{{ busy === k.kind ? '生成中…' : k.label }}</button></ng-container>
+        <ng-container *ngFor="let k of kinds"><button type="button" *ngIf="!k.needsIcu05 || icu05Available" [class.on]="brief?.kind === k.kind" (click)="run(k.kind)" [disabled]="!!busy || api.aiDrafts.size > 0" [title]="k.hint">{{ busy === k.kind ? '生成中…' : k.label }}</button></ng-container>
       </span>
     </div>
     <p class="ai-idle" *ngIf="configured && !brief && !busy && !error && !turns.length">按需生成，不会自动运行。</p>
     <p class="review-inline-error" role="alert" *ngIf="error"><ui-icon name="info"/>{{ error }}</p>
     <p class="ai-idle ai-cached" *ngIf="brief?.cached && !busy">数据未变化，复用 {{ brief?.cachedAt | date:'HH:mm' }} 的结果 · <button type="button" class="text-button" (click)="run(brief!.kind, true)">重新生成</button></p>
-    <ai-brief-view [brief]="brief" />
+    <ai-brief-view [brief]="brief" [dataAsOf]="dataAsOf" />
     <div class="ai-chat" *ngIf="configured">
       <div class="ai-turn" *ngFor="let t of turns">
         <p class="ai-q"><b>问</b>{{ t.q }}</p>
         <p class="ai-status" *ngIf="t.busy">思考中…</p>
         <p class="review-inline-error" *ngIf="t.error">{{ t.error }}</p>
-        <ai-brief-view *ngIf="t.brief" [brief]="t.brief" [single]="true" />
+        <ai-brief-view *ngIf="t.brief" [brief]="t.brief" [dataAsOf]="dataAsOf" [single]="true" />
       </div>
       <div class="ai-suggest" *ngIf="!turns.length"><button type="button" *ngFor="let s of starters" (click)="question = s; ask()">{{ s }}</button></div>
       <form class="ai-ask" (ngSubmit)="ask()">
@@ -42,6 +42,7 @@ interface Turn { q: string; brief: AiBrief | null; error: string; busy: boolean;
 export class AiAssistCard implements OnChanges {
   @Input({ required: true }) patientId = '';
   @Input() encounterId = '';
+  @Input() dataAsOf: string | null = null;
   @Input() configured = false;
   @Input() icu05Available = false;
   api = inject(Api);

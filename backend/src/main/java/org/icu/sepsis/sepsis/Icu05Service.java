@@ -12,7 +12,9 @@ import org.springframework.stereotype.Service;
 @Service
 public class Icu05Service {
   private final ObjectProvider<Icu05SourceReader> reader;
-  public Icu05Service(ObjectProvider<Icu05SourceReader> reader) { this.reader = reader; }
+  private final ObjectProvider<Icu05CaseReviewService> reviews;
+  private final ObjectProvider<Icu05OverrideService> overrides;
+  public Icu05Service(ObjectProvider<Icu05SourceReader> reader,ObjectProvider<Icu05CaseReviewService> reviews,ObjectProvider<Icu05OverrideService> overrides) { this.reader = reader; this.reviews=reviews; this.overrides=overrides; }
 
   public Map<String, Object> evaluate(Patient p, Instant asOf) {
     Icu05SourceReader r = reader.getIfAvailable();
@@ -27,12 +29,15 @@ public class Icu05Service {
     }
     Map<String, Object> m = header(p, asOf, true, "");
     m.putAll(out);
-    return m;
+    Icu05OverrideService override = overrides.getIfAvailable();
+    if(override!=null)m=override.decorate(p,m);
+    Icu05CaseReviewService review = reviews.getIfAvailable();
+    return review == null ? m : review.decorate(p,m);
   }
 
   private Map<String, Object> header(Patient p, Instant asOf, boolean available, String message) {
     Map<String, Object> m = new LinkedHashMap<>();
-    m.put("schemaVersion", 1); m.put("patientId", p.id); m.put("encounterId", p.encounterId);
+    m.put("schemaVersion", 3); m.put("patientId", p.id); m.put("encounterId", p.encounterId);
     m.put("simulated", p.simulated); m.put("available", available); m.put("message", message); m.put("asOf", asOf);
     return m;
   }

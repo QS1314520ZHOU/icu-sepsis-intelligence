@@ -26,10 +26,13 @@ public class KnowledgeBase {
 
   public static class Chunk {
     public String id, docId, title, source, version, url, section, strength, text;
+    public String revisionId, category, status, applicableScope, evidenceQuality;
     public List<String> tags = new ArrayList<>();
     transient List<String> terms;
     public Map<String, Object> view() {
       Map<String, Object> m = new LinkedHashMap<>();
+      m.put("revisionId", revisionId); m.put("category", category); m.put("status", status);
+      m.put("applicableScope", applicableScope); m.put("evidenceQuality", evidenceQuality);
       m.put("id", id); m.put("docId", docId); m.put("title", title); m.put("source", source); m.put("version", version);
       m.put("url", url); m.put("section", section); m.put("strength", strength); m.put("tags", tags); m.put("text", text);
       return m;
@@ -42,6 +45,7 @@ public class KnowledgeBase {
 
   private final List<Chunk> chunks = new ArrayList<>();
   private final List<Map<String, Object>> docs = new ArrayList<>();
+  private final List<Map<String, Object>> history = new ArrayList<>();
   private final Map<String, Integer> df = new HashMap<>();
   private double avgLen;
   private final AiProperties props;
@@ -53,6 +57,8 @@ public class KnowledgeBase {
   public KnowledgeBase(AiProperties props, LlmClient llm, ObjectMapper json) {
     this.props = props; this.llm = llm;
     try {
+      for (Resource r : new PathMatchingResourcePatternResolver().getResources("classpath*:knowledge/history/*.json"))
+        try (InputStream in = r.getInputStream()) { load(json.readTree(in), "classpath:history/" + r.getFilename()); }
       for (Resource r : new PathMatchingResourcePatternResolver().getResources("classpath*:knowledge/*.json"))
         try (InputStream in = r.getInputStream()) { load(json.readTree(in), "classpath:" + r.getFilename()); }
       if (!props.knowledgeDir.isEmpty()) {
@@ -75,10 +81,19 @@ public class KnowledgeBase {
   private void load(JsonNode d, String origin) {
     String docId = d.path("docId").asText("");
     if (docId.isEmpty() || !d.path("chunks").isArray()) throw new IllegalStateException("Invalid knowledge file " + origin);
-    // An external file may replace a built-in document with the same docId (e.g. an approved local SOP update).
-    chunks.removeIf(c -> c.docId.equals(docId));
-    docs.removeIf(m -> docId.equals(m.get("docId")));
-    Set<String> ids = chunks.stream().map(c -> c.id).collect(Collectors.toSet());
+    String version = d.path("version").asText("");
+    String declaredStatus = d.path("status").asText("active");
+    String category = d.path("category").asText("unspecified");
+    if (!Set.of("active","draft","retired").contains(declaredStatus)
+        || !Set.of("international","domestic","department","system","unspecified").contains(category))
+      throw new IllegalStateException("Invalid knowledge status/category in " + origin);
+    String contentHash = digest(d.toString());
+    for (Map<String,Object> old : history) if (docId.equals(old.get("docId")) && version.equals(old.get("version"))) {
+      if (contentHash.equals(old.get("contentHash"))) return;
+      throw new IllegalStateException("Knowledge version content changed without version increment: " + docId + "/" + version);
+    }
+    Set<String> ids = chunks.stream().filter(c -> !c.docId.equals(docId)).map(c -> c.id).collect(Collectors.toSet());
+    List<Chunk> loaded = new ArrayList<>();
     int n = 0;
     for (JsonNode j : d.get("chunks")) {
       Chunk c = new Chunk();
@@ -89,15 +104,42 @@ public class KnowledgeBase {
       c.version = d.path("version").asText(""); c.url = d.path("url").asText(null);
       c.section = j.path("section").asText(""); c.strength = j.path("strength").asText("");
       j.path("tags").forEach(t -> c.tags.add(t.asText()));
-      chunks.add(c); n++;
+      c.category=category; c.status=declaredStatus;
+      c.applicableScope=d.path("applicableScope").asText(""); c.evidenceQuality=j.path("evidenceQuality").asText("");
+      c.revisionId=digest(docId + "|" + version + "|" + c.id + "|" + c.text);
+      loaded.add(c); n++;
     }
     Map<String, Object> m = new LinkedHashMap<>();
     m.put("docId", docId); m.put("title", d.path("title").asText(docId)); m.put("version", d.path("version").asText(""));
     m.put("source", d.path("source").asText("")); m.put("url", d.path("url").asText(null)); m.put("note", d.path("note").asText(""));
     m.put("chunks", n); m.put("origin", origin);
-    docs.add(m);
+    m.put("category",category); m.put("status",declaredStatus); m.put("applicableScope",d.path("applicableScope").asText(""));
+    m.put("effectiveFrom",d.path("effectiveFrom").asText(null)); m.put("contentHash",contentHash);
+    Map<String,Object> snapshot=new LinkedHashMap<>(m);
+    snapshot.put("items",freeze(loaded.stream().map(Chunk::view).collect(Collectors.toList())));
+    String effectiveFrom=d.path("effectiveFrom").asText("");
+    boolean effective=effectiveFrom.isBlank() || !java.time.LocalDate.parse(effectiveFrom).isAfter(java.time.LocalDate.now(props.zone));
+    boolean activate="active".equals(declaredStatus) && effective; snapshot.put("current",activate);
+    if(activate) {
+      for(Map<String,Object> old:history)if(docId.equals(old.get("docId")))old.put("current",false);
+      chunks.removeIf(c -> c.docId.equals(docId)); docs.removeIf(old -> docId.equals(old.get("docId")));
+      chunks.addAll(loaded); docs.add(m);
+    }
+    history.add(snapshot);
   }
 
+  @SuppressWarnings("unchecked") static Object freeze(Object value) {
+    if(value instanceof Map) {Map<String,Object> out=new LinkedHashMap<>();((Map<String,Object>)value).forEach((k,v)->out.put(k,freeze(v)));return Collections.unmodifiableMap(out);}
+    if(value instanceof List) return Collections.unmodifiableList(((List<?>)value).stream().map(KnowledgeBase::freeze).collect(Collectors.toList()));
+    return value;
+  }
+  static String digest(String text) {
+    try { return java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(java.security.MessageDigest.getInstance("SHA-256").digest(text.getBytes(java.nio.charset.StandardCharsets.UTF_8))); }
+    catch(java.security.NoSuchAlgorithmException e){throw new IllegalStateException(e);}
+  }
+  public List<Map<String,Object>> history(String docId) {
+    return history.stream().filter(d->docId.equals(d.get("docId"))).map(d->Collections.unmodifiableMap(new LinkedHashMap<>(d))).collect(Collectors.toUnmodifiableList());
+  }
   private void index() {
     df.clear();
     long total = 0;

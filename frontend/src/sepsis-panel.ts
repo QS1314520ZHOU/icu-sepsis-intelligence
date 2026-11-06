@@ -190,7 +190,7 @@ const units: Record<string, string> = { MAP: 'mmHg', SBP: 'mmHg', LACTATE: 'mmol
           <tr class="sx-infection" [attr.data-level]="infectionHit ? 'abnormal' : 'none'"><th scope="row">感染</th><td class="sx-o-item">诊断 / 培养</td><td class="sx-o-value" colspan="2">{{ infectionHit ? '诊断含感染相关描述' : '未取得感染证据' }}<small> · {{ cultureNote }}</small></td></tr>
         </tbody></table>
       </section>
-      <ai-assist-card *ngIf="canAssist" [patientId]="patientId" [encounterId]="encounterId" [configured]="!!data?.ai?.configured" [icu05Available]="!!icu05?.available"/>
+      <ai-assist-card *ngIf="canAssist" [patientId]="patientId" [encounterId]="encounterId" [dataAsOf]="data?.asOf || null" [configured]="!!data?.ai?.configured" [icu05Available]="!!icu05?.available"/>
     </div>
 
     <details class="review-card sx-fold" *ngIf="data?.available" [open]="showTrends" (toggle)="onTrendsToggle($any($event.target).open)">

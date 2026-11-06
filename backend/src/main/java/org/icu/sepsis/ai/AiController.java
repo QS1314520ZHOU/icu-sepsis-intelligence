@@ -29,6 +29,7 @@ public class AiController {
     @NotBlank @Pattern(regexp = "accept|reject|edit") public String verdict;
     @Size(max = 500) public String reason;
     @Size(max = 2000) public String editedText;
+    @Min(0) @Max(14400) public Integer reviewSeconds;
   }
 
   private final AiAssistService ai;
@@ -51,11 +52,11 @@ public class AiController {
     return Envelope.ok(ai.ask(s.patient(id), r.question, r.history, a.getName()));
   }
 
-  /** Latest stored explanation of an alert (generated automatically when the alert was raised), or null. */
+  /** Latest explanation valid for the current trigger evidence, or null; generated on demand by default. */
   @GetMapping("/alerts/{id}/ai")
   public Envelope<?> alertAi(@PathVariable String id) {
     org.icu.sepsis.domain.Domain.Alert al = s.get(id, org.icu.sepsis.domain.Domain.Alert.class);
-    return Envelope.ok(ai.alertExplanation(al.id));
+    return Envelope.ok(ai.alertExplanation(al));
   }
 
   @PostMapping("/alerts/{id}/ai")
@@ -72,7 +73,7 @@ public class AiController {
         .and("status").in(java.util.List.of("pending", "acknowledged", "deferred", "confirmed"));
     java.util.List<org.icu.sepsis.domain.Domain.Alert> open = s.db.find(
         org.springframework.data.mongodb.core.query.Query.query(c)
-            .with(org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.DESC, "createdAt")).limit(30),
+            .with(org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.DESC, "createdAt")),
         org.icu.sepsis.domain.Domain.Alert.class);
     org.icu.sepsis.domain.Domain.Patient ward = new org.icu.sepsis.domain.Domain.Patient();
     ward.id = "ward"; ward.encounterId = "ward";
@@ -83,7 +84,7 @@ public class AiController {
   @PostMapping("/ai/interactions/{id}/feedback")
   @PreAuthorize("hasAnyRole('DOCTOR','NURSE')")
   public Envelope<?> feedback(@PathVariable String id, @Valid @RequestBody FeedbackRequest r, Authentication a) {
-    return Envelope.ok(ai.feedback(id, r.verdict, r.reason, r.editedText, a.getName()));
+    return Envelope.ok(ai.feedback(id, r.verdict, r.reason, r.editedText, a.getName(), r.reviewSeconds));
   }
 
   /** Audit / evaluation export for the quality team (department scope, newest first). */
@@ -93,6 +94,11 @@ public class AiController {
       @RequestParam(defaultValue = "0") @Min(0) int page,
       @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
     return Envelope.ok(q.page(s.scope(), AiInteraction.class, page, size, AiController::view));
+  }
+
+  @GetMapping("/knowledge/history")
+  public Envelope<?> knowledgeHistory(@RequestParam @NotBlank @Size(max=100) String docId) {
+    return Envelope.ok(Map.of("docId",docId,"versions",ai.knowledgeHistory(docId)));
   }
 
   @GetMapping("/knowledge/search")

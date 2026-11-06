@@ -46,14 +46,22 @@ public class WorkflowService {
         if (!Set.of("pending", "acknowledged", "deferred").contains(a.status))
           throw ApiException.conflict("当前状态不能确认筛查");
         a.status = "confirmed";
+        a.reviewOutcome = "confirmed_screen";
         if (a.acknowledgedAt == null) a.acknowledgedAt = now;
         // Draft demo task only for simulated patients; real patients: confirmation is recorded on the alert itself.
         if (store.patient(a.patientId).simulated) createTask(a, actor, req.reason, now);
         break;
+      case "reconfirm":
+        if (!"confirmed".equals(a.status)) throw ApiException.conflict("仅已确认预警可再次复核确认");
+        a.reviewOutcome = "confirmed_screen";
+        break;
+      case "false_positive":
       case "reject":
-        if (!Set.of("pending", "acknowledged", "deferred").contains(a.status))
-          throw ApiException.conflict("当前状态不能驳回");
+        if (!Set.of("pending", "acknowledged", "deferred").contains(a.status)
+            && !("false_positive".equals(req.action) && "confirmed".equals(a.status)))
+          throw ApiException.conflict("当前状态不能驳回或确认误报");
         a.status = "rejected";
+        a.reviewOutcome = "false_positive".equals(req.action) ? "confirmed_false_positive" : "rejected_only";
         a.activeKey = null;
         a.closedAt = now;
         if (a.acknowledgedAt == null) a.acknowledgedAt = now;
@@ -74,6 +82,7 @@ public class WorkflowService {
         throw new ApiException(
             org.springframework.http.HttpStatus.BAD_REQUEST, "INVALID_ACTION", "不支持的预警动作");
     }
+    a.reviewedAt = now; a.reviewedBy = actor; a.needsReReview = false;
     a.reason = req.reason;
     store.db.save(a);
     store.record(a, "alert", req.action, actor, req.reason, before, now);
