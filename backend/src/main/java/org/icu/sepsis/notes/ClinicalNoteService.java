@@ -24,32 +24,34 @@ public class ClinicalNoteService {
     directory.fields().exclude("encryptedBody").exclude("nonce").exclude("keyId").exclude("fingerprintKeyId");
     List<ClinicalNoteSnapshot> notes=store.db.find(directory,ClinicalNoteSnapshot.class);
     Map<String,Object> out=new LinkedHashMap<>();out.put("patientId",p.id);out.put("encounterId",p.encounterId);out.put("total",total);out.put("items",notes.stream().map(ClinicalNoteService::view).collect(java.util.stream.Collectors.toList()));
+    out.put("adapterDiagnostics",source.getIfAvailable()==null?Map.of():source.getIfAvailable().diagnostics());out.put("parseDiagnostics",state==null?Map.of():state.parseDiagnostics);out.put("syncEnabled",props.syncEnabled);out.put("adapterConfigured",source.getIfAvailable()!=null);out.put("snapshotKeysReady",crypto.ready());
     out.put("canSync",props.syncEnabled&&crypto.ready()&&source.getIfAvailable()!=null);out.put("page",page);out.put("size",size);out.put("status",state==null?props.syncEnabled?"not_configured":"disabled":state.status);
-    out.put("complete",state==null?null:state.complete);out.put("lastAttemptAt",state==null?null:state.lastAttemptAt);
+    out.put("legacyBodyEscapingNormalized",state!=null&&state.legacyBodyEscapingNormalized);out.put("complete",state==null?null:state.complete);out.put("lastAttemptAt",state==null?null:state.lastAttemptAt);
     out.put("lastSuccessfulAt",state==null?null:state.lastSuccessfulAt);out.put("lastCompleteAt",state==null?null:state.lastCompleteAt);
     ClinicalNoteSyncJob job=background==null?null:background.getIfAvailable();out.put("backgroundSync",job==null?Map.of("status","not_started"):job.status());
     out.put("retention","长期受控保存；未配置自动到期删除，确切年限和归档按院方制度确定。");
     out.put("scope","历史病程快照，非正式病历；最后同步后可能仍有新文书，数量不代表源接口完整性。正文日期未被用作文书时间。");
-    out.put("aiUse","尚未接入病程 AI 综合复核，原文不会因此页面发送给模型。");
+    out.put("aiUse","此处查看原文不调用模型；病程片段 AI 复核请在概览 AI 区主动调用。");
     store.recordSystem(p,p,"clinical_note_access","list",actor,"授权范围内查看病程快照目录",clock.instant());return out;
   }
   public Map<String,Object> read(String patientId,String id,String actor){Patient p=authorizedPatient(patientId);ClinicalNoteSnapshot note=store.get(id,ClinicalNoteSnapshot.class);
     if(!Objects.equals(note.patientId,p.id)||!Objects.equals(note.encounterId,p.encounterId)||!Objects.equals(note.department,p.department))throw ApiException.notFound();
     store.recordSystem(note,p,"clinical_note_access","read_attempt",actor,"请求读取授权病程快照",clock.instant());
     String plaintext;try{plaintext=crypto.decrypt(note);}catch(IllegalStateException ex){store.recordSystem(note,p,"clinical_note_access","read_unavailable",actor,"病程快照密钥或完整性校验不可用",clock.instant());throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE,"NOTE_KEY_UNAVAILABLE","快照解密暂不可用，请核对历史密钥配置");}
-    try{var payload=json.readTree(plaintext);if(payload==null||!payload.isObject()||!payload.path("body").isTextual()||payload.path("body").asText().isBlank())throw new IllegalArgumentException();Map<String,Object> out=view(note);out.put("body",payload.path("body").asText(""));out.put("candidateReference",payload.path("candidateReference").asText(""));
+    try{var payload=json.readTree(plaintext);if(payload==null||!payload.isObject()||!payload.path("body").isTextual()||payload.path("body").asText().isBlank())throw new IllegalArgumentException();Map<String,Object> out=view(note);out.put("body",payload.path("body").asText(""));out.put("legacyBodyEscapingNormalized",payload.path("legacyBodyEscapingNormalized").asBoolean(false));out.put("candidateReference",payload.path("candidateReference").asText(""));
       store.recordSystem(note,p,"clinical_note_access","read",actor,"授权范围内读取历史病程快照",clock.instant());return out;
     }catch(ApiException ex){throw ex;}catch(Exception ex){store.recordSystem(note,p,"clinical_note_access","read_unavailable",actor,"快照正文结构校验不可用",clock.instant());throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE,"NOTE_CONTENT_UNAVAILABLE","快照正文暂不可用");}
   }
   public Map<String,Object> sync(String patientId,String actor){Patient p=authorizedPatient(patientId);syncPatient(p);return list(patientId,0,20,actor);}
   public synchronized ClinicalNoteSyncState syncPatient(Patient p){ClinicalNoteSyncState state=state(p);Instant now=clock.instant();
-    if(state==null){state=new ClinicalNoteSyncState();store.init(state,p,now);}state.lastAttemptAt=now;state.complete=null;
+    if(state==null){state=new ClinicalNoteSyncState();store.init(state,p,now);}state.lastAttemptAt=now;state.complete=null;state.legacyBodyEscapingNormalized=false;state.parseDiagnostics=Map.of();
     if(!props.syncEnabled){state.status="disabled";store.db.save(state);return state;}
     ClinicalNoteSource adapter=source.getIfAvailable();if(adapter==null){state.status="not_configured";store.db.save(state);return state;}
     if(!crypto.ready()){state.status="key_unavailable";store.db.save(state);return state;}
     try{ClinicalNoteSource.Batch batch=adapter.fetch(p);
       if(batch==null||!batch.bindingConfirmed||!Objects.equals(batch.patientId,p.id)||!Objects.equals(batch.encounterId,p.encounterId)||!Objects.equals(batch.department,p.department)){
         state.status="binding_unconfirmed";state.complete=false;store.db.save(state);return state;}
+      state.legacyBodyEscapingNormalized=batch.legacyBodyEscapingNormalized;
       if(batch.source==null||!batch.source.matches("[A-Za-z0-9_.-]{1,80}")||batch.notes==null)throw new IllegalArgumentException();
       state.received=batch.notes.size();state.stored=0;state.unchanged=0;state.rejected=0;
       int cap=Math.max(1,Math.min(10000,props.maxDocuments)),limit=Math.min(cap,batch.notes.size());
@@ -71,13 +73,13 @@ public class ClinicalNoteService {
         note.timeConflict=note.availableTimeConfirmed&&input.availableAt!=null&&(input.availableAt.isAfter(receivedAt)||note.documentedAt!=null&&input.documentedAt.isAfter(input.availableAt));
         note.identityConfirmed=input.identityConfirmed&&!candidate.isBlank();note.versionOrderConfirmed=input.versionOrderConfirmed;
         note.documentTypeConfirmed=input.documentTypeConfirmed&&input.documentType!=null&&!input.documentType.isBlank();
-        crypto.encrypt(note,json.writeValueAsString(Map.of("body",input.body,"candidateReference",candidate,"sourceDocumentedAt",Objects.toString(input.documentedAt,""),"sourceAvailableAt",Objects.toString(input.availableAt,""),"localObservedAt",receivedAt.toString())));
+        crypto.encrypt(note,json.writeValueAsString(Map.of("body",input.body,"legacyBodyEscapingNormalized",batch.legacyBodyEscapingNormalized,"candidateReference",candidate,"sourceDocumentedAt",Objects.toString(input.documentedAt,""),"sourceAvailableAt",Objects.toString(input.availableAt,""),"localObservedAt",receivedAt.toString())));
         try{store.db.insert(note);state.stored++;store.recordSystem(note,p,"clinical_note_snapshot","stored","system","病程来源快照受控保存；不属于正式病历",clock.instant());}
         catch(DuplicateKeyException ex){state.unchanged++;}
       }
       state.complete=state.rejected>0||batch.notes.size()>cap?Boolean.FALSE:batch.complete;state.status=Boolean.TRUE.equals(state.complete)?batch.notes.isEmpty()?"no_records":"synced":Boolean.FALSE.equals(state.complete)?"partial":"completeness_unknown";
       state.lastSuccessfulAt=upperMillis(clock.instant());if(Boolean.TRUE.equals(state.complete))state.lastCompleteAt=state.lastSuccessfulAt;
-    }catch(Exception ex){if(ex instanceof InterruptedException)Thread.currentThread().interrupt();state.status=ex instanceof java.net.SocketTimeoutException||ex instanceof java.net.http.HttpTimeoutException?"timeout":"read_failed";state.complete=false;}
+    }catch(Exception ex){if(ex instanceof BlbcjlProtocol.Failure)state.parseDiagnostics=((BlbcjlProtocol.Failure)ex).diagnostics;if(ex instanceof InterruptedException)Thread.currentThread().interrupt();state.status=ex instanceof BlbcjlClient.Failure?((BlbcjlClient.Failure)ex).code:ex instanceof BlbcjlProtocol.Failure?((BlbcjlProtocol.Failure)ex).code:ex instanceof java.net.SocketTimeoutException||ex instanceof java.net.http.HttpTimeoutException?"timeout":"read_failed";state.complete=false;}
     store.db.save(state);return state;
   }
   static Instant upperMillis(Instant time){Instant floor=Instant.ofEpochMilli(time.toEpochMilli());return floor.equals(time)?floor:floor.plusMillis(1);}

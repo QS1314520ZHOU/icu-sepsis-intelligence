@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 /** Read-only clinical evidence review, schema v2. No fabricated diagnosis/model/Bundle attainment. */
 @Service
 public class SepsisAssessmentService {
+  @org.springframework.beans.factory.annotation.Autowired(required=false) private MewsProperties mews=new MewsProperties();
   private final ClinicalDataProvider data;
   private final ClinicalRules validation;
   private final RuleConfig config;
@@ -56,7 +57,9 @@ public class SepsisAssessmentService {
     List<String> sourceWarnings = new ArrayList<>();
     if (channelPressure) sourceWarnings.add("有创与无创血压分通道展示，尚未确认院内择优规则；不自动合成为单一血压输入，qSOFA 血压项待核对。");
     if (!conflicts.isEmpty()) sourceWarnings.add("最新时点存在同刻不一致的记录（"+String.join("、",conflicts)+"），未采用旧值替代，请在原始记录中核对。");
-    if ("smartcare".equals(mode)) sourceWarnings.add("源记录入库时间未确认，不能据此进行历史时点回放；乳酸报告的采样时间、结果状态及本次住院关联未确认，候选报告仅供原始记录核对。");
+    if ("smartcare".equals(mode)) sourceWarnings.add("源记录入库时间未确认，不能据此进行历史时点回放；不影响已关联本次住院的有效观察记录展示。");
+    if(rows.stream().anyMatch(o->ClinicalRules.lactateReport(o,now)&&"unconfirmed".equals(o.encounterLinkStatus)))sourceWarnings.add("部分乳酸检验报告仅按患者键关联，本次住院归属待核对；该限制不代表已关联的血气乳酸无效。");
+    if(rows.stream().anyMatch(o->ClinicalRules.lactateReport(o,now)&&!"unconfirmed".equals(o.encounterLinkStatus)))sourceWarnings.add("部分乳酸记录仅作背景展示；具体单位或有效性问题见该条记录，不能解释为所有乳酸均未确认。");
     // Missing = no usable value for screening. Channel MAP/SBP counts as present; a report-only
     // lactate (context_only) is not "absent" — it is unconfirmed and must not be listed as 缺.
     boolean hasMap = latest.containsKey("MAP") || latest.keySet().stream().anyMatch(c -> c.startsWith("MAP_"));
@@ -93,31 +96,44 @@ public class SepsisAssessmentService {
       abnormal(findings,latest,"MAP_"+channel,"平均动脉压"+suffix,config.getMapLow(),true,"该通道低于核对阈值；未自动择优");
       abnormal(findings,latest,"SBP_"+channel,"收缩压"+suffix,config.getSbpLow(),true,"该通道低于核对阈值；未自动择优");
     }
-    String status=!available?"unavailable":!findings.isEmpty()?"review_required":!missing.isEmpty()?"insufficient_data":"not_triggered";
-    String label=!available?"数据暂不可用":!findings.isEmpty()?"存在待复核异常":!missing.isEmpty()?"数据不全，不能完整评估":"本次核对未见阈值异常";
+    Map<String,Object> earlyWarning=MewsScreening.evaluate(available&&mews.isEnabled()?screeningContext(patient):patient,available?rows:List.of(),now,mews);
+    boolean ewsTriggered=available&&Boolean.TRUE.equals(earlyWarning.get("triggered"));
+    boolean ewsUnknown="unknown".equals(earlyWarning.get("status"));
+    String status=!available?"unavailable":(!findings.isEmpty()||ewsTriggered)?"review_required":(!missing.isEmpty()||ewsUnknown)?"insufficient_data":"not_triggered";
+    String label=!available?"数据暂不可用":ewsTriggered?"MEWS 达到复核阈值":!findings.isEmpty()?"存在待复核异常":ewsUnknown?"MEWS 无法完整判定":!missing.isEmpty()?"数据不全，不能完整评估":"本次核对未见阈值异常";
     Map<String,Object> out=new LinkedHashMap<>();
     out.put("schemaVersion",2); out.put("patientId",patient.id); out.put("encounterId",patient.encounterId);
     out.put("asOf",now); out.put("engine",SepsisClinicalRules.ENGINE_VERSION); out.put("ruleSource",SepsisClinicalRules.RULE_SOURCE);
     out.put("dataMode",mode); out.put("simulated",patient.simulated); out.put("available",available); out.put("message",message);
     out.put("screeningStatus",status); out.put("screeningLabel",label); out.put("missingFeatures",missing); out.put("findings",findings);
+    out.put("earlyWarning",earlyWarning);
     out.put("sourceWarnings",sourceWarnings);
     out.put("pressureSelectionRequired",channelPressure);
     out.put("conflictingFeatures",conflicts);
     out.put("pressureEvidence",latest.values().stream().filter(o -> o.parameterCode.matches("(MAP|SBP|DBP)_(IBP|NIBP)"))
         .sorted(Comparator.comparing(o -> o.parameterCode)).map(this::evidence).collect(Collectors.toList()));
+    long contextCount=rows.stream().filter(o -> "context_only".equals(o.clinicalUse)).count();out.put("contextRecordsRead",contextCount);out.put("contextEvidenceTruncated",contextCount>20);
     out.put("contextEvidence",rows.stream().filter(o -> "context_only".equals(o.clinicalUse))
         .sorted(Comparator.comparing((Observation o) -> o.eventTime,Comparator.nullsLast(Comparator.reverseOrder())))
         .limit(20).map(this::evidence).collect(Collectors.toList()));
     out.put("qsofa",SepsisClinicalRules.qSofa(value(latest,"SBP"),value(latest,"RR"),value(latest,"GCS")));
     out.put("qsofaNote","仅使用新鲜且有效的最近记录；未核验报告和未选定血压通道不参与计算；缺项不计零，qSOFA 不能单独诊断或排除脓毒症。");
     out.put("vasopressorActive",latest.containsKey("VASOPRESSOR_ACTIVE")?value(latest,"VASOPRESSOR_ACTIVE")==1:null);
-    String diagnosis="";
-    if(available) {
-      diagnosis=rows.stream().filter(o->"DIAGNOSIS".equals(o.parameterCode)&&validation.valid(o,now))
-          .map(o->o.text==null?"":o.text).collect(Collectors.joining("；"));
-      SmartCareSourceReader src=reader.getIfAvailable();
-      if(src!=null) try { diagnosis=src.diagnosisText(patient.id); } catch(RuntimeException ignored) { /* never fabricate infection */ }
-    }
+    String diagnosis=rows.stream().filter(o->"DIAGNOSIS".equals(o.parameterCode)&&validation.valid(o,now))
+        .map(o->o.text==null?"":o.text).collect(Collectors.joining("；"));
+    String diagnosisSource="诊断观察记录";
+    SmartCareSourceReader src=reader.getIfAvailable();
+    if(src!=null) try {
+      // Source diagnosis belongs to the current verified stay, independently of vital availability.
+      Patient current=src.loadPatient(patient.id);
+      if(current!=null&&Objects.equals(patient.id,current.id)&&Objects.equals(patient.encounterId,current.encounterId)
+          &&Objects.equals(patient.department,current.department)) {
+        String sourceText=src.diagnosisText(patient.id);
+        if(sourceText!=null&&!sourceText.isBlank()){diagnosis=sourceText;diagnosisSource="患者临床 / 入院诊断";}
+      }
+    } catch(RuntimeException ignored) { sourceWarnings.add("源诊断读取失败，请核对宿主诊断。"); }
+    if(!diagnosis.isBlank()) out.put("recordedDiagnosis",Map.of("text",diagnosis,"source",diagnosisSource,
+        "timeConfirmed",false,"use","source_record_only"));
     out.put("infectionClue",SepsisClinicalRules.infectionText(diagnosis)?"诊断文本含感染线索，需核对时效及临床依据":"未取得可确认的感染证据");
     out.put("latestEvidence",latest.values().stream().sorted(Comparator.comparing(o -> o.parameterCode)).map(this::evidence).collect(Collectors.toList()));
     Observation lac=latest.get("LACTATE");
@@ -131,12 +147,22 @@ public class SepsisAssessmentService {
     out.put("model",Map.of("configured",false,"label","未配置预测模型","message","不生成风险分或风险百分比"));
     org.icu.sepsis.ai.AiProperties aiProps=ai==null?null:ai.getIfAvailable();
     boolean aiOn=aiProps!=null&&aiProps.chatConfigured();
-    out.put("ai",Map.of("configured",aiOn,"label",aiOn?"AI 辅助已配置（按需生成，需医生核对）":"未配置 AI 辅助"));
+    out.put("ai",Map.of("noteReviewConfigured",aiOn&&aiProps.noteReviewEnabled,"configured",aiOn,"label",aiOn?"AI 辅助已配置（按需生成，需医生核对）":"未配置 AI 辅助"));
+    out.put("currentWarnings",org.icu.sepsis.alerting.ScreeningAlertService.fromReview(out).stream()
+        .map(hit->Map.of("kind",hit.kind,"severity",hit.severity,"reason",hit.reason,"source",hit.source)).collect(Collectors.toList()));
     return out;
+  }
+  /** DOB is intentionally not stored in the local context. Resolve it only within the verified stay. */
+  private Patient screeningContext(Patient patient){
+    if(!"smartcare".equals(mode)||patient.birthDate!=null)return patient;
+    SmartCareSourceReader source=reader.getIfAvailable();if(source==null)return patient;
+    try{Patient loaded=source.loadPatient(patient.id);if(loaded==null||!Objects.equals(patient.id,loaded.id)||!Objects.equals(patient.encounterId,loaded.encounterId)||!Objects.equals(patient.department,loaded.department))return patient;
+      Patient scoped=new Patient();scoped.id=patient.id;scoped.encounterId=patient.encounterId;scoped.department=patient.department;scoped.admittedAt=patient.admittedAt;scoped.birthDate=loaded.birthDate;return scoped;
+    }catch(RuntimeException ignored){return patient;}
   }
   private Double value(Map<String,Observation> m,String code) { return m.containsKey(code)?m.get(code).value:null; }
   private Map<String,Object> evidence(Observation o) {
-    Map<String,Object> m=new LinkedHashMap<>();m.put("code",o.parameterCode);m.put("value",o.value);m.put("unit",o.unit);
+    Map<String,Object> m=new LinkedHashMap<>();m.put("rawNumericValue",o.rawNumericValue);m.put("reportedNumericText",o.reportedNumericText);m.put("unitBasis",o.unitBasis);m.put("displayPrecision",o.displayPrecision);m.put("code",o.parameterCode);m.put("value",o.value);m.put("unit",o.unit);
     m.put("sourceParameterCode",o.sourceParameterCode);m.put("measurementChannel",o.measurementChannel);
     m.put("timeBasis",o.timeBasis);m.put("reportedAt",o.reportedAt);m.put("sampledAt",o.sampledAt);
     m.put("encounterLinkStatus",o.encounterLinkStatus);m.put("clinicalUse",o.clinicalUse);

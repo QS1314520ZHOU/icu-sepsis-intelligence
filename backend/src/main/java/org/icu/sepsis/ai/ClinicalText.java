@@ -1,0 +1,3 @@
+package org.icu.sepsis.ai;
+/** Known internal state labels only; medical acronyms and other text stay intact. */
+public final class ClinicalText {private ClinicalText(){}public static String localize(String text){if(text==null)return null;String out=text;String[][] labels={{"unmapped","无法准确映射"},{"context_only","仅供核对"},{"not_adult","不适用成人评分"},{"incomplete_components","分项不完整"},{"total_mismatch","总分与分项不一致"},{"components_match","分项已核对"},{"unavailable","暂不可用"},{"unknown","无法判定"},{"stale","过期"},{"invalid","无效"},{"ready","有效"}};for(String[] label:labels)out=out.replaceAll("(?i)(?<![A-Za-z0-9_])"+label[0]+"(?![A-Za-z0-9_])",label[1]);return out;}}

@@ -5,8 +5,8 @@ import { Api, errorMessage } from './api';
 export interface VerifiedNoteQuote {patientId:string;encounterId:string;snapshotId:string;packetFingerprint:string;asOf:string;ref:string;excerpt:string;start:number;end:number;}
 interface Selection extends VerifiedNoteQuote {category:string;}
 interface ReviewDraft {patientId:string;encounterId:string;asOf:string;packetFingerprint:string;modelInvoked:boolean;items:(Selection&{signals:string[]})[];coverage:string[];text:string;}
-@Component({selector:'clinical-note-review-panel',standalone:true,imports:[CommonModule,FormsModule],template:`<section aria-label="本地病程综合复核草稿"><h3>本地病程综合复核草稿</h3>
-<p>AI 综合复核尚未启用。此处只整理医生所选片段及有限文字信号，不推断医学结论；不发送模型、不保存草稿或改写规则。</p>
+@Component({selector:'clinical-note-review-panel',standalone:true,imports:[CommonModule,FormsModule],template:`<section aria-label="本地病程综合复核草稿"><h3>所选片段草稿（本地）</h3>
+<p>仅整理所选片段，不调用模型；AI 病程复核请使用概览入口。</p>
 <ng-container *ngIf="quote"><label>所选片段分类<select aria-label="病程片段分类" [(ngModel)]="category"><option *ngFor="let c of categories" [value]="c.key">{{c.label}}</option></select></label><button type="button" (click)="add()" [disabled]="busy || selections.length>=12">加入复核草稿</button></ng-container>
 <p *ngIf="selections.length">已选 {{selections.length}} 个片段；同一时点与证据集合，最多 12 个。</p>
 <ol><li *ngFor="let s of selections;let i=index">{{label(s.category)}} · {{s.ref}} · {{s.excerpt}} <button type="button" (click)="remove(i)" [disabled]="busy">移除片段</button></li></ol>

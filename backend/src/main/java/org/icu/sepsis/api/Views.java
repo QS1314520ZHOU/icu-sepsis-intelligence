@@ -51,6 +51,7 @@ public final class Views {
         o.parameterCode,
         "value",
         o.value,
+        "rawNumericValue",o.rawNumericValue,"reportedNumericText",o.reportedNumericText,"unitBasis",o.unitBasis,"displayPrecision",o.displayPrecision,
         "text",
         o.text,
         "unit",

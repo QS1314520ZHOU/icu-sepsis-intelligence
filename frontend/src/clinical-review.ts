@@ -1,5 +1,6 @@
 /** Clinical review schema v2. Unknown is never translated to normal/low risk. */
 export interface Evidence {
+  rawNumericValue?:number|null;reportedNumericText?:string|null;unitBasis?:string;displayPrecision?:number|null;
   code: string; label?: string; value: number; unit: string; eventTime: string;
   sourceSystem: string; sourceRecordId: string; reason?: string;
   sourceParameterCode?: string; measurementChannel?: string; timeBasis?: string;
@@ -9,19 +10,25 @@ export interface Evidence {
 export interface ReviewItem {
   code: string; name: string; status: 'recorded' | 'unknown'; note: string; eventTime: string | null;
 }
+export interface MewsComponent {code:string;label:string;value:number|null;text?:string|null;unit?:string;eventTime?:string;sourceSystem?:string;sourceRecordId?:string;sourceParameterCode?:string;points:number|null;state:string;ageSeconds?:number;carriedForward?:boolean;}
+export interface MewsChannel {channel:string;label:string;total:number|null;partialScore:number;complete:boolean;triggered:boolean|null;components:MewsComponent[];oldestAt:string|null;newestAt:string|null;spanSeconds:number|null;coreSpanSeconds?:number|null;reasons:string[];}
+export interface MewsResult {tool:string;ruleVersion:string;ruleSource:string;asOf:string;freshMinutes:number;temperatureFreshMinutes?:number;maxSkewMinutes:number;reviewThreshold:number;population:string;status:string;triggered:boolean|null;label:string;note:string;channels:MewsChannel[];}
 export interface ClinicalReview {
   schemaVersion: 2; patientId: string; encounterId: string; asOf: string;
   available: boolean; message: string; simulated: boolean;
+  recordedDiagnosis?:{text:string;source:string;timeConfirmed:boolean;use:string};
+  currentWarnings?:{kind:string;severity:string;reason:string;source:string}[];
+  earlyWarning?:MewsResult;
   screeningStatus: string; screeningLabel: string; missingFeatures: string[];
   findings: Evidence[]; latestEvidence: Evidence[]; qsofa: number | null; qsofaNote: string;
   vasopressorActive: boolean | null; infectionClue: string;
   sourceWarnings?: string[]; pressureSelectionRequired?: boolean;
-  pressureEvidence?: Evidence[]; contextEvidence?: Evidence[];
+  pressureEvidence?: Evidence[]; contextEvidence?: Evidence[]; contextEvidenceTruncated?:boolean; contextRecordsRead?:number;
   checklist: ReviewItem[]; taskNote: string;
   model: { configured: boolean; label: string; message: string };
-  ai: { configured: boolean; label: string };
+  ai: { configured: boolean; label: string; noteReviewConfigured?:boolean };
 }
-const names: Record<string,string> = {MAP:'平均动脉压',SBP:'收缩压',RR:'呼吸频率',GCS:'意识评分',LACTATE:'乳酸',
+const names: Record<string,string> = {AVPU:'意识反应',MAP:'平均动脉压',SBP:'收缩压',RR:'呼吸频率',GCS:'意识评分',LACTATE:'乳酸',
   MAP_IBP:'平均动脉压（有创）',MAP_NIBP:'平均动脉压（无创）',SBP_IBP:'收缩压（有创）',SBP_NIBP:'收缩压（无创）',DBP_IBP:'舒张压（有创）',DBP_NIBP:'舒张压（无创）',
   PF_RATIO:'氧合指数 P/F',PLT:'血小板',TBIL:'总胆红素',CREA:'肌酐',URINE_OUTPUT:'尿量',
   HR:'心率',TEMP:'体温',SPO2:'SpO₂',INFECTION_EVIDENCE:'感染证据',LACTATE_UNCONFIRMED:'乳酸（有报告但住院归属未确认）'};

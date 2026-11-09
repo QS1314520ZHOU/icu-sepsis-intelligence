@@ -1,0 +1,6 @@
+import {CommonModule} from '@angular/common';
+import {Component,Input,Output,EventEmitter} from '@angular/core';
+import {Evidence,featureLabel,sourceLabel} from './clinical-review';
+import {displayReading,groupSourceReadings} from './source-readings';
+@Component({selector:'unverified-reports',standalone:true,imports:[CommonModule],template:`<p class="muted small">近 24h 返回的记录；同指标、同原始时间分组，不代表同一标本。<span *ngIf="truncated">仅展示最近 20 条。</span></p><div class="review-table-wrap"><table><thead><tr><th>指标</th><th>数值</th><th>记录时间</th><th>来源</th></tr></thead><tbody><tr *ngFor="let group of groups"><td>{{label(group.code)}}</td><td>{{group.value}} {{group.unit}}</td><td>{{group.time | date:'MM-dd HH:mm:ss'}}</td><td><details><summary>{{group.records.length}} 条来源</summary><p *ngFor="let e of group.records"><button type="button" class="text-button" (click)="openSource.emit(e)">{{source(e.sourceSystem,e.code)}} · {{value(e.value)}} {{e.unit||'单位待核对'}} · {{e.timeBasis==='reported'?'报告时间':'记录时间'}}</button></p></details></td></tr></tbody></table></div>`})
+export class UnverifiedReports {@Input() rows:Evidence[]=[];@Input() truncated=false;@Output() openSource=new EventEmitter<Evidence>();label=featureLabel;source=sourceLabel;value=displayReading;get groups(){return groupSourceReadings(this.rows);}}

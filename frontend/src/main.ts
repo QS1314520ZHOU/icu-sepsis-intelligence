@@ -4,12 +4,6 @@ import { bootstrapApplication } from '@angular/platform-browser';
 import { CanActivateFn, provideRouter, Router } from '@angular/router';
 import { Api, authInterceptor } from './api';
 import { App } from './app';
-import { EmbedWorkspace } from './embed-workspace';
-import { Alerts } from './pages/alerts';
-import { Bundles } from './pages/bundles';
-import { Detail } from './pages/detail';
-import { Login } from './pages/login';
-import { Overview } from './pages/overview';
 const authGuard: CanActivateFn = () => {
   const api = inject(Api);
   return !!api.user || inject(Router).createUrlTree(['/login']);
@@ -22,13 +16,13 @@ bootstrapApplication(App, {
   providers: [
     provideHttpClient(withInterceptors([authInterceptor])),
     provideRouter([
-      { path: 'embed', component: EmbedWorkspace },
-      { path: 'login', component: Login },
-      { path: 'overview', component: Overview, canActivate: [authGuard] },
+      { path: 'embed', loadComponent: () => import('./embed-workspace').then(m => m.EmbedWorkspace) },
+      { path: 'login', loadComponent: () => import('./pages/login').then(m => m.Login) },
+      { path: 'overview', loadComponent: () => import('./pages/overview').then(m => m.Overview), canActivate: [authGuard] },
       { path: 'patients', loadComponent: () => import('./pages/patients').then(m => m.Patients), canActivate: [authGuard] },
-      { path: 'patients/:id', component: Detail, canActivate: [authGuard] },
-      { path: 'alerts', component: Alerts, canActivate: [authGuard] },
-      { path: 'bundles', component: Bundles, canActivate: [authGuard] },
+      { path: 'patients/:id', loadComponent: () => import('./pages/detail').then(m => m.Detail), canActivate: [authGuard] },
+      { path: 'alerts', loadComponent: () => import('./pages/alerts').then(m => m.Alerts), canActivate: [authGuard] },
+      { path: 'bundles', loadComponent: () => import('./pages/bundles').then(m => m.Bundles), canActivate: [authGuard] },
       { path: 'quality', loadComponent: () => import('./pages/qualitypage').then(m => m.QualityPage), canActivate: [authGuard, qualityGuard] },
       { path: 'models', loadComponent: () => import('./pages/models').then(m => m.Models), canActivate: [authGuard] },
       // 现场 iframe：根路径直接进 embed，不出现登录页

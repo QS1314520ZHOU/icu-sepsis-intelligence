@@ -12,4 +12,5 @@ class AiPrivacyGuardTest {
       assertThrows(ApiException.class, () -> AiPrivacyGuard.check(text, p), text);
     assertDoesNotThrow(() -> AiPrivacyGuard.check("乳酸4.6，MAP 65 mmHg，是否需要查看？", p));
   }
+ @Test void bareBedNumbersDoNotMatchDatesOrClinicalValues(){Patient p=new Patient();p.label="合成姓名";p.bed="06";p.id="SYNTHETIC-ID";assertDoesNotThrow(()->AiPrivacyGuard.check("休克判定依据是什么？",p));assertDoesNotThrow(()->AiPrivacyGuard.check("记录时间 11-06 22:20，乳酸 0.6 mmol/L，MAP 106 mmHg",p));assertThrows(ApiException.class,()->AiPrivacyGuard.check("06床的患者情况如何",p));assertThrows(ApiException.class,()->AiPrivacyGuard.check("床号06",p));}
 }

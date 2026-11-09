@@ -83,17 +83,20 @@ app:
   nurse-password: ${NURSE_PASSWORD:}
   quality-password: ${QUALITY_PASSWORD:}
 
-  # 授权科室标识（演示 DEMO-ICU；接入医院按实际科室编码）。
+  # 本地 Basic 账号的默认科室；iframe 多科室按宿主患者的源库科室核验，不由此固定。
   department: ${AUTHORIZED_DEPARTMENT:DEMO-ICU}
 
   # ICU-05 感染性休克 Bundle（科室主任规则 v3）见 docs/13
   icu05:
+    # 仅规定选值方式；不启用尚未确认的 K1 时间窗口。
+    k1-selection: ${ICU05_K1_SELECTION:maximum}
     blood-culture-keywords: ${ICU05_BLOOD_CULTURE_KEYWORDS:血培养}
     culture-time-field: ${ICU05_CULTURE_TIME_FIELD:reviewTime}
 
   # AI 辅助（院内 OpenAI 兼容网关 + 指南检索）见 docs/16
   # 密钥只从环境变量注入，不入库、不通过状态接口回传。
   ai:
+    note-review-enabled: ${AI_NOTE_REVIEW_ENABLED:false}
     enabled: ${AI_ENABLED:false}
     # 根地址不含 /v1；完整路径 = base-url + chat-path
     # 例：http://192.168.x.x:22830
@@ -133,6 +136,20 @@ app:
   # 病程来源快照独立长期保存；默认不接入医院源接口，不改变 AI_STORE_PROMPT。
   clinical-notes:
     sync-enabled: ${CLINICAL_NOTES_SYNC_ENABLED:false}
+    scan-known-departments: ${CLINICAL_NOTES_SCAN_KNOWN_DEPARTMENTS:false}
+    blbcjl:
+      # 仅兼容 WBNR 正文裸换行与非法反斜杠转义；不猜修双引号，归属及结构校验保持严格。
+      allow-legacy-body-escaping: ${CLINICAL_NOTES_BLBCJL_ALLOW_LEGACY_BODY_ESCAPING:true}
+      enabled: ${CLINICAL_NOTES_BLBCJL_ENABLED:false}
+      endpoint: ${CLINICAL_NOTES_BLBCJL_ENDPOINT:}
+      access-key: ${CLINICAL_NOTES_BLBCJL_ACCESS_KEY:}
+      # 固定 BQDM 按用户指定值配置，不从患者字段推导；BLH 由当前 patient.mrn 取得。
+      bqdm: ${CLINICAL_NOTES_BLBCJL_BQDM:}
+      mbkmc: ${CLINICAL_NOTES_BLBCJL_MBKMC:}
+      wjjgmc: ${CLINICAL_NOTES_BLBCJL_WJJGMC:}
+      connect-timeout-ms: ${CLINICAL_NOTES_BLBCJL_CONNECT_TIMEOUT_MS:5000}
+      read-timeout-ms: ${CLINICAL_NOTES_BLBCJL_READ_TIMEOUT_MS:15000}
+      max-response-bytes: ${CLINICAL_NOTES_BLBCJL_MAX_RESPONSE_BYTES:2097152}
     keys-json: ${CLINICAL_NOTES_KEYS_JSON:}
     active-key-id: ${CLINICAL_NOTES_ACTIVE_KEY_ID:}
     fingerprint-key-id: ${CLINICAL_NOTES_FINGERPRINT_KEY_ID:}
@@ -140,6 +157,7 @@ app:
     max-body-characters: ${CLINICAL_NOTES_MAX_BODY_CHARACTERS:100000}
     max-sync-patients: ${CLINICAL_NOTES_MAX_SYNC_PATIENTS:100}
     scan-ms: ${CLINICAL_NOTES_SCAN_MS:900000}
+    initial-delay-ms: ${CLINICAL_NOTES_INITIAL_DELAY_MS:180000}
 
   # 自动预警：床旁筛查 / ICU-05 门控判定为"疑似休克"或"感染 + 异常"时生成待处理预警。
   alerts:
@@ -155,7 +173,15 @@ app:
     skip-unchanged: ${ALERTS_SKIP_UNCHANGED:true}  # 床旁数据无变化时跳过本轮 ICU-05 与写库
     full-eval-minutes: ${ALERTS_FULL_EVAL_MINUTES:60}  # 即使无变化也至少每 N 分钟完整评估一次
 
-  # 筛查/复核显示阈值（RuleConfig）。规则自动判定，不是诊断。
+  # MEWS 独立时间策略；不受下方 RuleConfig 通用新鲜度替代。
+  screening:
+    mews:
+      enabled: ${MEWS_ENABLED:true}
+      fresh-minutes: ${MEWS_FRESH_MINUTES:30}
+      temperature-fresh-minutes: ${MEWS_TEMPERATURE_FRESH_MINUTES:240}
+      max-skew-minutes: ${MEWS_MAX_SKEW_MINUTES:15}
+      review-threshold: ${MEWS_REVIEW_THRESHOLD:5}
+
   rules:
     version: draft-demo-v1
     approval: DRAFT_DEMO_ONLY

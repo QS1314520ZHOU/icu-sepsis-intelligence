@@ -21,10 +21,15 @@ final class AiPrivacyGuard {
 
   private static boolean matches(String text, Patient p) {
     if (p == null) return false;
-    for (String s : new String[] {p.label, p.bed, p.id, p.patientId, p.encounterId}) {
-      if (s != null && s.trim().length() >= 2 && !s.equals("患者") && text.contains(s.trim())) return true;
+    for (String s : new String[] {p.label, p.id, p.patientId, p.encounterId}) {
+      if(s==null||s.trim().length()<2||s.equals("患者"))continue;
+      String value=s.trim();
+      if(value.matches("[0-9]+")&&value.length()<6)continue;
+      if(value.matches("[A-Za-z0-9_-]+")){if(Pattern.compile("(?<![A-Za-z0-9])"+Pattern.quote(value)+"(?![A-Za-z0-9])").matcher(text).find())return true;}
+      else if(text.contains(value))return true;
     }
     return false;
   }
+  static String redactKnownFactIdentifiers(String text,Patient patient){if(text==null||patient==null)return text;String out=text;for(String raw:new String[]{patient.label,patient.id,patient.patientId,patient.encounterId}){if(raw==null||raw.trim().length()<2||"患者".equals(raw))continue;String value=raw.trim();if(value.matches("[0-9]+")&&value.length()<6)continue;if(value.matches("[A-Za-z0-9_-]+"))out=out.replaceAll("(?<![A-Za-z0-9])"+Pattern.quote(value)+"(?![A-Za-z0-9])","[标识已隐去]");else out=out.replace(value,"[标识已隐去]");}return out;}
   private AiPrivacyGuard() {}
 }

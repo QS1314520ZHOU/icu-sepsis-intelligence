@@ -1,11 +1,14 @@
+import {TimelineWorkspace} from './timeline-workspace';
+import {BundleWorkspace} from './bundle-workspace';
+import {EvidenceWorkspace} from './evidence-workspace';
+import {PatientAssistant} from './patient-assistant';
 import { WardBoard } from './ward-board';
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
-import { Component, inject, OnInit, OnDestroy, ViewChild } from '@angular/core';
+import { Component, inject, OnInit, OnDestroy, ViewChild, ViewEncapsulation } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 import { Alert, Api, Envelope, Page, Patient, Task, errorMessage } from './api';
 import { UiIcon } from './ui-icon';
-import { Detail } from './pages/detail';
 import { Alerts } from './pages/alerts';
 import { Bundles } from './pages/bundles';
 import { SepsisPanel, SepsisStatus } from './sepsis-panel';
@@ -39,7 +42,9 @@ interface HostPatientSession extends Session {
 
 @Component({
   standalone: true,
-  imports: [CommonModule, Detail, Alerts, Bundles, SepsisPanel, UiIcon, WardBoard],
+  encapsulation: ViewEncapsulation.None,
+  styleUrl: './workspace.css',
+  imports: [CommonModule, Alerts, Bundles, SepsisPanel, UiIcon, WardBoard, TimelineWorkspace, BundleWorkspace, EvidenceWorkspace, PatientAssistant],
   template: ` <main class="icu-embed">
     <!-- 等待宿主 -->
     <section class="icu-embed-wait" *ngIf="!patient && !loading">
@@ -78,6 +83,7 @@ interface HostPatientSession extends Session {
         >
           <ui-icon [name]="tabIcon(t.key)"/>{{ t.label }}<span class="icu-tab-badge" *ngIf="t.key === 'alerts' && pendingCount">{{ pendingCount }}</span>
         </button>
+        <button class="workspace-ai-toggle" *ngIf="canAssist && view!=='trends'" [attr.aria-expanded]="aiOpen" (click)="aiOpen=!aiOpen">AI 辅助</button>
         <span class="icu-viewas segmented" role="group" aria-label="界面视图" title="只改变显示内容，不改变权限">
           <button type="button" [class.selected]="!api.nurseView" (click)="setViewAs('doctor')">医生视图</button>
           <button type="button" [class.selected]="api.nurseView" (click)="setViewAs('nurse')">护士视图</button>
@@ -86,21 +92,21 @@ interface HostPatientSession extends Session {
 
       <p class="icu-error" role="alert" *ngIf="error">{{ error }}</p>
 
-      <section class="icu-body">
-        <sepsis-panel *ngIf="view === 'risk'" [patientId]="p.id" [encounterId]="p.encounterId" (status)="onStatus($event)"
-          (openTrends)="openTrendHistory()" (openEvidence)="openRecords()" (openAlerts)="setView('alerts')" (openTasks)="openTasksView()" />
-        <patient-detail
-          *ngIf="view === 'records'"
-          [patientId]="p.id"
-          [embedded]="true" [initialHours]="trendInitialHours"
-          [panel]="recordsPanel"
-          (openAlerts)="setView('alerts')"
-        />
+      <section class="icu-body workspace-body" [class.with-assistant]="canAssist && aiOpen && view!=='trends'">
+       <div class="workspace-main">
+        @if(view==='risk'){@defer(on immediate){<sepsis-panel [patientId]="p.id" [encounterId]="p.encounterId" [overviewOnly]="true" (openBundle)="setView('bundle')" (openAssistant)="aiOpen=true" (status)="onStatus($event)"
+          (openTrends)="openTrendHistory()" (openEvidence)="openRecords()" (openAlerts)="setView('alerts')" (openTasks)="openTasksView()" />}}
+        @if(view==='trends'){@defer(on immediate){<timeline-workspace [patientId]="p.id" [encounterId]="p.encounterId" (openEvidence)="openRecords()"/>}}
+        @if(view==='records'){@defer(on immediate){<evidence-workspace [patientId]="p.id" [encounterId]="p.encounterId"/>}}
+        @if(view==='bundle'){@defer(on immediate){<bundle-workspace [patientId]="p.id" [encounterId]="p.encounterId"/>}}
         @if (view === 'ward') { @defer (on immediate) { <ward-board [currentPatientId]="p.id" /> } @placeholder { <p role="status">正在载入科室质控…</p> } }
         <ng-container *ngIf="view === 'alerts'">
-          <patient-alerts [embedded]="true" [patientId]="p.id" (openEvidence)="openRecords()" (changed)="refreshStatus()" />
-          <div id="icu-tasks"><patient-bundles [embedded]="true" (openEvidence)="openRecords()" (changed)="refreshStatus()" /></div>
+          <header class="workspace-heading action-heading"><div><h1>预警与处置</h1><span>触发依据 → 医生复核 → 执行跟踪</span></div></header><nav class="action-tabs" aria-label="处理队列"><button [class.selected]="actionView==='alerts'" (click)="setActionView('alerts')">待复核预警</button><button [class.selected]="actionView==='tasks'" (click)="setActionView('tasks')">执行任务</button></nav>
+          <patient-alerts *ngIf="actionView==='alerts'" [embedded]="true" [patientId]="p.id" (openEvidence)="openRecords()" (changed)="refreshStatus()" />
+          <div id="icu-tasks" *ngIf="actionView==='tasks'"><patient-bundles [embedded]="true" (openEvidence)="openRecords()" (changed)="refreshStatus()" /></div>
         </ng-container>
+       </div>
+       @if(canAssist && aiOpen && view!=='trends'){@defer(on immediate){<aside class="workspace-assistant"><patient-assistant [patientId]="p.id" [encounterId]="p.encounterId" (close)="aiOpen=false" (notesRequested)="openRecords()"/></aside>}}
       </section>
     </ng-container>
 
@@ -110,13 +116,17 @@ interface HostPatientSession extends Session {
   </main>`,
 })
 export class EmbedWorkspace implements OnInit, OnDestroy {
+  aiOpen = false;
+  get canAssist(){return !this.api.nurseView && (this.api.has('DOCTOR') || this.api.has('NURSE'));}
   trendInitialHours=12;
   recordsPanel: 'trends' | 'evidence' = 'evidence';
   pendingCount = 0;
-  openTrendHistory(){this.trendInitialHours=168;this.recordsPanel='trends';this.setView('records');}
+  openTrendHistory(){this.setView('trends');}
   openRecords(){this.trendInitialHours=12;this.recordsPanel='evidence';this.setView('records');}
-  openTasksView(){this.setView('alerts');setTimeout(()=>document.getElementById('icu-tasks')?.scrollIntoView({block:'start'}),60);}
-  tabIcon(key:string) { return ({risk:'activity',records:'file',alerts:'bell',ward:'chart'} as Record<string,string>)[key] || 'file'; }
+  actionView:'alerts'|'tasks'='alerts';
+  setActionView(value:'alerts'|'tasks'){if(this.dirty()||this.busy()){this.error='请先完成或取消当前操作。';return;}this.actionView=value;}
+  openTasksView(){if(this.dirty()||this.busy()){this.error='请先完成或取消当前操作。';return;}this.setView('alerts');this.actionView='tasks';}
+  tabIcon(key:string) { return ({risk:'activity',records:'file',trends:'chart',bundle:'clipboard',alerts:'bell',ward:'chart'} as Record<string,string>)[key] || 'file'; }
   /** Status for the host's own patient list/badge. Counts that failed to load are sent as null, never 0. */
   onStatus(s: SepsisStatus) {
     if (!this.patient || s.patientId !== this.patient.id) return;
@@ -144,7 +154,6 @@ export class EmbedWorkspace implements OnInit, OnDestroy {
   private protocol: 'smartcare' | 'secure' = 'smartcare';
   api = inject(Api);
   http = inject(HttpClient);
-  @ViewChild(Detail) detail?: Detail;
   @ViewChild(Alerts) alerts?: Alerts;
   @ViewChild(Bundles) bundles?: Bundles;
   channel = uuid4();
@@ -164,8 +173,10 @@ export class EmbedWorkspace implements OnInit, OnDestroy {
   private applying = false;
   tabs = [
     { key: 'risk', label: '概览' },
+    { key: 'trends', label: '组合趋势' },
+    { key: 'records', label: '病程与依据' },
+    { key: 'bundle', label: 'Bundle 复核' },
     { key: 'alerts', label: '预警处理' },
-    { key: 'records', label: '记录与依据' },
     { key: 'ward', label: '科室质控' },
   ];
   /** The department board is for doctors / quality staff (director view); nurses keep the three patient tabs. */
@@ -271,7 +282,7 @@ export class EmbedWorkspace implements OnInit, OnDestroy {
   }
 
   private busy() {
-    return this.api.icu05ReviewBusy || !!this.detail?.busy || !!this.alerts?.busy || !!this.bundles?.busy;
+    return this.api.icu05ReviewBusy || !!this.alerts?.busy || !!this.bundles?.busy;
   }
 
   setView(v: string) {

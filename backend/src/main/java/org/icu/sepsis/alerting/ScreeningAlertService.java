@@ -20,8 +20,8 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class ScreeningAlertService {
-  public static final String SHOCK = "suspected_shock", INFECTION = "infection_abnormal";
-  public static final String RULE_VERSION = "screen-alert-v2";
+  public static final String SHOCK = "suspected_shock", INFECTION = "infection_abnormal", EARLY_WARNING="early_warning";
+  public static final String RULE_VERSION = "screen-alert-v3-mews";
   static final Set<String> OPEN = Set.of("pending", "acknowledged", "deferred", "confirmed");
   private static final Logger log = LoggerFactory.getLogger(ScreeningAlertService.class);
 
@@ -112,6 +112,11 @@ public class ScreeningAlertService {
       Collections.sort(items);
       out.add(new Hit(INFECTION, "high", "诊断文本含感染线索，且存在异常：" + String.join("、", items), "bedside"));
     }
+    Object ew=review.get("earlyWarning");
+    if(ew instanceof Map&&Boolean.TRUE.equals(((Map<?,?>)ew).get("triggered"))){
+      List<String> scores=new ArrayList<>();Object cs=((Map<?,?>)ew).get("channels");if(cs instanceof List)for(Object c:(List<?>)cs)if(c instanceof Map&&Boolean.TRUE.equals(((Map<?,?>)c).get("triggered")))scores.add(((Map<?,?>)c).get("label")+" MEWS "+((Map<?,?>)c).get("total"));
+      out.add(new Hit(EARLY_WARNING,"high",String.join("；",scores)+"，达到候选复核阈值；请床旁复评并核对感染线索，不能单独确诊脓毒症", "bedside"));
+    }
     for (Hit h : out) h.evidenceFingerprint = signature(RULE_VERSION+"|"+h.source+"|"+h.reason, reviewEvidence(review,h.kind));
     return out;
   }
@@ -139,6 +144,8 @@ public class ScreeningAlertService {
     return out;
   }
 
+  static Map<String,Object> selectEarlyWarning(Map<?,?> ew){Map<String,Object> evidence=new TreeMap<>();for(String key:List.of("ruleVersion","freshMinutes","temperatureFreshMinutes","maxSkewMinutes","reviewThreshold","population","channels"))evidence.put(key,stableEarlyEvidence(ew.get(key)));return evidence;}
+  static Object stableEarlyEvidence(Object value){if(value instanceof Map){Map<String,Object> out=new TreeMap<>();((Map<?,?>)value).forEach((k,v)->{String key=String.valueOf(k);if(!Set.of("ageSeconds","carriedForward","asOf").contains(key))out.put(key,stableEarlyEvidence(v));});return out;}if(value instanceof Collection){List<Object> out=new ArrayList<>();for(Object item:(Collection<?>)value)out.add(stableEarlyEvidence(item));return out;}return value;}
   static Map<String,Object> select(Map<?,?> value) {
     Map<String,Object> selected=new TreeMap<>();
     for(String key:List.of("code","value","number","unit","time","eventTime","sourceId","sourceRecordId","reason","windowConfirmed"))
@@ -149,6 +156,7 @@ public class ScreeningAlertService {
     List<Map<String,Object>> selected=new ArrayList<>();Object raw=review.get("findings");
     if(raw instanceof List)for(Object item:(List<?>)raw)if(item instanceof Map){Map<?,?> map=(Map<?,?>)item;String code=String.valueOf(map.get("code"));
       if(!SHOCK.equals(kind)||"LACTATE".equals(code)||code.startsWith("MAP"))selected.add(select(map));}
+    if(EARLY_WARNING.equals(kind)&&review.get("earlyWarning") instanceof Map)selected.add(selectEarlyWarning((Map<?,?>)review.get("earlyWarning")));
     return selected;
   }
   static String canonical(Object value) {
@@ -236,6 +244,7 @@ public class ScreeningAlertService {
       b.append(e.get("code")).append('@').append(e.get("eventTime")).append('=').append(e.get("value")).append(';');
     b.append("|v=").append(review.get("vasopressorActive")).append("|i=").append(review.get("infectionClue"))
         .append("|m=").append(review.get("missingFeatures"));
+    if(review.get("earlyWarning") instanceof Map)b.append("|ews=").append(canonical(selectEarlyWarning((Map<?,?>)review.get("earlyWarning"))));
     return b.toString();
   }
 

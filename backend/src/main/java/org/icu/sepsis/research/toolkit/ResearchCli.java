@@ -13,7 +13,7 @@ import java.util.*;
  * </pre>
  */
 public final class ResearchCli {
-  public static final Set<String> COMMANDS = Set.of("research-report", "research-synth", "research-e2e-seed", "research-e2e-verify");
+  public static final Set<String> COMMANDS = Set.of("k1-compare", "research-report", "research-synth", "research-e2e-seed", "research-e2e-verify");
 
   private ResearchCli() {}
 
@@ -44,6 +44,11 @@ public final class ResearchCli {
     Map<String, String> o = options(args);
     try {
       switch (args[0]) {
+        case "k1-compare": {
+          if(o.get("input")==null||o.get("out")==null)return usage();
+          org.icu.sepsis.sepsis.K1ComparisonFile.run(Path.of(o.get("input")),Path.of(o.get("out")));
+          System.out.println("K1 候选窗口对照已输出；未用于正式质控，非临床验证。");return 0;
+        }
         case "research-synth": {
           String out = o.get("out");
           if (out == null) return usage();
@@ -73,7 +78,7 @@ public final class ResearchCli {
   }
 
   static int usage() {
-    System.err.println("用法：research-report --export DIR --out DIR | research-synth --out DIR [--n N --seed S --scenario signal|null]"
+    System.err.println("用法：k1-compare --input FILE --out FILE | research-report --export DIR --out DIR | research-synth --out DIR [--n N --seed S --scenario signal|null]"
         + " | research-e2e-seed --salt S --truth FILE [--uri URI --n N --seed S] | research-e2e-verify EXPORT TRUTH REPORT");
     return 2;
   }

@@ -10,6 +10,7 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public class AiProperties {
+  @Value("${app.ai.note-review-enabled:false}") public boolean noteReviewEnabled=false;
   public final boolean enabled;
   public final String baseUrl, apiKey, chatPath, embeddingsPath;
   public final String fastModel, reasoningModel, embeddingModel;

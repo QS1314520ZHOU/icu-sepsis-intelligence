@@ -53,6 +53,8 @@ public class PatientContextBuilder {
   public List<Fact> build(Map<String, Object> review, Map<String, Object> icu05, Instant now, boolean windowDetail) {
     List<Fact> out = new ArrayList<>();
     if (review != null) {
+      Object sourceDiagnosis=review.get("recordedDiagnosis");
+      if(sourceDiagnosis instanceof Map){Map<?,?> recorded=(Map<?,?>)sourceDiagnosis;add(out,"源诊断记录",str(recorded.get("text"))+"；来源："+str(recorded.get("source"))+"。原文限定语必须保留；时间未确认，不代表当前确诊，不替代感染证据、评分或 ICU-05 条件。",null);}
       if (!Boolean.TRUE.equals(review.get("available"))) add(out, "状态", "床旁数据暂不可用：" + str(review.get("message")), null);
       else {
         add(out, "核对", "规则核对状态：" + str(review.get("screeningLabel")) + "（只读证据核对，非诊断）", null);
@@ -69,6 +71,7 @@ public class PatientContextBuilder {
           if (!str(e.get("qualityNote")).isEmpty()) s.append("；").append(clip(str(e.get("qualityNote")), 60));
           add(out, "观测", s.toString(), t);
         }
+        Object early=review.get("earlyWarning");if(early instanceof Map){Map<?,?> ew=(Map<?,?>)early;add(out,"早期筛查","bedside 重新计算 MEWS："+ew.get("label")+"；"+ew.get("freshMinutes")+" 分钟内，最大跨度 "+ew.get("maxSkewMinutes")+" 分钟（仅针对除体温外四项）；体温单独允许 "+ew.get("temperatureFreshMinutes")+" 分钟内最近值，沿用体温不能称为当前实测；候选复核阈值 ≥"+ew.get("reviewThreshold")+"，规则 "+ew.get("ruleVersion")+"。缺项不补零，不替代感染证据与床旁复评。",null);Object cs=ew.get("channels");if(cs instanceof List)for(Object c:(List<?>)cs)if(c instanceof Map){Map<?,?> channel=(Map<?,?>)c;add(out,"早期筛查",channel.get("label")+" MEWS 总分 "+Objects.toString(channel.get("total"),"无法判定")+"；全部记录时间跨度秒 "+channel.get("spanSeconds")+"，除体温外四项跨度秒 "+channel.get("coreSpanSeconds")+"；缺口 "+channel.get("reasons"),null);Object components=channel.get("components");if(components instanceof List)for(Object part:(List<?>)components)if(part instanceof Map){Map<?,?> item=(Map<?,?>)part;Object event=item.get("eventTime");add(out,"MEWS 分项",channel.get("label")+" "+item.get("label")+"，分项得分 "+Objects.toString(item.get("points"),"未知")+"，状态 "+org.icu.sepsis.sepsis.MewsScreening.stateLabel(String.valueOf(item.get("state")))+"，数值 "+Objects.toString(item.get("value"),"未提供")+"，记录时间 "+(event instanceof Instant?DateTimeFormatter.ofPattern("MM-dd HH:mm:ss").withZone(fmt.getZone()).format((Instant)event):"未知")+"；距评估时点秒 "+item.get("ageSeconds")+"；是否沿用旧体温 "+(Boolean.TRUE.equals(item.get("carriedForward"))?"是":"否")+"；只有 ready 分项可计分，不能补零或把部分合计当完整总分",event instanceof Instant?(Instant)event:null);}}}
         Object q = review.get("qsofa");
         add(out, "评分", q == null ? "qSOFA 无法计算（缺项或血压通道未选定）" : "qSOFA " + q + "/3（仅用新鲜有效记录，缺项不计零）", null);
         Object v = review.get("vasopressorActive");
@@ -80,7 +83,7 @@ public class PatientContextBuilder {
         // The generic MAP/SBP entry is redundant once a channel-specific variant is listed or present.
         missing.removeIf(c -> ("MAP".equals(c) || "SBP".equals(c)) && all.stream().anyMatch(x -> x.startsWith(c + "_")));
         if (!missing.isEmpty())
-          add(out, "缺项", "近 24h 无有效记录：" + missing.stream().map(c -> NAMES.getOrDefault(c, c)).collect(Collectors.joining("、")), null);
+          add(out, "缺项", "近 24h 无可参与判断的有效记录（不等于未取得报告）：" + missing.stream().map(c -> NAMES.getOrDefault(c, c)).collect(Collectors.joining("、")), null);
         for (Object w : list2(review.get("sourceWarnings"))) add(out, "数据限制", clip(str(w), 90), null);
         int ctx = 0;
         for (Map<String, Object> e : list(review.get("contextEvidence"))) {
@@ -139,7 +142,7 @@ public class PatientContextBuilder {
     Map<String, List<org.icu.sepsis.domain.Domain.Observation>> by = new LinkedHashMap<>();
     for (org.icu.sepsis.domain.Domain.Observation o : rows) {
       if (o == null || o.value == null || o.eventTime == null || o.eventTime.isAfter(now) || o.eventTime.isBefore(now.minus(Duration.ofHours(24))) || !Double.isFinite(o.value) || o.parameterCode == null) continue;
-      if ("context_only".equals(o.clinicalUse) || (o.qualityStatus != null && !"valid".equals(o.qualityStatus))) continue;
+      if ("context_only".equals(o.clinicalUse) || "unconfirmed".equals(o.encounterLinkStatus) || (o.qualityStatus != null && !"valid".equals(o.qualityStatus))) continue;
       if(o.ingestTime!=null&&o.ingestTime.isAfter(now))continue;
       by.computeIfAbsent(o.parameterCode, k -> new ArrayList<>()).add(o);
     }
@@ -169,6 +172,10 @@ public class PatientContextBuilder {
           .append("），最高 ").append(num(hi.value)).append("（").append(fmt.format(hi.eventTime)).append("）");
       if (nr > 0 && ne > 0) s.append("；近 6h 均值 ").append(num(recent / nr)).append("，此前均值 ").append(num(earlier / ne));
       add(out, "趋势", s.toString(), last.eventTime);
+      if("LACTATE".equals(code)){
+        List<String> series=new ArrayList<>();for(var point:l.subList(Math.max(0,l.size()-24),l.size()))series.add(fmt.format(point.eventTime)+"="+num(point.value)+unit);
+        add(out,"乳酸时序","近24h有效乳酸按记录时间排序："+String.join("；",series)+(l.size()>24?"；仅列最近24个时点，前序未逐点提供，峰值见趋势摘要":"")+"。最近值反映末次测量，最高值反映此窗口峰值，两者均非单独确诊依据；记录时间不自动视为采样时间或复苏后时点。",last.eventTime);
+      }
       if (++n >= 12) break;
     }
     List<org.icu.sepsis.domain.Domain.Observation> urine = by.get("URINE_OUTPUT");

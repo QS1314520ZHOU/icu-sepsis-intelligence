@@ -101,6 +101,18 @@ public class Icu05SourceReader {
     return e;
   }
 
+  /** Independent of T0: bounded read-only medication execution history for the timeline. */
+  public Evidence timelineDrugs(String pid, String encounterId, String department, Instant from, Instant asOf) {
+    var patient = patients.loadPatient(pid);
+    if (patient == null || !Objects.equals(patient.encounterId, encounterId) || !Objects.equals(patient.department, department))
+      throw ApiException.conflict("住院上下文已变化，请重新选择患者。");
+    Evidence e = new Evidence(); e.asOf = asOf;
+    Instant lookback = from.minus(Duration.ofDays(30));
+    if (patient.admittedAt != null && patient.admittedAt.isAfter(lookback)) lookback = patient.admittedAt;
+    readDrugs(e, pid, Date.from(lookback), Date.from(asOf));
+    return e;
+  }
+
   private void readBloodGas(Evidence e, String mrn, String hisPid, Date from, Date to) {
     // Primary: SmartCare.bGATemp by mrn (director rule).
     if (!blank(mrn)) {
@@ -123,8 +135,8 @@ public class Icu05SourceReader {
             String code = b.getString("code");
             if (!"valid".equals(b.get("valid"))) continue;
             Instant t = toInstant(b.get("time"));
-            Double v = num(b.get("fVal"));
-            if (v == null) v = num(b.get("strVal"));
+            Double v = SmartCareSourceReader.bloodGasNumber(b);
+
             if (t == null || v == null || t.isBefore(from.toInstant()) || t.isAfter(to.toInstant()))
               continue;
             String key = code + "|" + t + "|" + v;
@@ -133,7 +145,7 @@ public class Icu05SourceReader {
             pt.rawValue = num(b.get("fVal")) != null ? b.get("fVal") : b.get("strVal");
             pt.timeMeaning = "血气记录时间（采样或结果时间类型未确认）";
             if ("param_bg_Lac".equals(code)) {
-              pt.rawUnit = b.get("unit") == null ? null : String.valueOf(b.get("unit"));
+              pt.rawUnit = b.get("unit") == null ? patients.bloodGasUnit(b,code) : String.valueOf(b.get("unit"));
               pt.lactateUnitKnown = confirmedLactateUnit(pt.rawUnit); e.lactate.add(pt);
             }
             else if ("param_bg_P/Fratio".equals(code)) e.pf.add(pt);

@@ -209,6 +209,7 @@ public final class Icu05Rules {
     out.put("t0OrderName", e.t0OrderName);
     out.put("pool", pool(e));
     out.put("lactateRecords", lactateRecords(e));
+    out.put("k1CandidatePolicies", K1WindowComparison.policy());
     out.put("truncatedSources", new TreeSet<>(e.truncatedSources));
     out.put("failedSources", new TreeSet<>(e.failed));
     out.put("limitations", limitations(e));

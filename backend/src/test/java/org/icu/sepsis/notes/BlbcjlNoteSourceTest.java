@@ -1,0 +1,8 @@
+package org.icu.sepsis.notes;
+import static org.junit.jupiter.api.Assertions.*;import static org.mockito.Mockito.*;import static org.mockito.ArgumentMatchers.*;
+import org.junit.jupiter.api.Test;import org.bson.Document;import org.bson.types.ObjectId;import org.springframework.data.mongodb.core.MongoTemplate;import org.springframework.data.mongodb.core.query.Query;import org.icu.sepsis.application.Store;import org.icu.sepsis.domain.Domain.Patient;import org.icu.sepsis.integration.SmartCareSourceReader;
+class BlbcjlNoteSourceTest {
+ final MongoTemplate source=mock(MongoTemplate.class);final Store store=mock(Store.class);final BlbcjlNoteSource adapter=new BlbcjlNoteSource(source,store,new BlbcjlProperties(),new ClinicalNoteProperties());
+ @Test void changedEncounterCannotReachHttpTransport(){var p=new Patient();p.id="aaaaaaaaaaaaaaaaaaaaaaaa";p.encounterId="old";p.department="D";var row=new Document("mrn","synthetic-new-stay").append("deptCode","D");when(source.findOne(any(Query.class),eq(Document.class),eq("patient"))).thenReturn(row);assertThrows(IllegalArgumentException.class,()->adapter.fetch(p));}
+ @Test void departmentAndMissingMrnFailBeforeAnyHttp() {var p=new Patient();p.id="aaaaaaaaaaaaaaaaaaaaaaaa";p.department="D";var row=new Document("mrn","synthetic-mrn").append("deptCode","other");p.encounterId=SmartCareSourceReader.encounterIdOf(row);when(source.findOne(any(Query.class),eq(Document.class),eq("patient"))).thenReturn(row);assertThrows(IllegalArgumentException.class,()->adapter.fetch(p));row.put("deptCode","D");row.remove("mrn");p.encounterId=SmartCareSourceReader.encounterIdOf(row);assertThrows(IllegalArgumentException.class,()->adapter.fetch(p));}
+}

@@ -21,33 +21,34 @@ interface Row { code: string; name: string; cells: (Cell | null)[]; }
   selector: 'icu05-card', standalone: true, imports: [CommonModule, FormsModule, UiIcon, Icu05OverridePanel],
   template: `<section class="review-card sx-bundle i5" aria-label="感染性休克集束化">
     <div class="review-card-title">
-      <h2><ui-icon name="clipboard"/>感染性休克 Bundle</h2>
-      <span class="sx-chip i5-status" *ngIf="mode === 'quality' || !applicable" [attr.data-tone]="statusTone" [title]="gateTip">{{ data.gate?.statusLabel || data.statusLabel }}</span>
-      <span class="sx-chip i5-t0" *ngIf="data.t0" [title]="'T0：' + (data.t0Source || '') + (data.t0OrderName ? '，' + data.t0OrderName : '')">T0 <b>{{ data.t0 | date:'MM-dd HH:mm' }}</b><small *ngIf="elapsed">已 {{ elapsed }}</small></span>
+      <h2><ui-icon name="clipboard"/>{{historical ? "历史 Bundle 记录" : "感染性休克 Bundle"}}</h2>
+      <span class="sx-chip i5-status" *ngIf="mode === 'quality' || !applicable" [attr.data-tone]="statusTone" [title]="gateTip">{{ k1WindowPending ? "资格待确认" : (data.gate?.statusLabel || data.statusLabel) }}</span>
+      <span class="sx-chip i5-t0" *ngIf="data.t0" [title]="'T0：' + (data.t0Source || '') + (data.t0OrderName ? '，' + data.t0OrderName : '')">{{historical ? "历史T0" : "T0"}} <b>{{ data.t0 | date:'MM-dd HH:mm' }}</b><small *ngIf="elapsed && !historical">已 {{ elapsed }}</small></span>
       <div class="segmented i5-view" role="group" aria-label="Bundle 视图" *ngIf="data.windows.length && !api.nurseView">
         <button type="button" [class.selected]="mode === 'bedside'" (click)="view = 'bedside'" title="按措施列出已做、待做和剩余时间">床旁</button>
         <button type="button" [class.selected]="mode === 'quality'" (click)="view = 'quality'" title="ICU-05 质控口径：1h/3h/6h 时窗逐项判定">质控</button>
       </div>
     </div>
     <p class="i5-msg" role="status" *ngIf="k1WindowPending">乳酸取值窗口待确认；K1 无法判定。</p>
-    <ng-container *ngIf="mode === 'bedside' && data.windows.length">
-      <div class="i5-next" *ngIf="next && applicable" [attr.data-urgent]="next.minutesLeft <= 30 ? 'y' : null">
+
+    <div class="i5-axis" *ngIf="data.t0 && data.windows.length" aria-label="Bundle参考时窗"><span><b>T0</b><small>{{data.t0 | date:'HH:mm'}}</small></span><span *ngFor="let w of data.windows"><b>{{w.key}}</b><small>{{w.deadline | date:'HH:mm'}}</small></span></div><div class="i5-bedside-layout" *ngIf="mode === 'bedside' && data.windows.length"><div class="i5-measures">
+      <div class="i5-next" *ngIf="next && applicable && !historical" [attr.data-urgent]="next.minutesLeft <= 30 ? 'y' : null">
         <span class="i5-next-k">下一步</span><b>{{ next.name }}</b><span class="i5-next-t">{{ next.window }} 时窗 · 剩 <strong>{{ left(next.minutesLeft) }}</strong>（截止 {{ next.deadline | date:'HH:mm' }}）</span>
       </div>
       <p class="i5-next quiet" *ngIf="!next && applicable">各时窗均已结束</p>
       <ng-container *ngIf="applicable"><ng-container *ngTemplateOutlet="acts"/></ng-container>
-      <details class="i5-na-b" *ngIf="!applicable"><summary>未达本地质控候选条件，措施记录仅供参考</summary><ng-container *ngTemplateOutlet="acts"/></details>
+      <details class="i5-na-b" *ngIf="!applicable" [open]="k1WindowPending || data.status === 'unknown'"><summary>查看来源措施记录（纳入条件单独核对）</summary><ng-container *ngTemplateOutlet="acts"/></details>
       <ng-template #acts>
       <ul class="i5-acts">
         <li *ngFor="let a of actions" [attr.data-state]="a.state" [title]="a.time ? (a.time | date:'MM-dd HH:mm') : ''">
           <i aria-hidden="true">{{ mark[a.state] }}</i><span class="i5-a-name">{{ a.name }}</span>
-          <span class="i5-a-rel">{{ a.state === 'todo' ? '待做' : a.state === 'unknown' ? '无法判定' : a.state === 'fail' ? '未完成' : a.rel }}</span>
+          <span class="i5-a-rel">{{ a.state === 'todo' ? (historical ? '未见记录' : '待做') : a.state === 'unknown' ? '无法判定' : a.state === 'fail' ? '未完成' : a.rel }}</span>
           <span class="i5-a-detail">{{ a.detail }}</span><em class="i5-a-warn" *ngIf="a.warn">{{ a.warn }}</em>
         </li>
       </ul>
       </ng-template>
       <p class="i5-wins" *ngIf="applicable"><span *ngFor="let c of chips" [attr.data-state]="c.state">{{ c.key }} <b>{{ c.label }}</b></span><small class="i5-wins-why" *ngIf="failWhy">未达标：{{ failWhy }}</small></p>
-    </ng-container>
+    </div><aside class="i5-review-summary" aria-label="本次复核摘要"><h3>复核摘要</h3><dl><dt>时间零点</dt><dd>{{data.t0 ? (data.t0 | date:'MM-dd HH:mm') : '待确认'}}</dd><dt>本次评估</dt><dd>{{data.asOf | date:'MM-dd HH:mm'}}</dd><dt>分母资格</dt><dd>{{k1WindowPending ? 'K1 窗口待确认' : (data.gate?.statusLabel || data.statusLabel)}}</dd></dl><p>措施记录与纳入资格分别核对</p><div class="i5-summary-windows" *ngIf="applicable"><span *ngFor="let c of chips">{{c.key}} <b>{{c.label}}</b></span></div></aside></div>
     <ng-container *ngIf="mode === 'quality' || !data.windows.length">
     <p class="i5-msg" *ngIf="!data.t0">{{ data.message || '未取得 T0，不做 Bundle 判定' }}</p>
     <div class="i5-gate" *ngIf="data.gate as g">
@@ -56,7 +57,7 @@ interface Row { code: string; name: string; cells: (Cell | null)[]; }
       <span><em>器官</em><i *ngFor="let i of g.organ" [attr.data-v]="v(i.value)" [title]="tip(i)">{{ organText(i) }}</i></span>
     </div>
     <ng-container *ngIf="data.windows.length">
-      <details class="i5-na" *ngIf="!applicable" ><summary>未达纳入条件，时窗结果仅供参考</summary><ng-container *ngTemplateOutlet="grid"/></details>
+      <details class="i5-na" *ngIf="!applicable" ><summary>查看时窗结果（纳入条件单独核对）</summary><ng-container *ngTemplateOutlet="grid"/></details>
       <ng-container *ngIf="applicable"><ng-container *ngTemplateOutlet="grid"/></ng-container>
     </ng-container>
     <ng-template #grid>
@@ -73,8 +74,8 @@ interface Row { code: string; name: string; cells: (Cell | null)[]; }
     </ng-container>
     @defer (on idle) { <icu05-override-panel [data]="data" (changed)="acceptOverrides($event)"/> }
     @placeholder { <p>正在加载复核工具…</p> }
-    <section class="i5-case-review" *ngIf="data.caseReview">
-      <h3>病例人工复核</h3>
+    <details class="i5-case-review" *ngIf="data.caseReview" [open]="!!reviewMode || !!data.caseReview.active">
+      <summary>病例人工复核</summary>
       <p>{{ data.caseReview.message }}</p>
       <p *ngIf="data.caseReview.active as r">{{ r.operator }} · {{ r.createdAt | date:'yyyy-MM-dd HH:mm:ss' }} · {{ r.reasonText }}
         · 复核时自动分母资格 {{ r.autoValue === true ? '成立' : r.autoValue === false ? '不成立' : '无法判定' }}</p>
@@ -98,9 +99,9 @@ interface Row { code: string; name: string; cells: (Cell | null)[]; }
           · 复核时自动分母资格 {{ r.autoValue === true ? '成立' : r.autoValue === false ? '不成立' : '无法判定' }} · 人工排除 · 规则 {{ r.ruleVersion }}</li></ul>
       </ng-container>
       <p class="review-inline-error" role="alert" *ngIf="reviewError">{{ reviewError }}</p>
-    </section>
+    </details>
     <details class="sx-limits i5-limits" *ngIf="data.limitations?.length"><summary><ui-icon name="info"/>判定规则与数据来源</summary>
-      <ul><li>规则版本：{{ data.ruleVersion }}</li><li>{{ data.ruleSource }}；{{ data.gate?.rule || '' }}。“—”表示无法判定，不按未完成计。</li><li *ngIf="data.pool">质控分母：{{ data.pool.rule }}（本例：{{ data.pool.eligible === true ? '符合' : data.pool.eligible === false ? '不符合' : '无法确认' }}）</li><li *ngFor="let l of data.limitations">{{ l }}</li></ul>
+      <ul><li *ngIf="k1WindowPending">候选对照：T0−24h～T0+6h / T0−2h～T0+1h，均不早于本次入院；窗口待确认，仅离线复核，不计正式分子分母。</li><li>规则版本：{{ data.ruleVersion }}</li><li>{{ data.ruleSource }}；{{ data.gate?.rule || '' }}。“—”表示无法判定，不按未完成计。</li><li *ngIf="data.pool">质控分母：{{ data.pool.rule }}（本例：{{ data.pool.eligible === true ? '符合' : data.pool.eligible === false ? '不符合' : '无法确认' }}）</li><li *ngFor="let l of data.limitations">{{ l }}</li></ul>
       <div *ngIf="data.gate as g">
         <h3>质控候选乳酸依据</h3>
         <ng-container *ngFor="let i of g.shock"><div *ngIf="i.code === 'K1'">
@@ -172,6 +173,7 @@ export class Icu05Card implements OnChanges, OnDestroy {
       if(!this.disposed && identity===this.identity()) this.reviewHistory=history;
     } catch(error) { if(!this.disposed && identity===this.identity()) this.reviewError=errorMessage(error); }
   }
+  get historical():boolean{return !!this.data.t0&&Date.parse(this.data.asOf)-Date.parse(this.data.t0)>6*3600000;}
   get k1WindowPending(): boolean { return this.data.gate?.shock.some(i => i.code === 'K1' && i.reason === 'K1_WINDOW_UNCONFIRMED') ?? false; }
   api = inject(Api);
   /** 护士视图固定床旁待办，不出现质控矩阵。 */

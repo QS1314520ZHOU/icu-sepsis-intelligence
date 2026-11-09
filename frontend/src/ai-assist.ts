@@ -1,12 +1,13 @@
 /** AI-assisted explanation (RAG) contract. Pure helpers only, so they can be unit-tested without Angular. */
-export type AiKind = 'summary' | 'icu05' | 'trend' | 'handover' | 'note' | 'family' | 'alert' | 'ask' | 'ward';
+export type AiKind = 'summary' | 'icu05' | 'trend' | 'handover' | 'note' | 'family' | 'alert' | 'ask' | 'ward' | 'note_review' | 'screening' | 'decision';
 export type AiStatus = 'ok' | 'disabled' | 'busy' | 'unavailable' | 'invalid_output';
 export interface AiItem { text: string; refs: string[]; urgency?: 'high' | 'medium' | 'low'; }
 export interface AiFact { id: string; category: string; text: string; time: string | null; }
 export interface AiKnowledge { ref: string; id: string; revisionId?: string; category?: string; status?: string; applicableScope?: string; evidenceQuality?: string; docId: string; title: string; source: string; version: string; section: string; strength: string; text: string; url?: string | null; }
 export interface AiBrief {
   interactionId: string; patientId: string; encounterId: string; kind: AiKind; status: AiStatus; message: string;
-  model: string | null; modelRole: string | null; fallbackUsed: boolean; latencyMs: number | null; generatedAt: string;
+  noteSources?: {ref:string;snapshotId:string;documentType:string;documentedAt:string|null;archivedAt:string;timeConfirmed:boolean}[];noteScope?:string;
+  requestedModel?: string | null; model: string | null; modelRole: string | null; fallbackUsed: boolean; latencyMs: number | null; generatedAt: string;
   /** 输入未变时服务端复用了上次成功结果。 */
   cached?: boolean; cachedAt?: string;
   summary: AiItem[]; gaps: AiItem[]; suggestions: AiItem[]; uncertainties: AiItem[];
@@ -24,12 +25,14 @@ export type SectionKey = string;
 export const sectionTitles: { key: SectionKey; title: string }[] = [
   { key: 'summary', title: '要点' }, { key: 'gaps', title: '数据缺口' }, { key: 'suggestions', title: '可考虑核对' }, { key: 'uncertainties', title: '不确定' },
 ];
-export const kindLabel: Record<AiKind, string> = {
+export const kindLabel: Record<AiKind, string> = { decision:'AI辅助研判', screening:'早期筛查解读', note_review: '病程片段复核',
   summary: '病情摘要', icu05: 'ICU-05 缺项分析', trend: '趋势解读', handover: '交班摘要', note: '病程记录草稿', family: '家属沟通要点',
   alert: '预警解读', ask: '提问', ward: '科室队列解释',
 };
 /** Buttons on the patient card, in display order. */
-export const patientKinds: { kind: AiKind; label: string; hint: string; needsIcu05?: boolean }[] = [
+export const patientKinds: { kind: AiKind; label: string; hint: string; needsIcu05?: boolean;needsNotes?:boolean }[] = [
+  {kind:'screening',label:'早期筛查解读',hint:'解释 MEWS 分项、时间与感染核对要点'},
+  {kind:'note_review',label:'病程片段复核',hint:'读取本次住院有限片段并结合当前记录复核',needsNotes:true},
   { kind: 'summary', label: '病情摘要', hint: '异常、数据缺口与可考虑核对的事项' },
   { kind: 'trend', label: '趋势解读', hint: '近 24 小时指标变化与需警惕的趋势' },
   { kind: 'handover', label: '交班摘要', hint: 'SBAR 结构，可直接复制交班' },
@@ -38,7 +41,7 @@ export const patientKinds: { kind: AiKind; label: string; hint: string; needsIcu
   { kind: 'icu05', label: 'ICU-05 缺项分析', hint: '逐时窗解释 Bundle 判定', needsIcu05: true },
 ];
 /** Kinds whose output is meant to be pasted elsewhere. */
-export const copyKinds = new Set<string>(['handover', 'note', 'family', 'summary', 'trend', 'ward']);
+export const copyKinds = new Set<string>(['note_review', 'handover', 'note', 'family', 'summary', 'trend', 'ward']);
 export const urgencyLabel: Record<string, string> = { high: '优先', medium: '', low: '' };
 
 export function layoutOf(b: Pick<AiBrief, 'layout'> | null): AiSection[] {
@@ -49,7 +52,9 @@ export function sectionItems(b: AiBrief | null, s: AiSection): AiItem[] {
   return b ? visibleItems(b[s.key] as AiItem[] | undefined, b, s.allowNoRef) : [];
 }
 /** Ward briefs: replace P# pseudonyms with the bed / name the browser already knows. */
+export function localizeAiText(text:string):string{const labels:Record<string,string>={unmapped:'无法准确映射',context_only:'仅供核对',not_adult:'不适用成人评分',incomplete_components:'分项不完整',total_mismatch:'总分与分项不一致',components_match:'分项已核对',unavailable:'暂不可用',unknown:'无法判定',stale:'过期',invalid:'无效',ready:'有效'};return text.replace(/\b(unmapped|context_only|not_adult|incomplete_components|total_mismatch|components_match|unavailable|unknown|stale|invalid|ready)\b/gi,m=>labels[m.toLowerCase()]||m);}
 export function resolvePatients(text: string, patients?: Record<string, string>): string {
+  text=localizeAiText(text);
   if (!patients) return text;
   return text.replace(/\bP(\d{1,2})\b/g, (m) => patients[m] ? patients[m] + '（' + m + '）' : m);
 }

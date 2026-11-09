@@ -3,6 +3,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 @Component
 public class ClinicalNoteProperties {
+  @Value("${app.clinical-notes.scan-known-departments:false}") public boolean scanKnownDepartments=false;
   @Value("${app.clinical-notes.sync-enabled:false}") public boolean syncEnabled=false;
   @Value("${app.clinical-notes.keys-json:}") public String keysJson="{}";
   @Value("${app.clinical-notes.active-key-id:}") public String activeKeyId="";

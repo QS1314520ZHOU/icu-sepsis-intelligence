@@ -26,3 +26,6 @@ research-report/
 
 # Local verification logs and synthetic browser captures
 /work/
+
+# Private intranet configuration; never commit credentials or note keys
+/application.yml

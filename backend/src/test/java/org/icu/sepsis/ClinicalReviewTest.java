@@ -60,4 +60,29 @@ class ClinicalReviewTest {
     Map<String,Object> r=run(List.of(obs("LACTATE",3.1,"mmol/L",now.minus(Duration.ofHours(20)))));
     assertTrue(((List<?>)r.get("missingFeatures")).contains("LACTATE"));assertFalse(((List<?>)r.get("missingFeatures")).contains("LACTATE_UNCONFIRMED"));
   }
+ @Test void adultScopeIsReloadedFromMatchingSourceWithoutPersistingDob(){var p=patient();var loaded=patient();loaded.birthDate=LocalDate.of(1980,1,1);var source=mock(SmartCareSourceReader.class);when(reader.getIfAvailable()).thenReturn(source);when(source.loadPatient(p.id)).thenReturn(loaded);var svc=new SepsisAssessmentService(provider,new ClinicalRules(cfg),cfg,reader,"smartcare",mock(ObjectProvider.class));var result=svc.assess(p,now);assertEquals("adult",((Map<?,?>)result.get("earlyWarning")).get("population"));assertNull(p.birthDate);}
+ @Test void ageCannotBeBorrowedFromDifferentStayOrUnavailableSource(){for(boolean mismatch:List.of(true,false)){var p=patient();var source=mock(SmartCareSourceReader.class);when(reader.getIfAvailable()).thenReturn(source);var loaded=patient();loaded.encounterId="other-stay";loaded.birthDate=LocalDate.of(1980,1,1);if(mismatch)when(source.loadPatient(p.id)).thenReturn(loaded);else when(source.loadPatient(p.id)).thenThrow(new IllegalStateException("private-source-detail"));var svc=new SepsisAssessmentService(provider,new ClinicalRules(cfg),cfg,reader,"smartcare",mock(ObjectProvider.class));var result=svc.assess(p,now);assertEquals("unknown",((Map<?,?>)result.get("earlyWarning")).get("population"));assertNull(p.birthDate);}}
+  @Test void sourceDiagnosisSurvivesUnavailableVitalsWithoutChangingScreening(){
+    var source=mock(SmartCareSourceReader.class);when(reader.getIfAvailable()).thenReturn(source);
+    when(source.loadPatient(patient().id)).thenReturn(patient());
+    when(source.diagnosisText(patient().id)).thenReturn("考虑脓毒性休克；既往感染性休克，当前待排");
+    when(provider.observations(anyString(),anyString(),any(),any())).thenThrow(new IllegalStateException());
+    var result=service.assess(patient(),now);
+    assertEquals("unavailable",result.get("screeningStatus"));
+    var recorded=(Map<?,?>)result.get("recordedDiagnosis");
+    assertEquals("考虑脓毒性休克；既往感染性休克，当前待排",recorded.get("text"));
+    assertEquals(false,recorded.get("timeConfirmed"));assertFalse(result.containsKey("bundle"));
+  }
+  @Test void diagnosisFromDifferentStayIsNeverBorrowed(){
+    var source=mock(SmartCareSourceReader.class);when(reader.getIfAvailable()).thenReturn(source);
+    var other=patient();other.encounterId="other";when(source.loadPatient(patient().id)).thenReturn(other);
+    assertFalse(run(List.of()).containsKey("recordedDiagnosis"));verify(source,never()).diagnosisText(anyString());
+  }
+  @Test void currentWarningContractUsesExistingAlertClassifierAndNotDisplayColors(){
+    var isolated=run(List.of(obs("GCS",2,"score",now)));assertTrue(((List<?>)isolated.get("currentWarnings")).isEmpty());
+    var shock=run(List.of(obs("LACTATE",3.5,"mmol/L",now),obs("MAP",58,"mmHg",now)));
+    var warnings=(List<?>)shock.get("currentWarnings");assertEquals(1,warnings.size());assertEquals("suspected_shock",((Map<?,?>)warnings.get(0)).get("kind"));
+  }
+  @Test void validCurrentLactateIsNotBlanketMarkedUnconfirmed(){var svc=new SepsisAssessmentService(provider,new ClinicalRules(cfg),cfg,reader,"smartcare",mock(ObjectProvider.class));when(provider.observations(anyString(),anyString(),any(),any())).thenReturn(List.of(obs("LACTATE",2.3,"mmol/L",now)));var result=svc.assess(patient(),now);assertTrue(result.get("latestEvidence").toString().contains("LACTATE"));assertFalse(result.get("sourceWarnings").toString().contains("本次住院归属待核对"));}
+  @Test void reportRestrictionDoesNotInvalidateConfirmedBloodGasLactate(){var report=obs("LACTATE",3.1,"mmol/L",now);report.encounterLinkStatus="unconfirmed";report.clinicalUse="context_only";var result=run(List.of(obs("LACTATE",2.3,"mmol/L",now),report));assertTrue(result.get("sourceWarnings").toString().contains("不代表已关联的血气乳酸无效"));assertTrue(result.get("latestEvidence").toString().contains("value=2.3"));}
 }

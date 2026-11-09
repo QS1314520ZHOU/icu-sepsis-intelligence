@@ -111,7 +111,7 @@ export function bedsideActions(d: Icu05Result): BedsideAction[] {
       const b3 = hits.map(x => find(x.w, 'B3')).find(Boolean) || d.windows.map(w => find(w, 'B3')).find(Boolean);
       if (b3?.value === false) warn = '早于血培养';
     }
-    out.push({ code: a.code, name: a.name, state, time: state === 'done' ? pick.i.time : null, rel: state === 'done' ? relT0(pick.i.time, d.t0) : '',
+    out.push({ code: a.code, name: a.code === 'B2' ? a.name + '（' + (pick.i.timeMeaning || '医嘱时间') + '，非采血）' : a.name, state, time: state === 'done' ? pick.i.time : null, rel: state === 'done' ? relT0(pick.i.time, d.t0) : '',
       detail: (pick.i.detail || '').replace(/（T0 前开始.*$/, '').trim() || (state === 'fail' || state === 'unknown' ? reason : ''),
       warn, deadline: state === 'todo' ? pick.w.deadline : null, window: pick.w.key });
   }
@@ -146,3 +146,6 @@ export function verdictBasis(d: Icu05Result): string[] {
   if (inf.length) out.push('感染：' + inf.join(' / '));
   return out;
 }
+
+/** Explicitly supported response versions; unknown contracts must not be guessed. */
+export function supportedIcu05Schema(version: unknown): boolean { return version === 1 || version === 2 || version === 3; }

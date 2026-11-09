@@ -57,4 +57,15 @@ class ClinicalNoteServiceTest {
     assertEquals(now.plusSeconds(10),n.syncedAt);assertEquals(now.plusMillis(1),n.availableAt);assertTrue(crypto.decrypt(n).contains(input.availableAt.toString()));
     var packet=ClinicalNoteEvidenceRules.evaluate(List.of(n),Set.of(n.id),now.plusNanos(500000));assertEquals("SOURCE_FUTURE",ClinicalNoteEvidenceRulesTest.row(packet,n.id).get("reason"));
   }
+ @Test void noteFailureExposesOnlySafeCategoryAndConnectionReadiness()throws Exception{service.syncPatient(patient);doThrow(new BlbcjlClient.Failure("interface_http_error")).when(source).fetch(patient);assertEquals("interface_http_error",service.syncPatient(patient).status);var directory=service.list("p",0,20,"doctor");assertEquals(true,directory.get("syncEnabled"));assertEquals(true,directory.get("adapterConfigured"));assertEquals(true,directory.get("snapshotKeysReady"));assertEquals(1L,directory.get("total"));assertFalse(directory.containsKey("endpoint"));assertFalse(directory.containsKey("keysJson"));doThrow(new BlbcjlProtocol.Failure("interface_response_invalid")).when(source).fetch(patient);assertEquals("interface_response_invalid",service.syncPatient(patient).status);}
+ @Test void compatibilityProvenanceIsAuthenticatedWithTheSavedBody()throws Exception{var batch=batch("compatibility-case");batch.legacyBodyEscapingNormalized=true;when(source.fetch(patient)).thenReturn(batch);var state=service.syncPatient(patient);assertTrue(state.legacyBodyEscapingNormalized);var savedNote=saved.get(0);var payload=json.readTree(crypto.decrypt(savedNote));assertTrue(payload.path("legacyBodyEscapingNormalized").asBoolean());assertEquals(batch.notes.get(0).body,payload.path("body").asText());}
+ @Test void failedParseStoresOnlySafeDiagnosticsAndReturnsEffectiveAdapterMode()throws Exception{
+  when(source.diagnostics()).thenReturn(Map.of("parserVersion",BlbcjlProtocol.VERSION,"legacyBodyEscapingEnabled",true));
+  byte[] raw="{\"code\":0,\"data\":[{\"WBNR\":\"SYNTHETIC-PRIVATE\nBODY\"}]}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+  var failure=assertThrows(BlbcjlProtocol.Failure.class,()->BlbcjlProtocol.parse(raw,"SYNTHETIC","",patient,1000,10000,false));
+  doThrow(failure).when(source).fetch(patient);var state=service.syncPatient(patient);assertEquals("interface_response_invalid",state.status);assertEquals("unescaped_control",state.parseDiagnostics.get("kind"));assertFalse(state.parseDiagnostics.toString().contains("SYNTHETIC-PRIVATE"));assertTrue(saved.isEmpty());
+  var list=service.list("p",0,20,"doctor");assertEquals(state.parseDiagnostics,list.get("parseDiagnostics"));assertEquals(true,((Map<?,?>)list.get("adapterDiagnostics")).get("legacyBodyEscapingEnabled"));
+  doReturn(batch("合成正文")).when(source).fetch(patient);assertEquals(Map.of(),service.syncPatient(patient).parseDiagnostics);
+ }
+
 }

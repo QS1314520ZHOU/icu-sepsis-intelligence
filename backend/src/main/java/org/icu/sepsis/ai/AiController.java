@@ -17,7 +17,7 @@ import org.springframework.web.bind.annotation.*;
 @Validated
 public class AiController {
   public static class BriefRequest {
-    @NotBlank @Pattern(regexp = "summary|icu05|trend|handover|note|family") public String kind = "summary";
+    @NotBlank @Pattern(regexp = "summary|icu05|trend|handover|note|family|note_review|screening|decision") public String kind = "summary";
     /** true = 跳过缓存重新生成。 */
     public boolean refresh;
   }
@@ -43,6 +43,7 @@ public class AiController {
   @PostMapping("/patients/{id}/ai/brief")
   @PreAuthorize("hasAnyRole('DOCTOR','NURSE')")
   public Envelope<?> brief(@PathVariable String id, @Valid @RequestBody BriefRequest r, Authentication a) {
+    if(("note_review".equals(r.kind)||"decision".equals(r.kind))&&a.getAuthorities().stream().noneMatch(role->"ROLE_DOCTOR".equals(role.getAuthority())))throw new org.icu.sepsis.api.ApiException(org.springframework.http.HttpStatus.FORBIDDEN,"NOTE_REVIEW_DOCTOR_ONLY","病程片段复核仅医生可请求");
     return Envelope.ok(ai.brief(s.patient(id), r.kind, a.getName(), r.refresh));
   }
 

@@ -1,6 +1,6 @@
 import { FormsModule } from '@angular/forms';
 import { CommonModule } from '@angular/common';
-import { Component, Input, OnChanges, OnDestroy, SimpleChanges, inject } from '@angular/core';
+import { Component, Input, Output, EventEmitter, OnChanges, OnDestroy, SimpleChanges, inject } from '@angular/core';
 import { Api, errorMessage } from './api';
 import { draftCopyText, isDraftOutdated, AiBrief, AiItem, AiSection, RefTarget, copyKinds, copyText, hasContent, kindLabel, layoutOf, refTarget, rejectReasons, resolvePatients, sectionItems, statusNote, urgencyLabel } from './ai-assist';
 
@@ -25,23 +25,23 @@ import { draftCopyText, isDraftOutdated, AiBrief, AiItem, AiSection, RefTarget, 
       <p>{{ show(o.body) }}</p><small>{{ o.meta }}</small>
     </div>
     <details class="ai-sources" [open]="!content">
-      <summary>依据 {{ b.facts.length }} 条事实 · {{ b.knowledge.length }} 条知识</summary>
+      <summary>依据与生成信息 · {{ b.facts.length }} 条事实</summary>      <span>{{ b.label || kind[b.kind] }} · {{ b.requestedModel ? ('请求模型：' + b.requestedModel) : '请求模型未记录' }}<ng-container *ngIf="b.model && b.model !== b.requestedModel"> · 网关返回标识：{{ b.model }}</ng-container><ng-container *ngIf="b.fallbackUsed">（备用模型）</ng-container><ng-container *ngIf="b.latencyMs !== null"> · {{ (b.latencyMs / 1000) | number:'1.0-1' }}s</ng-container> · {{ b.generatedAt | date:'HH:mm' }}</span><p>{{ b.disclaimer }}</p><div *ngIf="b.noteSources?.length"><p>本次读取 {{b.noteSources!.length}} 份快照的有限片段</p><button type="button" *ngFor="let source of b.noteSources" (click)="readNote(source.snapshotId)">{{source.ref}} · {{source.documentType}} · 查看原文</button><p>{{b.noteScope}}</p></div>
       <ol class="ai-facts" *ngIf="!content && b.facts.length"><li *ngFor="let f of b.facts"><b>{{ f.id }}</b> {{ show(f.text) }}</li></ol>
       <ol class="ai-kb"><li *ngFor="let k of b.knowledge"><b>{{ k.ref }}</b> {{ k.title }} · {{ k.section }} · 版本 {{ k.version || '未提供' }}<em *ngIf="k.strength">{{ k.strength }}</em><p>{{ k.text }}</p><small>{{ k.source }}<ng-container *ngIf="k.applicableScope"> · {{ k.applicableScope }}</ng-container></small></li></ol>
     </details>
-    <p *ngIf="content && (b.kind === 'handover' || b.kind === 'note')" class="ai-status">AI 草稿 · 生成于 {{ b.generatedAt | date:'MM-dd HH:mm:ss' }} · 请逐条核对来源与时间。</p>
+    <p *ngIf="content && (b.kind === 'handover' || b.kind === 'note')" class="ai-status">草稿 · {{ b.generatedAt | date:'MM-dd HH:mm' }}</p>
     <p *ngIf="outdated && content" class="review-inline-error" role="status">页面数据已刷新，草稿可能过期，请重新核对或生成。</p>
     <div *ngIf="editing" class="ai-draft-editor"><label>人工编辑草稿<textarea aria-label="人工编辑交班或病程草稿" [(ngModel)]="draft" maxlength="10000" rows="10"></textarea></label>
       <p>仅保留在当前页面；原 AI 稿与依据继续展示，人工文字需重新核对引用。</p><button type="button" (click)="finishEdit()" [disabled]="!draft.trim()">完成本地编辑</button><button type="button" (click)="cancelEdit()">取消本次编辑</button></div>
     <footer class="ai-foot" *ngIf="content">
-      <span>{{ b.label || kind[b.kind] }} · {{ b.model || '' }}<ng-container *ngIf="b.fallbackUsed">（备用模型）</ng-container><ng-container *ngIf="b.latencyMs !== null"> · {{ (b.latencyMs / 1000) | number:'1.0-1' }}s</ng-container> · {{ b.generatedAt | date:'HH:mm' }}</span>
+
       <button type="button" *ngIf="(b.kind === 'handover' || b.kind === 'note') && !editing" (click)="startEdit()">编辑草稿</button>
       <button type="button" *ngIf="edited !== null && !editing" (click)="restoreDraft()">恢复 AI 原稿</button>
       <span *ngIf="edited !== null && !editing">当前复制文本已人工修改</span>
       <button type="button" class="ai-copy" *ngIf="copyable" (click)="copy()">{{ copied ? '已复制' : '复制文本' }}</button>
-      <span class="ai-disclaimer">{{ b.disclaimer }}</span>
+
       <span class="ai-feedback" *ngIf="!sent">
-        <label>人工核对耗时（秒，可选）<input type="number" min="0" max="14400" step="1" aria-label="人工核对耗时秒" [(ngModel)]="reviewSeconds"/></label>
+        <label class="ai-review-duration">核对用时<input type="number" min="0" max="14400" step="1" placeholder="秒，可选" aria-label="人工核对耗时秒" [(ngModel)]="reviewSeconds"/></label>
         <button type="button" *ngIf="edited !== null && !editing" (click)="send('edit')" [disabled]="sending">记录修改反馈</button>
         <button type="button" (click)="send('accept')" [disabled]="sending">有用</button>
         <button type="button" (click)="rejecting = !rejecting" [disabled]="sending">不采纳</button>
@@ -52,11 +52,16 @@ import { draftCopyText, isDraftOutdated, AiBrief, AiItem, AiSection, RefTarget, 
       <button type="button" *ngFor="let r of reasons" [class.selected]="reason === r" (click)="reason = r">{{ r }}</button>
       <button type="button" class="primary" [disabled]="!reason || sending" (click)="send('reject')">提交</button>
     </div>
+    <section *ngIf="noteOriginal"><button type="button" (click)="noteOriginal=''">关闭病程原文</button><pre style="white-space:pre-wrap;overflow-wrap:anywhere">{{noteOriginal}}</pre></section>
     <p class="review-inline-error" role="alert" *ngIf="error">{{ error }}</p>
   </ng-container>`,
 })
 export class AiBriefView implements OnChanges, OnDestroy {
+ @Input() externalNoteReader=false;@Output() noteRequested=new EventEmitter<string>();
+
   @Input() dataAsOf: string | null = null;
+  noteOriginal='';
+  async readNote(snapshotId:string){if(this.externalNoteReader){this.noteRequested.emit(snapshotId);return;}const brief=this.brief;if(!brief)return;this.noteOriginal='';try{const data=await this.api.get<{id:string;body:string}>('/patients/'+encodeURIComponent(brief.patientId)+'/clinical-notes/'+encodeURIComponent(snapshotId));if(this.brief!==brief)return;if(data.id!==snapshotId||typeof data.body!=='string'){this.error='病程原文引用不一致';return;}this.noteOriginal=data.body;}catch(e){if(this.brief===brief)this.error='原文读取失败：'+errorMessage(e);}}
   editing = false; draft = ''; edited: string | null = null; private readonly draftKey = Symbol('ai-draft');
   get outdated() { return isDraftOutdated(this.brief?.generatedAt, this.dataAsOf); }
   startEdit() { if (!this.brief) return; this.draft=this.edited ?? copyText(this.brief); this.editing=true; this.api.aiDrafts.add(this.draftKey); }
@@ -75,7 +80,7 @@ export class AiBriefView implements OnChanges, OnDestroy {
   readonly kind = kindLabel; readonly urgency = urgencyLabel; readonly reasons = rejectReasons;
   ngOnChanges(changes: SimpleChanges) {
     if (!changes['brief']) return;
-    this.cancelEdit(); this.edited=null; this.reviewSeconds=null;
+    this.noteOriginal='';this.cancelEdit(); this.edited=null; this.reviewSeconds=null;
     const b = this.brief;
     this.sections = layoutOf(b); this.content = hasContent(b); this.note = statusNote(b);
     this.copyable = !!b && copyKinds.has(b.kind);

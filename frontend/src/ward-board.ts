@@ -24,7 +24,7 @@ export interface Icu05Board {
   selector: 'ward-board', standalone: true, imports: [CommonModule, UiIcon],
   template: `<section class="wb" aria-label="科室质控">
     <div class="embedded-section-head wb-head">
-      <h1><ui-icon name="chart"/>感染性休克 Bundle · 科室质控</h1>
+      <h1><ui-icon name="chart"/>科室质控</h1>
       <div class="segmented" role="group" aria-label="统计范围">
         <button type="button" *ngFor="let d of [7, 30]" [class.selected]="days === d" (click)="days = d; load()">近 {{ d }} 天</button>
       </div>
@@ -33,25 +33,23 @@ export interface Icu05Board {
     <p class="review-inline-error" role="alert" *ngIf="error"><ui-icon name="info"/>{{ error }}</p>
     <div class="review-loading" *ngIf="busy && !b" role="status"><span class="spinner"></span>正在按 ICU-05 规则重算科室病例…</div>
     <ng-container *ngIf="b">
-      <p class="wb-pool">入科 {{ b.screened }} 例 · 本地质控候选 <b>{{ b.septicShock }}</b> 例（纳入分母 <b>{{ b.denominator }}</b><ng-container *ngIf="b.excluded"> · 不符合纳入 {{ b.excluded }}</ng-container><ng-container *ngIf="b.poolUnknown"> · 纳入待确认 {{ b.poolUnknown }}</ng-container>）<ng-container *ngIf="b.suspected"> · 疑似待复核 <b>{{ b.suspected }}</b> 例</ng-container><ng-container *ngIf="b.unavailable"> · 数据未接入 {{ b.unavailable }}</ng-container></p>
-      <p *ngIf="b.classificationUnknown" class="wb-pool">候选条件无法判定 {{ b.classificationUnknown }} 例，未作为不符合条件处理。</p>
-      <p *ngIf="b.manualReviews as r" class="wb-pool" [title]="r.rule">有生效人工覆盖 {{ r.reviewedCases }}/{{ r.denominator }} 例（{{ pct(r.rate) }}） · 病例排除 {{ r.caseExclusions }} · 判定项 {{ r.judgementCases }} · SOFA 分项 {{ r.sofaCases }}<ng-container *ngIf="r.requiresReview"> · 旧覆盖待复核 {{ r.requiresReview }}</ng-container><br><small>{{ r.rule }}</small></p>
-      <p *ngIf="b.updateMode" class="wb-pool">{{ b.updateMode }}<ng-container *ngIf="b.oldestEvaluatedAt"> 本批最早计算：{{ b.oldestEvaluatedAt | date:'MM-dd HH:mm:ss' }}</ng-container></p>
-      <div class="wb-kpis">
+      <div class="wb-summary" aria-label="统计概况"><span>入科 <b>{{b.screened}}</b></span><span>纳入分母 <b>{{b.denominator}}</b></span><span>候选条件待核对 <b>{{b.classificationUnknown || 0}}</b></span><span *ngIf="b.manualReviews as r">人工覆盖 <b>{{r.reviewedCases}}/{{r.denominator}}</b></span></div>
+      <div class="section-caption"><h2>Bundle 时效</h2><span>达标 / 可判定病例</span></div><div class="wb-kpis">
         <div class="wb-kpi" *ngFor="let w of b.windows" [attr.data-tone]="tone(w.rate)">
           <span class="wb-kpi-k">{{ w.key }} 完成率</span>
-          <strong>{{ pct(w.rate) }}</strong>
+          <div class="wb-rate-chart" [attr.aria-label]="w.key+'完成率 '+pct(w.rate)"><svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="27" fill="none" stroke="#e8edf5" stroke-width="5"/><circle *ngIf="w.rate!==null" cx="32" cy="32" r="27" fill="none" stroke="#456bcc" stroke-width="5" pathLength="100" [attr.stroke-dasharray]="ratePercent(w.rate)+' 100'" transform="rotate(-90 32 32)"/></svg><strong>{{ pct(w.rate) }}</strong></div>
           <small>{{ w.met }}/{{ w.met + w.notMet }} 例<ng-container *ngIf="w.inProgress"> · 进行中 {{ w.inProgress }}</ng-container><ng-container *ngIf="w.unknown"> · 无法判定 {{ w.unknown }}</ng-container></small>
+          <div class="wb-distribution" role="img" [attr.aria-label]="w.key+'：达标'+w.met+'，未达标'+w.notMet+'，进行中'+w.inProgress+'，无法判定'+w.unknown"><span class="met" [style.width.%]="share(w,w.met)"></span><span class="not-met" [style.width.%]="share(w,w.notMet)"></span><span class="progress" [style.width.%]="share(w,w.inProgress)"></span><span class="unknown" [style.width.%]="share(w,w.unknown)"></span></div>
         </div>
-      </div>
+      </div><div class="wb-chart-legend"><span class="met">达标</span><span class="not-met">未达标</span><span class="progress">进行中</span><span class="unknown">无法判定</span></div>
       <div class="review-card wb-ind">
-        <div class="review-card-title"><h2>救治过程指标</h2><span class="ai-label">感染性休克救治能力指数 · 过程子指标</span></div>
+        <div class="review-card-title"><h2>救治过程指标</h2></div>
         <div class="wb-ind-grid">
           <div *ngFor="let i of b.indicators" [title]="i.rule" [class.off]="!i.available">
             <span>{{ i.label }}</span>
-            <strong>{{ i.available ? pct(i.rate) : '未接入' }}</strong>
+            <strong>{{ i.available ? pct(i.rate) : '未接入' }}</strong><div class="wb-ind-bar" *ngIf="i.available" role="img" [attr.aria-label]="i.label+' '+pct(i.rate)"><span *ngIf="i.rate!==null" [style.width.%]="ratePercent(i.rate)"></span></div>
             <small *ngIf="i.available">{{ i.yes }}/{{ (i.yes || 0) + (i.no || 0) }} 例<ng-container *ngIf="i.unknown"> · 无法判定 {{ i.unknown }}</ng-container></small>
-            <small *ngIf="!i.available">{{ i.rule }}</small>
+
           </div>
         </div>
       </div>
@@ -80,7 +78,11 @@ export interface Icu05Board {
         <button type="button" [disabled]="(page + 1) * pageSize >= b.cases.length" (click)="page = page + 1">下一页</button>
       </div>
       <p class="review-inline-error" *ngIf="b.complete === false">部分病例或证据来源读取不完整，请核对后再使用。</p>
-      <details class="sx-limits"><summary><ui-icon name="info"/>统计口径</summary><ul><li>{{ b.ruleSource }}</li><li *ngIf="b.scope">{{ b.scope }}</li><li *ngFor="let l of b.limitations">{{ l }}</li><li *ngIf="b.sourceIncomplete">{{ b.sourceIncomplete }} 例存在证据来源读取失败或截断，受影响判定按无法判定处理。</li><li *ngIf="b.readFailed">{{ b.readFailed }} 例读取失败，未计入。</li><li *ngIf="b.truncated">结果被截断，统计不完整。</li></ul></details>
+      <details class="sx-limits"><summary><ui-icon name="info"/>统计口径</summary>      <p class="wb-pool">入科 {{ b.screened }} 例 · 本地质控候选 <b>{{ b.septicShock }}</b> 例（纳入分母 <b>{{ b.denominator }}</b><ng-container *ngIf="b.excluded"> · 不符合纳入 {{ b.excluded }}</ng-container><ng-container *ngIf="b.poolUnknown"> · 纳入待确认 {{ b.poolUnknown }}</ng-container>）<ng-container *ngIf="b.suspected"> · 疑似待复核 <b>{{ b.suspected }}</b> 例</ng-container><ng-container *ngIf="b.unavailable"> · 数据未接入 {{ b.unavailable }}</ng-container></p>
+      <p *ngIf="b.classificationUnknown" class="wb-pool">候选条件无法判定 {{ b.classificationUnknown }} 例，未作为不符合条件处理。</p>
+      <p *ngIf="b.manualReviews as r" class="wb-pool" [title]="r.rule">有生效人工覆盖 {{ r.reviewedCases }}/{{ r.denominator }} 例（{{ pct(r.rate) }}） · 病例排除 {{ r.caseExclusions }} · 判定项 {{ r.judgementCases }} · SOFA 分项 {{ r.sofaCases }}<ng-container *ngIf="r.requiresReview"> · 旧覆盖待复核 {{ r.requiresReview }}</ng-container><br><small>{{ r.rule }}</small></p>
+      <p *ngIf="b.updateMode" class="wb-pool">{{ b.updateMode }}<ng-container *ngIf="b.oldestEvaluatedAt"> 本批最早计算：{{ b.oldestEvaluatedAt | date:'MM-dd HH:mm:ss' }}</ng-container></p>
+<ul><li>{{ b.ruleSource }}</li><li *ngIf="b.scope">{{ b.scope }}</li><li *ngFor="let l of b.limitations">{{ l }}</li><li *ngIf="b.sourceIncomplete">{{ b.sourceIncomplete }} 例存在证据来源读取失败或截断，受影响判定按无法判定处理。</li><li *ngIf="b.readFailed">{{ b.readFailed }} 例读取失败，未计入。</li><li *ngIf="b.truncated">结果被截断，统计不完整。</li></ul></details>
     </ng-container>
   </section>`,
 })
@@ -97,6 +99,8 @@ export class WardBoard implements OnInit {
     catch (e) { this.error = '质控统计读取失败：' + errorMessage(e); }
     finally { this.busy = false; }
   }
+  ratePercent(rate:number|null){return rate!==null&&Number.isFinite(rate)?Math.max(0,Math.min(100,rate*100)):0;}
+  share(w:BoardWindow,count:number){const total=w.met+w.notMet+w.inProgress+w.unknown;return total>0?Math.max(0,count)/total*100:0;}
   pct(r: number | null) { return r === null ? '—' : Math.round(r * 100) + '%'; }
   tone(r: number | null) { return r === null ? 'none' : r >= 0.8 ? 'ok' : r >= 0.5 ? 'warn' : 'bad'; }
   win(c: BoardCase, k: string) { return c.windows.find(w => w.key === k) || null; }

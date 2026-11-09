@@ -39,6 +39,7 @@ public class SmartCareSourceReader {
   private static final Map<String, String> BEDSIDE_TO_PARAMETER =
       Map.ofEntries(
           Map.entry("param_HR", "HR"),
+          Map.entry("param_Yishi", "AVPU"),
           Map.entry("param_nibp_m", "MAP_NIBP"),
           Map.entry("param_nibp_s", "SBP_NIBP"),
           Map.entry("param_nibp_d", "DBP_NIBP"),
@@ -119,7 +120,7 @@ public class SmartCareSourceReader {
     Query q = Query.query(Criteria.where("_id").is(new ObjectId(requireId(hostPatientId))));
     q.fields().include("name").include("hisPid").include("mrn").include("hospitalTime")
         .include("deptCode").include("deptCode2").include("dept").include("showBed")
-        .include("hisBed").include("icuAdmissionTime").include("admissionTime");
+        .include("birthday").include("hisBed").include("icuAdmissionTime").include("admissionTime");
     Document doc = smartcare.findOne(q, Document.class, "patient");
     if (doc == null) throw ApiException.notFound();
     return doc;
@@ -175,20 +176,22 @@ public class SmartCareSourceReader {
       if (parameter == null) continue;
       Double value = parseDouble(d.get("strVal"));
       if (value == null && "GCS".equals(parameter)) value = parseGcs(d.get("strVal"));
-      if (value == null) continue;
+      if (value == null && !java.util.Set.of("AVPU","HR","RR","TEMP","SBP","SBP_IBP","SBP_NIBP").contains(parameter)) continue;
       Instant event = toInstant(d.get("time"));
       if (event == null) continue;
       Observation o = observation(hostPatientId, encounterId, department, parameter, value,
           unitFor(parameter), event, null,
           "SmartCare.bedside", String.valueOf(d.get("_id")));
       o.sourceParameterCode = code;
+      if(value==null&&!"AVPU".equals(parameter)){o.qualityStatus="invalid";o.text=d.getString("strVal");o.qualityNote="最新来源值不是可用于计分的精确数字";}
+      if("AVPU".equals(parameter)){o.value=null;o.text=d.getString("strVal");o.unit="AVPU";}
       o.measurementChannel = code.startsWith("param_nibp_") ? "NIBP" : code.startsWith("param_ibp_") ? "IBP" : null;
       rows.add(o);
     }
     return rows;
   }
 
-  /** P/F from SmartCare.bGATemp bedsides (mrn link). Observed time, review use when encounter matches. */
+  /** Lactate and P/F from SmartCare.bGATemp bedsides (mrn link). Observed time, review use when encounter matches. */
   private List<Observation> bloodGasObservations(
       Document patient,
       String hostPatientId,
@@ -200,40 +203,38 @@ public class SmartCareSourceReader {
     if (mrn == null || mrn.isBlank()) return List.of();
     List<Observation> rows = new ArrayList<>();
     try {
-      Document match =
-          new Document("code", "param_bg_P/Fratio")
-              .append("valid", "valid")
-              .append("time", new Document("$gte", Date.from(from)).append("$lte", Date.from(asOf)));
-      for (Document d :
-          smartcare
-              .getCollection("bGATemp")
-              .find(new Document("mrn", mrn).append("bedsides", new Document("$elemMatch", match)))
-              .projection(new Document("bedsides", 1))
-              .limit(200)) {
+      Document match = new Document("code",new Document("$in",List.of("param_bg_P/Fratio","param_bg_Lac"))).append("valid","valid").append("time",new Document("$gte",Date.from(from)).append("$lte",Date.from(asOf)));
+      Query query=new org.springframework.data.mongodb.core.query.BasicQuery(new Document("mrn",mrn).append("bedsides",new Document("$elemMatch",match))).limit(200);
+      query.fields().include("bedsides");
+      for(Document d:smartcare.find(query,Document.class,"bGATemp")) {
         Object raw = d.get("bedsides");
         if (!(raw instanceof List)) continue;
         for (Object o : (List<?>) raw) {
           if (!(o instanceof Document)) continue;
           Document b = (Document) o;
-          if (!"param_bg_P/Fratio".equals(b.getString("code"))) continue;
+          String code=b.getString("code");boolean lactate="param_bg_Lac".equals(code);
+          if (!lactate&&!"param_bg_P/Fratio".equals(code)) continue;
           if (!"valid".equals(b.get("valid"))) continue;
           Instant t = toInstant(b.get("time"));
-          Double v = parseDouble(b.get("fVal"));
-          if (v == null) v = parseDouble(b.get("strVal"));
-          if (t == null || v == null) continue;
+          Double v = bloodGasNumber(b);
+          if (t == null || v == null || !Double.isFinite(v) || t.isBefore(from)||t.isAfter(asOf)) continue;
           Observation obs =
               observation(
                   hostPatientId,
                   encounterId,
                   department,
-                  "PF_RATIO",
+                  lactate?"LACTATE":"PF_RATIO",
                   v,
-                  PARAMETER_UNITS.get("PF_RATIO"),
+                  lactate?bloodGasUnit(b,code):PARAMETER_UNITS.get("PF_RATIO"),
                   t,
                   null,
                   "SmartCare.bGATemp",
                   String.valueOf(d.get("_id")));
-          obs.sourceParameterCode = "param_bg_P/Fratio";
+          obs.id += ":"+code+":"+t;
+          obs.sourceParameterCode = code;
+          obs.rawNumericValue=parseDouble(b.get("fVal"));obs.reportedNumericText=b.get("strVal") instanceof String?(String)b.get("strVal"):null;obs.unitBasis=b.get("unit")!=null?"source_record":"parameter_dictionary";
+          Document definition=parameterDefinition(code);Object precision=definition==null?null:definition.get("floatCount");if(precision instanceof Number&&((Number)precision).intValue()>=0&&((Number)precision).intValue()<=6)obs.displayPrecision=((Number)precision).intValue();
+          if(lactate&&(obs.unit==null||!"mmol/l".equalsIgnoreCase(obs.unit.trim()))){obs.clinicalUse="context_only";obs.qualityStatus="unverified";obs.qualityNote="血气乳酸已取得，但单位尚未确认，不参与当前判断。";}
           obs.timeBasis = "observed";
           rows.add(obs);
         }
@@ -550,6 +551,7 @@ public class SmartCareSourceReader {
     p.id = d.getObjectId("_id").toHexString();
     p.patientId = p.id;
     p.label = d.getString("name");
+    Instant birth=toInstant(d.get("birthday"));if(birth!=null)p.birthDate=birth.atZone(java.time.ZoneId.of("Asia/Shanghai")).toLocalDate();
     p.bed = bedOf(d);
     p.department = firstNonBlank(d.getString("deptCode"), d.getString("deptCode2"), d.getString("dept"), "UNKNOWN");
     p.simulated = false;
@@ -599,4 +601,9 @@ public class SmartCareSourceReader {
       return null;
     }
   }
+  private static class GasDefinition {final java.time.Instant at=java.time.Instant.now();final Document value;GasDefinition(Document value){this.value=value;}}
+  private final java.util.Map<String,GasDefinition> gasDefinitions=new java.util.concurrent.ConcurrentHashMap<>();
+  private Document parameterDefinition(String code){GasDefinition cached=gasDefinitions.get(code);if(cached!=null&&cached.at.plusSeconds(300).isAfter(java.time.Instant.now()))return cached.value;try{Query q=Query.query(org.springframework.data.mongodb.core.query.Criteria.where("code").is(code).and("valid").is(true));q.fields().include("unit").include("floatCount");Document value=smartcare.findOne(q,Document.class,"configParam");gasDefinitions.put(code,new GasDefinition(value));return value;}catch(RuntimeException ignored){gasDefinitions.put(code,new GasDefinition(null));return null;}}
+  public String bloodGasUnit(Document point,String code){Object own=point.get("unit");if(own instanceof String&&!((String)own).isBlank())return (String)own;Document definition=parameterDefinition(code);return definition!=null&&definition.get("unit") instanceof String?(String)definition.get("unit"):null;}
+  public static Double bloodGasNumber(Document point){Double numeric=parseDouble(point.get("fVal")),text=parseDouble(point.get("strVal"));Object raw=point.get("strVal");if(raw instanceof String&&!((String)raw).isBlank()&&text==null)return null;if(numeric==null)return text;if(text==null)return numeric;return Float.compare(numeric.floatValue(),text.floatValue())==0?text:null;}
 }

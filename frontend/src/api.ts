@@ -43,6 +43,7 @@ export interface Prediction {
   modelStatus: string;
 }
 export interface Observation {
+  rawNumericValue?:number|null;reportedNumericText?:string|null;unitBasis?:string;displayPrecision?:number|null;
   id: string;
   parameterCode: string;
   value: number | null;
@@ -130,6 +131,7 @@ export interface Model {
 }
 @Injectable({ providedIn: 'root' })
 export class Api {
+  requestedNotesPatient="";
   private http = inject(HttpClient);
   scheme: 'Basic' | 'Bearer' = 'Basic';
   token = '';
@@ -187,7 +189,7 @@ export const authInterceptor: HttpInterceptorFn = (req, next) => {
 export function errorMessage(e: unknown): string {
   if (e instanceof HttpErrorResponse) {
     if (e.status === 0) return '无法连接服务，请检查后端是否启动。';
-    return `${e.error?.message || '请求失败'} · ${e.error?.code || e.status} · trace ${e.error?.traceId || '—'}`;
+    return e.error?.message || '请求失败，请重试。';
   }
   return '操作未完成，请刷新并检查数据版本。';
 }

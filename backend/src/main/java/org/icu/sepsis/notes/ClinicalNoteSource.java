@@ -13,10 +13,12 @@ public interface ClinicalNoteSource {
   }
   final class Batch {
     public String patientId, encounterId, department, source;
-    public boolean bindingConfirmed; public Boolean complete;
+    public boolean bindingConfirmed; public Boolean complete;public boolean legacyBodyEscapingNormalized;
     public List<Note> notes=new ArrayList<>();
   }
   Batch fetch(Patient patient) throws Exception;
+  /** Safe runtime configuration only; never endpoint, credentials, request identifiers or response text. */
+  default Map<String,Object> diagnostics(){return Map.of();}
   /** Provider must return currently in-ward host IDs, never infer discharge from missing note text. */
   default Set<String> activePatientIds(String department){return Set.of();}
 }

@@ -15,7 +15,7 @@
             "index": "src/index.html",
             "tsConfig": "tsconfig.json",
             "polyfills": ["zone.js"],
-            "styles": ["src/styles.css", "src/host-clinical-ui.css"],
+            "styles": ["src/styles.css", "src/host-clinical-ui.css", "src/clinical-design.css"],
             "budgets": [
               {
                 "type": "initial",

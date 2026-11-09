@@ -20,6 +20,8 @@ public final class Domain {
   @Document("sepsis_patient_context")
   public static class Patient extends Base {
     public String label, bed;
+    @com.fasterxml.jackson.annotation.JsonIgnore @org.springframework.data.annotation.Transient
+    public java.time.LocalDate birthDate;
     public Instant admittedAt;
   }
 
@@ -27,6 +29,7 @@ public final class Domain {
   public static class Observation extends Base {
     public String parameterCode, unit, sourceSystem, sourceRecordId, qualityStatus, text;
     public Double value;
+    public Double rawNumericValue;public String reportedNumericText,unitBasis;public Integer displayPrecision;
     public Instant eventTime, ingestTime;
     // Source semantics: never infer sampling/ingestion or encounter membership from a report time.
     public String sourceParameterCode, measurementChannel, timeBasis, ingestTimeBasis,

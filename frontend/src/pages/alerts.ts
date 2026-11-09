@@ -39,12 +39,12 @@ import { AiBrief } from '../ai-assist';
         @defer (on immediate) { <ward-priority-panel/> }
         @if (api.has('DOCTOR') || api.has('QUALITY')) { @defer (on immediate) { <alert-review-stats/> } }
         <button type="button" (click)="wardBrief()" [disabled]="wardBusy">{{ wardBusy ? '生成中…' : 'AI 解释系统队列' }}</button>
-        <small class="muted"> 系统先汇总全部未结束预警并按患者住院排序；AI 最多解释前 20 个，故障不影响队列（发送给模型时患者以编号代替）</small>
+        <details class="queue-scope"><summary>队列与 AI 范围</summary><p>系统按患者住院排序；AI 最多解释前 20 个。发送给模型时患者以编号代替。</p></details>
         <p class="review-inline-error" *ngIf="wardError">{{ wardError }}</p>
-        <ai-brief-view *ngIf="ward" [brief]="ward" [single]="true" />
+        @if(ward){@defer(on immediate){<ai-brief-view [brief]="ward" [single]="true" />}}
       </div>
-      <div class="work-empty" *ngIf="!alerts.length && !busy && !error"><ui-icon name="bell"/><strong>{{ status === 'pending' ? '暂无待处理预警' : '当前筛选下没有预警' }}</strong><small class="muted">疑似休克（需要升压药，或 乳酸≥2 且 MAP&lt;65）或 感染线索 + 异常指标时自动生成</small><button *ngIf="embedded" (click)="openEvidence.emit()">查看记录 <ui-icon name="arrow"/></button></div>
-      <article class="alertrow" *ngFor="let a of alerts">
+      <div class="work-empty" *ngIf="!alerts.length && !busy && !error"><ui-icon name="bell"/><strong>{{ status === 'pending' ? '暂无待处理预警' : '当前筛选下没有预警' }}</strong><small class="muted">可切换状态查看历史记录</small><button *ngIf="embedded" (click)="openEvidence.emit()">查看记录 <ui-icon name="arrow"/></button></div>
+      <article class="alertrow" *ngFor="let a of alerts" [attr.data-severity]="a.severity">
         <div>
           <span class="tag" [class.danger]="a.severity === 'critical'">{{ kindLabel(a) }}</span
           ><strong>{{ who(a) }}</strong
@@ -70,7 +70,7 @@ import { AiBrief } from '../ai-assist';
           <div class="al-ai" *ngIf="aiOpen[a.id]">
             <p class="ai-status" *ngIf="aiBusy[a.id]">生成中…</p>
             <p class="review-inline-error" *ngIf="aiError[a.id]">{{ aiError[a.id] }}</p>
-            <ai-brief-view *ngIf="aiBrief[a.id] as b" [brief]="b" [single]="true" />
+            @if(aiBrief[a.id]; as b){@defer(on immediate){<ai-brief-view [brief]="b" [single]="true" />}}
             <button type="button" class="text-button" *ngIf="aiBrief[a.id] && !aiBusy[a.id]" (click)="runAi(a)">重新生成</button>
           </div>
         </div>
@@ -214,6 +214,7 @@ export class Alerts implements OnInit {
     return (name || a.patientId) + (this.embedded && this.mine(a) ? '（当前）' : '');
   }
   kindLabel(a: Alert) {
+    if (a.kind === 'early_warning') return '早期预警 · 待复评';
     if (a.kind === 'suspected_shock') return '疑似休克';
     if (a.kind === 'infection_abnormal') return '感染 + 异常';
     return text(a.severity);

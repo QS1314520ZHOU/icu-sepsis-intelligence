@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, Input, OnChanges, inject } from '@angular/core';
+import { Component, Input, Output, EventEmitter, OnChanges, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Api, errorMessage } from './api';
 import { UiIcon } from './ui-icon';
@@ -14,25 +14,25 @@ interface Turn { q: string; brief: AiBrief | null; error: string; busy: boolean;
   template: `<section class="review-card sx-ai" aria-label="AI 辅助">
     <div class="review-card-title">
       <h2><ui-icon name="file"/>AI 辅助</h2>
-      <span class="ai-label" [title]="configured ? '仅依据本页规则结果、近 24 小时记录与指南条目' : '未接入院内模型时，可查看本次核对依据与相关指南条目'">{{ configured ? '生成内容需医生核对' : 'AI 未配置' }}</span>
+      <span class="ai-label" [title]="configured ? '仅依据本页规则结果、近 24 小时记录与指南条目' : '未接入院内模型时，可查看本次核对依据与相关指南条目'">{{ configured ? 'AI 草稿' : 'AI 未配置' }}</span>
       <span class="ai-actions">
-        <ng-container *ngFor="let k of kinds"><button type="button" *ngIf="!k.needsIcu05 || icu05Available" [class.on]="brief?.kind === k.kind" (click)="run(k.kind)" [disabled]="!!busy || api.aiDrafts.size > 0" [title]="k.hint">{{ busy === k.kind ? '生成中…' : k.label }}</button></ng-container>
+        <ng-container *ngFor="let k of kinds"><button type="button" *ngIf="(!k.needsIcu05 || icu05Available) && (!k.needsNotes || noteReviewConfigured && api.has('DOCTOR'))" [class.on]="brief?.kind === k.kind" (click)="run(k.kind)" [disabled]="!!busy || api.aiDrafts.size > 0" [title]="k.hint">{{ busy === k.kind ? '生成中…' : k.label }}</button></ng-container>
       </span>
     </div>
-    <p class="ai-idle" *ngIf="configured && !brief && !busy && !error && !turns.length">按需生成，不会自动运行。</p>
-    <p class="review-inline-error" role="alert" *ngIf="error"><ui-icon name="info"/>{{ error }}</p>
+
+    <p class="review-inline-error" role="alert" *ngIf="error"><ui-icon name="info"/>{{ error }}<button type="button" *ngIf="failedKind==='note_review'" (click)="openNotes()">查看病程同步详情</button></p>
     <p class="ai-idle ai-cached" *ngIf="brief?.cached && !busy">数据未变化，复用 {{ brief?.cachedAt | date:'HH:mm' }} 的结果 · <button type="button" class="text-button" (click)="run(brief!.kind, true)">重新生成</button></p>
-    <ai-brief-view [brief]="brief" [dataAsOf]="dataAsOf" />
+    @if(brief){@defer(on immediate){<ai-brief-view [brief]="brief" [dataAsOf]="dataAsOf" />}}
     <div class="ai-chat" *ngIf="configured">
       <div class="ai-turn" *ngFor="let t of turns">
         <p class="ai-q"><b>问</b>{{ t.q }}</p>
         <p class="ai-status" *ngIf="t.busy">思考中…</p>
         <p class="review-inline-error" *ngIf="t.error">{{ t.error }}</p>
-        <ai-brief-view *ngIf="t.brief" [brief]="t.brief" [dataAsOf]="dataAsOf" [single]="true" />
+        @if(t.brief){@defer(on immediate){<ai-brief-view [brief]="t.brief" [dataAsOf]="dataAsOf" [single]="true" />}}
       </div>
       <div class="ai-suggest" *ngIf="!turns.length"><button type="button" *ngFor="let s of starters" (click)="question = s; ask()">{{ s }}</button></div>
       <form class="ai-ask" (ngSubmit)="ask()">
-        <input name="q" [(ngModel)]="question" maxlength="300" placeholder="针对当前患者提问，如：乳酸为什么还没复测？" aria-label="向 AI 提问" [disabled]="asking"/>
+        <input name="q" [(ngModel)]="question" maxlength="300" placeholder="输入问题" aria-label="向 AI 提问" [disabled]="asking"/>
         <button class="primary" [disabled]="asking || !question.trim()">{{ asking ? '…' : '提问' }}</button>
         <button type="button" class="text-button" *ngIf="turns.length" (click)="turns = []">清空</button>
       </form>
@@ -40,10 +40,14 @@ interface Turn { q: string; brief: AiBrief | null; error: string; busy: boolean;
   </section>`,
 })
 export class AiAssistCard implements OnChanges {
+  @Output() notesRequested=new EventEmitter<void>();
+  failedKind:AiKind|null=null;
+  openNotes(){this.api.requestedNotesPatient=this.patientId;this.notesRequested.emit();}
   @Input({ required: true }) patientId = '';
   @Input() encounterId = '';
   @Input() dataAsOf: string | null = null;
   @Input() configured = false;
+  @Input() noteReviewConfigured=false;
   @Input() icu05Available = false;
   api = inject(Api);
   brief: AiBrief | null = null;
@@ -61,14 +65,14 @@ export class AiAssistCard implements OnChanges {
   }
   async run(kind: AiKind, refresh = false) {
     const generation = ++this.generation;
-    this.busy = kind; this.error = '';
+    this.busy = kind;this.failedKind=null; this.error = '';
     try {
       const b = await this.api.post<AiBrief>('/patients/' + encodeURIComponent(this.patientId) + '/ai/brief', refresh ? { kind, refresh: true } : { kind });
       if (generation !== this.generation) return;
       if (!acceptsBrief(b, this.patientId, this.encounterId)) { this.brief = null; this.error = '患者上下文不一致，已丢弃本次结果。'; return; }
       this.brief = b;
     } catch (e) {
-      if (generation === this.generation) { this.brief = null; this.error = 'AI 辅助请求失败：' + errorMessage(e); }
+      if (generation === this.generation) { this.brief = null; this.failedKind=kind;this.error = 'AI 辅助请求失败：' + errorMessage(e); }
     } finally {
       if (generation === this.generation) this.busy = null;
     }

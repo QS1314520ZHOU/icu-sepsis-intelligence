@@ -10,8 +10,14 @@ public class ClinicalNoteSyncJob {
   public ClinicalNoteSyncJob(Store store,ClinicalNoteService notes,ClinicalNoteProperties props,ClinicalNoteCrypto crypto,ObjectProvider<ClinicalNoteSource> source){this.store=store;this.notes=notes;this.props=props;this.crypto=crypto;this.source=source;}
   @Scheduled(initialDelayString="${app.clinical-notes.initial-delay-ms:180000}",fixedDelayString="${app.clinical-notes.scan-ms:900000}")
   public synchronized void scan(){if(!props.syncEnabled){lastStatus="disabled";return;}if(!crypto.ready()){lastStatus="key_unavailable";return;}ClinicalNoteSource adapter=source.getIfAvailable();if(adapter==null){lastStatus="not_configured";return;}lastAttemptAt=java.time.Instant.now();processed=0;
-    try{Set<String> active=adapter.activePatientIds(store.department);if(active==null){lastStatus="read_failed";return;}if(active.isEmpty()){lastStatus="no_active_patients";lastSuccessfulAt=java.time.Instant.now();return;}
-      List<Patient> patients=store.db.find(Query.query(Criteria.where("department").is(store.department).and("_id").in(active)),Patient.class);
+    try{Set<String> departments=new TreeSet<>();
+      if(props.scanKnownDepartments){for(String department:store.db.findDistinct(new Query(),"department",Patient.class,String.class))if(department!=null&&!department.isBlank()&&!"UNKNOWN".equals(department))departments.add(department);}
+      else departments.add(store.department);
+      List<Patient> patients=new ArrayList<>();
+      for(String department:departments){Set<String> active=adapter.activePatientIds(department);if(active==null)throw new IllegalStateException();if(active.isEmpty())continue;
+        for(Patient patient:store.db.find(Query.query(Criteria.where("department").is(department).and("_id").in(active)),Patient.class))if(Objects.equals(department,patient.department)&&active.contains(patient.id))patients.add(patient);
+      }
+      if(patients.isEmpty()){lastStatus="no_active_patients";lastSuccessfulAt=java.time.Instant.now();return;}
       patients.sort(Comparator.comparing(p->p.id));if(patients.isEmpty()){lastStatus="binding_unconfirmed";return;}int count=Math.min(patients.size(),Math.max(1,props.maxSyncPatients));
       boolean incomplete=false;for(int i=0;i<count;i++){ClinicalNoteSyncState state=notes.syncPatient(patients.get((offset+i)%patients.size()));processed++;if(state!=null&&!Set.of("synced","no_records").contains(state.status))incomplete=true;}offset=(offset+count)%patients.size();lastStatus=incomplete?"partial":count<patients.size()?"scan_limited":"synced";lastSuccessfulAt=java.time.Instant.now();
     }catch(RuntimeException ignored){lastStatus="read_failed";/* Never log hospital credentials, responses or note text; independent clinical rules remain available. */}}
