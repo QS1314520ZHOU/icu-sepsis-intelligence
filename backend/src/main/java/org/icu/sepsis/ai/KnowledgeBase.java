@@ -42,6 +42,15 @@ public class KnowledgeBase {
     public final Chunk chunk; public final double score;
     Hit(Chunk c, double s) { chunk = c; score = s; }
   }
+  /** Per-query outcome: readiness of the index does not prove that this query used it. */
+  public static class SearchResult {
+    public final List<Hit> hits;
+    public final boolean semanticUsed;
+    public final String fallbackReason;
+    SearchResult(List<Hit> hits, boolean used, String reason) {
+      this.hits = hits; semanticUsed = used; fallbackReason = reason;
+    }
+  }
 
   private final List<Chunk> chunks = new ArrayList<>();
   private final List<Map<String, Object>> docs = new ArrayList<>();
@@ -53,6 +62,9 @@ public class KnowledgeBase {
   private volatile Map<String, float[]> vectors;
   private volatile String vectorStatus = "not_configured";
   private volatile long lastAttempt;
+  @org.springframework.beans.factory.annotation.Value("${app.ai.vector-cache-dir:./.runtime/guideline-vectors}")
+  String vectorCacheDir="";
+  private volatile String cacheStatus="disabled";
 
   public KnowledgeBase(AiProperties props, LlmClient llm, ObjectMapper json) {
     this.props = props; this.llm = llm;
@@ -178,26 +190,31 @@ public class KnowledgeBase {
   }
 
   public List<Hit> search(String query, int k) {
+    return searchDetailed(query, k).hits;
+  }
+
+  public SearchResult searchDetailed(String query, int k) {
     List<Hit> lexical = bm25(query);
     Map<String, float[]> vec = vectors;
     if (vec == null || vec.isEmpty()) {
       maybeBuildInBackground();
-      return lexical.stream().limit(k).collect(Collectors.toList());
+      return new SearchResult(lexical.stream().limit(k).collect(Collectors.toList()), false, vectorStatus);
     }
     List<Hit> semantic;
     try {
       float[] q = llm.embed(List.of(query), Math.min(props.fastTimeoutMs, 5000)).get(0);
+      if (vec.values().stream().anyMatch(v -> v.length != q.length)) throw new IllegalStateException("embedding dimension mismatch");
       semantic = chunks.stream().filter(c -> vec.containsKey(c.id)).map(c -> new Hit(c, cosine(q, vec.get(c.id))))
           .sorted(Comparator.comparingDouble((Hit h) -> -h.score)).limit(30).collect(Collectors.toList());
     } catch (RuntimeException e) {
-      return lexical.stream().limit(k).collect(Collectors.toList());
+      return new SearchResult(lexical.stream().limit(k).collect(Collectors.toList()), false, "query_failed");
     }
     Map<String, Double> rrf = new LinkedHashMap<>();
     for (int i = 0; i < lexical.size() && i < 30; i++) rrf.merge(lexical.get(i).chunk.id, 1.0 / (60 + i), Double::sum);
     for (int i = 0; i < semantic.size(); i++) rrf.merge(semantic.get(i).chunk.id, 1.0 / (60 + i), Double::sum);
     Map<String, Chunk> byId = chunks.stream().collect(Collectors.toMap(c -> c.id, c -> c));
-    return rrf.entrySet().stream().sorted(Map.Entry.<String, Double>comparingByValue().reversed()).limit(k)
-        .map(e -> new Hit(byId.get(e.getKey()), e.getValue())).collect(Collectors.toList());
+    return new SearchResult(rrf.entrySet().stream().sorted(Map.Entry.<String, Double>comparingByValue().reversed()).limit(k)
+        .map(e -> new Hit(byId.get(e.getKey()), e.getValue())).collect(Collectors.toList()), true, "");
   }
 
   List<Hit> bm25(String query) {
@@ -224,9 +241,10 @@ public class KnowledgeBase {
     maybeBuildInBackground();
   }
 
-  private void maybeBuildInBackground() {
+  private synchronized void maybeBuildInBackground() {
     if (!props.embeddingConfigured() || vectors != null || "building".equals(vectorStatus)) return;
     if ("failed".equals(vectorStatus) && System.currentTimeMillis() - lastAttempt < RETRY_MS) return;
+    vectorStatus = "building";
     Thread t = new Thread(this::buildVectors, "kb-embedding");
     t.setDaemon(true);
     t.start();
@@ -237,16 +255,29 @@ public class KnowledgeBase {
     if (!props.embeddingConfigured() || vectors != null) return;
     vectorStatus = "building";
     lastAttempt = System.currentTimeMillis();
+    String signature=digest("guideline-embedding-v1|"+props.baseUrl+"|"+props.embeddingsPath+"|"+props.embeddingModel+"|"
+        +chunks.stream().map(c->c.revisionId+"|"+c.title+"|"+c.section).sorted().collect(Collectors.joining("|")));
+    Path cache=null;
+    if(vectorCacheDir!=null&&!vectorCacheDir.isBlank())try{
+      cache=Path.of(vectorCacheDir);var restored=GuidelineVectorCache.read(cache,signature,chunks.stream().map(c->c.id).collect(Collectors.toSet()));
+      if(restored!=null){vectors=restored;vectorStatus="ready";cacheStatus="restored";return;}cacheStatus="miss";
+    }catch(Exception e){cacheStatus="read_failed";}
     try {
       Map<String, float[]> m = new HashMap<>();
       for (int i = 0; i < chunks.size(); i += 16) {
         List<Chunk> batch = chunks.subList(i, Math.min(chunks.size(), i + 16));
         List<float[]> v = llm.embed(batch.stream().map(c -> c.title + " " + c.section + "：" + c.text).collect(Collectors.toList()),
             props.reasoningTimeoutMs);
-        for (int j = 0; j < batch.size(); j++) m.put(batch.get(j).id, v.get(j));
+        for (int j = 0; j < batch.size(); j++) {
+          float[] value = v.get(j);
+          if (value == null || value.length == 0 || (!m.isEmpty() && m.values().iterator().next().length != value.length))
+            throw new IllegalStateException("embedding dimension mismatch");
+          m.put(batch.get(j).id, value);
+        }
       }
       vectors = m;
       vectorStatus = "ready";
+      if(cache!=null)try{GuidelineVectorCache.write(cache,signature,m);cacheStatus="saved";}catch(Exception e){cacheStatus="write_failed";}
       log.info("Knowledge embeddings ready: {} chunks", m.size());
     } catch (RuntimeException e) {
       vectorStatus = "failed";
@@ -265,4 +296,5 @@ public class KnowledgeBase {
   public int size() { return chunks.size(); }
   public List<Map<String, Object>> documents() { return Collections.unmodifiableList(docs); }
   public String vectorStatus() { return vectorStatus; }
+  public String vectorCacheStatus(){return cacheStatus;}
 }

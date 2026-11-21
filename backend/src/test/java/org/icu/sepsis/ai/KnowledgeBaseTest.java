@@ -20,7 +20,7 @@ class KnowledgeBaseTest {
 
   @Test void builtInKnowledgeLoadsWithProvenance() {
     KnowledgeBase kb = kb("");
-    assertEquals(73, kb.size());
+    assertEquals(84, kb.size());
     for (Map<String, Object> d : kb.documents()) {
       assertFalse(String.valueOf(d.get("source")).isBlank(), d.toString());
       assertFalse(String.valueOf(d.get("version")).isBlank(), d.toString());
@@ -38,6 +38,18 @@ class KnowledgeBaseTest {
     assertTrue(top(kb, "30 mL/kg 晶体液", 3).contains("ssc26-10"));
     assertTrue(top(kb, "T0 首条医嘱", 3).contains("icu05-t0"));
     assertTrue(top(kb, "血糖 胰岛素", 2).contains("ssc26-92"));
+  }
+
+  @Test void renalGuidelineHasTraceableSourceAndLexicalFallback() {
+    KnowledgeBase kb=kb("");
+    var result=kb.searchDetailed("AKI 急性肾损伤 肌酐 比较 尿量 基线",3);
+    assertFalse(result.semanticUsed);
+    assertEquals("not_configured",result.fallbackReason);
+    assertTrue(result.hits.stream().anyMatch(h->"nice-ng148-aki".equals(h.chunk.docId)));
+    var chunk=kb.get("ng148-creatinine").orElseThrow();
+    assertEquals("international",chunk.category);
+    assertTrue(chunk.url.startsWith("https://www.nice.org.uk/"));
+    assertTrue(chunk.text.contains("26 μmol/L"));
   }
 
   @Test void tokenizerUsesBigramsAndWords() {

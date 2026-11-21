@@ -2,7 +2,7 @@ import { FormsModule } from '@angular/forms';
 import { CommonModule } from '@angular/common';
 import { Component, Input, Output, EventEmitter, OnChanges, OnDestroy, SimpleChanges, inject } from '@angular/core';
 import { Api, errorMessage } from './api';
-import { draftCopyText, isDraftOutdated, AiBrief, AiItem, AiSection, RefTarget, copyKinds, copyText, hasContent, kindLabel, layoutOf, refTarget, rejectReasons, resolvePatients, sectionItems, statusNote, urgencyLabel } from './ai-assist';
+import { guidelineGrade, draftCopyText, isDraftOutdated, AiBrief, AiItem, AiSection, RefTarget, copyKinds, copyText, hasContent, kindLabel, layoutOf, refTarget, rejectReasons, resolvePatients, sectionItems, statusNote, urgencyLabel } from './ai-assist';
 
 /** Renders one validated AI result: sections, evidence chips, sources, copy and feedback. */
 @Component({
@@ -16,6 +16,7 @@ import { draftCopyText, isDraftOutdated, AiBrief, AiItem, AiSection, RefTarget, 
           <ul><li *ngFor="let i of items(s)" [attr.data-urgency]="i.urgency || null">
             <span class="ai-urgency" *ngIf="i.urgency && urgency[i.urgency]">{{ urgency[i.urgency] }}</span>{{ show(i.text) }}
             <button type="button" class="ai-ref" *ngFor="let r of i.refs" [class.on]="open?.ref === r" (click)="toggle(r)" [title]="tip(r)">{{ r }}</button>
+            <span class="guideline-grade" *ngFor="let grade of grades(i)" [class.conditional]="grade.conditional" [title]="grade.quality">{{grade.label}}</span>
           </li></ul>
         </div>
       </ng-container>
@@ -27,7 +28,7 @@ import { draftCopyText, isDraftOutdated, AiBrief, AiItem, AiSection, RefTarget, 
     <details class="ai-sources" [open]="!content">
       <summary>依据与生成信息 · {{ b.facts.length }} 条事实</summary>      <span>{{ b.label || kind[b.kind] }} · {{ b.requestedModel ? ('请求模型：' + b.requestedModel) : '请求模型未记录' }}<ng-container *ngIf="b.model && b.model !== b.requestedModel"> · 网关返回标识：{{ b.model }}</ng-container><ng-container *ngIf="b.fallbackUsed">（备用模型）</ng-container><ng-container *ngIf="b.latencyMs !== null"> · {{ (b.latencyMs / 1000) | number:'1.0-1' }}s</ng-container> · {{ b.generatedAt | date:'HH:mm' }}</span><p>{{ b.disclaimer }}</p><div *ngIf="b.noteSources?.length"><p>本次读取 {{b.noteSources!.length}} 份快照的有限片段</p><button type="button" *ngFor="let source of b.noteSources" (click)="readNote(source.snapshotId)">{{source.ref}} · {{source.documentType}} · 查看原文</button><p>{{b.noteScope}}</p></div>
       <ol class="ai-facts" *ngIf="!content && b.facts.length"><li *ngFor="let f of b.facts"><b>{{ f.id }}</b> {{ show(f.text) }}</li></ol>
-      <ol class="ai-kb"><li *ngFor="let k of b.knowledge"><b>{{ k.ref }}</b> {{ k.title }} · {{ k.section }} · 版本 {{ k.version || '未提供' }}<em *ngIf="k.strength">{{ k.strength }}</em><p>{{ k.text }}</p><small>{{ k.source }}<ng-container *ngIf="k.applicableScope"> · {{ k.applicableScope }}</ng-container></small></li></ol>
+      <ol class="ai-kb"><li *ngFor="let k of b.knowledge"><b>{{ k.ref }}</b> {{ k.title }} · {{ k.section }} · 版本 {{ k.version || '未提供' }}<em *ngIf="k.strength">{{ grade(k).label }} · {{grade(k).quality}}</em><p>{{ k.text }}</p><small>{{ k.source }}<ng-container *ngIf="k.applicableScope"> · {{ k.applicableScope }}</ng-container></small></li></ol>
     </details>
     <p *ngIf="content && (b.kind === 'handover' || b.kind === 'note')" class="ai-status">草稿 · {{ b.generatedAt | date:'MM-dd HH:mm' }}</p>
     <p *ngIf="outdated && content" class="review-inline-error" role="status">页面数据已刷新，草稿可能过期，请重新核对或生成。</p>
@@ -77,7 +78,8 @@ export class AiBriefView implements OnChanges, OnDestroy {
   open: RefTarget | null = null;
   reviewSeconds: number | null = null;
   rejecting = false; reason = ''; sending = false; sent = false; copied = false; error = '';
-  readonly kind = kindLabel; readonly urgency = urgencyLabel; readonly reasons = rejectReasons;
+  readonly grade = guidelineGrade; readonly kind = kindLabel; readonly urgency = urgencyLabel; readonly reasons = rejectReasons;
+  grades(item:AiItem){const seen=new Set<string>();return (this.brief?.knowledge || []).filter(k=>item.refs.includes(k.ref)&&k.category!=='system'&&k.category!=='department').map(guidelineGrade).filter(g=>g.label!=='分级未注明'&&!seen.has(g.label)&&!!seen.add(g.label));}
   ngOnChanges(changes: SimpleChanges) {
     if (!changes['brief']) return;
     this.noteOriginal='';this.cancelEdit(); this.edited=null; this.reviewSeconds=null;

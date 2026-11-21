@@ -1,3 +1,5 @@
+import {localErrorMessage} from './user-message-error';
+import {ClinicalEvidenceChanges} from './clinical-evidence-changes';
 import { HttpClient, HttpErrorResponse, HttpInterceptorFn } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
@@ -131,6 +133,7 @@ export interface Model {
 }
 @Injectable({ providedIn: 'root' })
 export class Api {
+  readonly evidenceChanges = new ClinicalEvidenceChanges();
   requestedNotesPatient="";
   private http = inject(HttpClient);
   scheme: 'Basic' | 'Bearer' = 'Basic';
@@ -191,5 +194,5 @@ export function errorMessage(e: unknown): string {
     if (e.status === 0) return '无法连接服务，请检查后端是否启动。';
     return e.error?.message || '请求失败，请重试。';
   }
-  return '操作未完成，请刷新并检查数据版本。';
+  return localErrorMessage(e);
 }

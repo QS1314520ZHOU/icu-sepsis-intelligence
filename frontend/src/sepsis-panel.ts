@@ -1,4 +1,7 @@
-import {AiDecisionPanel} from './ai-decision-panel';
+import {DataQualityPanel} from './data-quality-panel';
+import {RenalMedicationPanel} from './renal-medication-panel';
+import {DeteriorationPanel} from './deterioration-panel';
+import {AiDecisionPanel,invalidateDecisionCache} from './ai-decision-panel';
 import {ClinicalPathway} from './clinical-pathway-panel';
 import type {ClinicalStep} from './clinical-pathway';
 import {MewsPanel} from './mews-panel';
@@ -53,7 +56,7 @@ function confirmed(o: Observation): boolean {
 const units: Record<string, string> = { MAP: 'mmHg', SBP: 'mmHg', LACTATE: 'mmol/L', RR: '次/分', GCS: '分', HR: '次/分', TEMP: '°C', SPO2: '%' };
 
 @Component({
-  selector: 'sepsis-panel', standalone: true, imports: [AiDecisionPanel,ClinicalPathway,MewsPanel,UnverifiedReports,CommonModule, FormsModule, ClinicalTrends, UiIcon, Icu05Card, AiAssistCard],
+  selector: 'sepsis-panel', standalone: true, imports: [DataQualityPanel,RenalMedicationPanel,DeteriorationPanel,AiDecisionPanel,ClinicalPathway,MewsPanel,UnverifiedReports,CommonModule, FormsModule, ClinicalTrends, UiIcon, Icu05Card, AiAssistCard],
   template: `<section class="clinical-review sx-overview" aria-label="患者脓毒症概览" [attr.aria-busy]="loading" [class.nurse-first]="nurseFirst">
     <div class="sx-workbench-bar" aria-label="工作台导航">
       <div class="sx-workbench-title"><ui-icon name="activity"/><strong>脓毒症工作台</strong><span>患者评估与处置</span></div>
@@ -98,7 +101,10 @@ const units: Record<string, string> = { MAP: 'mmHg', SBP: 'mmHg', LACTATE: 'mmol
     <p class="review-inline-error" role="alert" *ngIf="observationsError"><ui-icon name="info"/>{{ observationsError }} <button (click)="load()">重试</button></p>
 
     @if(data?.available){@defer(on immediate){<clinical-pathway [review]="data" [bundle]="icu05" [pending]="alertTotal" (navigate)="overviewOnly && $event==='bundle' ? openBundle.emit() : navigateStep($event)"/>}}
-    @if(data?.available && api.has('DOCTOR') && !nurseFirst){@defer(on immediate){<ai-decision-panel [patientId]="patientId" [encounterId]="encounterId" [review]="data"/>}}
+    @if(data?.available){@defer(on immediate){<data-quality-panel [patientId]="patientId" [encounterId]="encounterId" [asOf]="data!.asOf"/>}}
+    @if(data?.available && api.has('DOCTOR') && !nurseFirst){@defer(on immediate){<renal-medication-panel [patientId]="patientId" [encounterId]="encounterId" [asOf]="data!.asOf"/>}}
+    @if(data?.available){@defer(on immediate){<deterioration-panel [patientId]="patientId" [encounterId]="encounterId" [asOf]="data!.asOf" (evidenceReviewed)="onEvidenceReviewed()"/>}}
+    @if(data?.available && api.has('DOCTOR') && !nurseFirst){@defer(on immediate){<ai-decision-panel [patientId]="patientId" [encounterId]="encounterId" [review]="data" [evidenceRevision]="evidenceRevision"/>}}
     <section class="sx-vitals" *ngIf="data?.available && hasAnyValue" aria-label="关键指标">
       <button class="sx-tile" *ngFor="let t of tiles" [title]="t.code === 'LACTATE' ? '概览取最新可见记录；同一时点优先显示单位明确的记录。K1 为独立窗口最高值，目前窗口待确认。' : t.time ? '记录于 ' + (t.time | date:'MM-dd HH:mm') + ' · ' + ago(t.time) : ''" [attr.data-level]="t.level" [class.candidate]="!t.evidence && t.candidate" (click)="selected = t.evidence || t.candidate" [disabled]="!t.evidence && !t.candidate" [attr.aria-label]="t.label + ' ' + (t.value ?? t.candidate?.value ?? '无记录')">
         <span class="sx-tile-name">{{ t.label }}<em *ngIf="t.word">{{ t.word }}</em><small class="sx-ok" *ngIf="!t.word && t.level === 'normal'">正常</small></span>
@@ -305,6 +311,8 @@ export class SepsisPanel implements OnChanges, OnDestroy {
       this.judge = null; await this.load();
     } catch (e) { this.judgeError = errorMessage(e); } finally { this.judgeBusy = false; }
   }
+  evidenceRevision=0;
+  onEvidenceReviewed(){invalidateDecisionCache(this.patientId,this.encounterId);this.api.evidenceChanges.notify(this.patientId,this.encounterId);}
   private generation = 0;
   displayValue=displayReading;
   reportsOpen=false;

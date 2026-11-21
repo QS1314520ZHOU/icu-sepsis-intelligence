@@ -1,0 +1,22 @@
+{
+  "docId": "alf-clinical",
+  "title": "AASLD急性肝衰竭复核边界",
+  "source": "AASLD急性肝衰竭复核边界；原始发布机构/作者来源见链接",
+  "version": "web-summary-20261120",
+  "url": "https://www.aasld.org/liver-fellow-network/core-series/practice-questions/hepatology-practice-questions-edition-2",
+  "category": "international",
+  "status": "active",
+  "chunks": [
+    {
+      "id": "alf-clinical-context",
+      "section": "完整证据与解释边界",
+      "strength": "规范/定义摘要，未自行分级",
+      "tags": [
+        "急性肝衰竭",
+        "INR",
+        "肝性脑病"
+      ],
+      "text": "急性肝衰竭评估需急性肝损伤、凝血异常、肝性脑病、病程及既往肝病背景联合核对。不能仅凭胆红素或GCS异常确诊，也不能忽略肝硬化背景。"
+    }
+  ]
+}

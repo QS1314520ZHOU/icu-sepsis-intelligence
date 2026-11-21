@@ -7,6 +7,7 @@ export interface AiKnowledge { ref: string; id: string; revisionId?: string; cat
 export interface AiBrief {
   interactionId: string; patientId: string; encounterId: string; kind: AiKind; status: AiStatus; message: string;
   noteSources?: {ref:string;snapshotId:string;documentType:string;documentedAt:string|null;archivedAt:string;timeConfirmed:boolean}[];noteScope?:string;
+  retrieval?: {mode:'bm25'|'hybrid'|'mixed';queries:number;semanticQueries:number;fallbackReasons:string[];indexStatus:string};
   requestedModel?: string | null; model: string | null; modelRole: string | null; fallbackUsed: boolean; latencyMs: number | null; generatedAt: string;
   /** 输入未变时服务端复用了上次成功结果。 */
   cached?: boolean; cachedAt?: string;
@@ -20,6 +21,15 @@ export interface AiBrief {
 }
 export interface AiSection { key: string; title: string; allowNoRef: boolean; urgency?: boolean; }
 export interface RefTarget { ref: string; kind: 'fact' | 'knowledge'; title: string; body: string; meta: string; }
+
+/** Only classify explicitly supplied guideline grades; absence is never interpreted as strong. */
+export function guidelineGrade(k: AiKnowledge): {label:string;quality:string;conditional:boolean} {
+  const strength=k.strength || '';
+  const conditional=/弱推荐|条件性推荐/.test(strength);
+  const label=conditional?'条件性推荐（弱推荐）':/强推荐/.test(strength)?'强推荐':/最佳实践/.test(strength)?'最佳实践声明':'分级未注明';
+  const quality=k.evidenceQuality || strength.match(/极低质量证据|低质量证据|中等质量证据|高质量证据/)?.[0] || '证据质量未注明';
+  return {label,quality,conditional};
+}
 export type SectionKey = string;
 
 export const sectionTitles: { key: SectionKey; title: string }[] = [

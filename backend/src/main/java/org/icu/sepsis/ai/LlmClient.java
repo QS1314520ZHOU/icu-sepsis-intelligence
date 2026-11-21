@@ -189,11 +189,19 @@ public class LlmClient {
     for (JsonNode d : data) {
       int idx = d.path("index").asInt(-1);
       JsonNode e = d.path("embedding");
-      if (idx < 0 || idx >= out.length || !e.isArray()) throw new LlmException("bad_response", "向量接口返回格式错误");
+      if (idx < 0 || idx >= out.length || out[idx] != null || !e.isArray() || e.isEmpty()) throw new LlmException("bad_response", "向量接口返回格式错误");
       float[] v = new float[e.size()];
-      for (int i = 0; i < v.length; i++) v[i] = (float) e.get(i).asDouble();
+      double norm = 0;
+      for (int i = 0; i < v.length; i++) {
+        if (!e.get(i).isNumber()) throw new LlmException("bad_response", "向量包含非数值");
+        v[i] = (float) e.get(i).asDouble();
+        if (!Float.isFinite(v[i])) throw new LlmException("bad_response", "向量包含无效数值");
+        norm += (double) v[i] * v[i];
+      }
+      if (norm == 0) throw new LlmException("bad_response", "向量不可为零向量");
       out[idx] = v;
     }
+    for (float[] v : out) if (v == null || v.length != out[0].length) throw new LlmException("bad_response", "向量缺失或维度不一致");
     return Arrays.asList(out);
   }
 

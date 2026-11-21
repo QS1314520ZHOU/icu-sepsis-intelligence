@@ -29,7 +29,7 @@ public class PatientContextBuilder {
       Map.entry("GCS", "GCS"), Map.entry("LACTATE", "乳酸"), Map.entry("HR", "心率"), Map.entry("TEMP", "体温"),
       Map.entry("SPO2", "SpO2"), Map.entry("SOFA", "SOFA（宿主评分）"), Map.entry("VASOPRESSOR_ACTIVE", "升压药在用标记"),
       Map.entry("LACTATE_UNCONFIRMED", "乳酸（有报告但住院归属未确认）"), Map.entry("INFECTION_EVIDENCE", "感染证据"),
-      Map.entry("PF_RATIO", "氧合指数 P/F"), Map.entry("PLT", "血小板"), Map.entry("TBIL", "总胆红素"), Map.entry("CREA", "肌酐"),
+      Map.entry("FIO2", "吸入氧浓度"), Map.entry("PEEP_SET", "PEEP设置值"), Map.entry("PEEP_MEASURED", "PEEP测量值"), Map.entry("RASS", "镇静评分RASS"), Map.entry("WEIGHT", "体重"), Map.entry("PF_RATIO", "氧合指数 P/F"), Map.entry("PLT", "血小板"), Map.entry("TBIL", "总胆红素"), Map.entry("CREA", "肌酐"),
       Map.entry("URINE_OUTPUT", "尿量"));
   static final Map<String, String> REASONS = Map.ofEntries(
       Map.entry("DATA_MISSING_LAC", "未取到乳酸"), Map.entry("DATA_MISSING", "未取到记录"), Map.entry("AB_MISSING", "未见抗菌药执行"),

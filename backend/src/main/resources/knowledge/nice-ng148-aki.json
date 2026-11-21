@@ -1,0 +1,51 @@
+{
+  "docId": "nice-ng148-aki",
+  "title": "NICE NG148 急性肾损伤识别与复核",
+  "source": "NICE. Acute kidney injury: prevention, detection and management (NG148). Recommendations 1.2.2, 1.3.1, 1.3.2.",
+  "version": "2019-updated-2024-summary-1",
+  "category": "international",
+  "status": "active",
+  "applicableScope": "成人AKI识别参考；本系统仅提供候选复核，不替代临床诊断、分期或院内审批。",
+  "url": "https://www.nice.org.uk/guidance/ng148/chapter/Recommendations",
+  "note": "中文为人工摘要，2026-11-19核查官方网站。26 μmol/L为NICE原口径，不标为KDIGO的26.5。",
+  "chunks": [
+    {
+      "id": "ng148-creatinine",
+      "section": "1.3.1 肌酐变化",
+      "strength": "指南建议摘要",
+      "tags": [
+        "AKI",
+        "急性肾损伤",
+        "肌酐",
+        "比较",
+        "基线"
+      ],
+      "text": "AKI识别条件包括48小时肌酐升高至少26 μmol/L，或已知或推定7天内上升至少50%。需确认时间、单位及比较值；系统候选复核不能代替诊断。"
+    },
+    {
+      "id": "ng148-urine",
+      "section": "1.2.2 / 1.3.1 尿量",
+      "strength": "指南建议摘要",
+      "tags": [
+        "AKI",
+        "尿量",
+        "少尿",
+        "体重",
+        "间隔"
+      ],
+      "text": "成人尿量低于0.5 mL/kg/h持续超过6小时也是AKI识别条件。判断需核对体重及连续区间尿量；缺尿量证据时，不能仅凭肌酐未达条件排除AKI。"
+    },
+    {
+      "id": "ng148-monitor",
+      "section": "1.3.2 持续监测",
+      "strength": "指南建议摘要",
+      "tags": [
+        "AKI",
+        "肌酐",
+        "监测",
+        "复查"
+      ],
+      "text": "AKI或有AKI风险者应持续监测肌酐；频率按临床需要决定，住院期间通常每日监测。"
+    }
+  ]
+}

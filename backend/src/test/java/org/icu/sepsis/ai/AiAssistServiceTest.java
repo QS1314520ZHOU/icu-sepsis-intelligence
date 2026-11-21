@@ -315,12 +315,70 @@ class AiAssistServiceTest {
     kb.buildVectors();
     assertEquals("ready", kb.vectorStatus());
     assertTrue(kb.search("血培养 何时留取", 5).stream().anyMatch(h -> h.chunk.id.equals("ssc26-7")));
+    assertTrue(kb.searchDetailed("血培养", 2).semanticUsed);
     embeddings = r -> new Object[] {500, "{}"};
+    var fallback=kb.searchDetailed("血培养",2);
+    assertEquals("ready",kb.vectorStatus());
+    assertFalse(fallback.semanticUsed);
+    assertEquals("query_failed",fallback.fallbackReason);
+    assertFalse(fallback.hits.isEmpty());
     AiProperties p2 = props(true, url(), "fast-m", "", "emb-m", 2000, 4);
     KnowledgeBase kb2 = new KnowledgeBase(p2, new LlmClient(p2, JSON), JSON);
     kb2.buildVectors();
     assertEquals("failed", kb2.vectorStatus());
     assertFalse(kb2.search("去甲肾上腺素 一线", 3).isEmpty(), "lexical retrieval keeps working");
+  }
+
+  @Test void malformedEmbeddingIndicesAndDimensionsAreRejected() {
+    var client=new LlmClient(props(true,url(),"fast-m","","emb-m",2000,4),JSON);
+    for(String body:List.of(
+        "{\"data\":[{\"index\":0,\"embedding\":[1,2]},{\"index\":0,\"embedding\":[1,2]}]}",
+        "{\"data\":[{\"index\":0,\"embedding\":[1,2]},{\"index\":1,\"embedding\":[1]}]}",
+        "{\"data\":[{\"index\":0,\"embedding\":[0,0]},{\"index\":1,\"embedding\":[1,2]}]}",
+        "{\"data\":[{\"index\":0,\"embedding\":[\"invalid\",1]},{\"index\":1,\"embedding\":[1,2]}]}")) {
+      embeddings=r->new Object[]{200,body};
+      assertThrows(LlmClient.LlmException.class,()->client.embed(List.of("synthetic one","synthetic two"),2000));
+    }
+  }
+
+  @Test void conditionalRecommendationCannotBecomeMandatoryTask() {
+    var service=service(props(false,"","","","",1000,2));
+    var chunk=new KnowledgeBase.Chunk();chunk.id="synthetic-conditional";chunk.strength="弱推荐，低质量证据";chunk.text="可考虑联合评估";chunk.section="合成指南";
+    List<Map<String,Object>> dropped=new ArrayList<>();
+    var result=service.validate("{\"suggestions\":[{\"text\":\"必须联合评估，未执行即未达标\",\"refs\":[\"K1\"]}]}",List.of(),List.of(chunk),Map.of("K1",chunk.id),dropped);
+    assertNull(result);assertEquals("弱推荐被表述为强制要求",dropped.get(0).get("reason"));
+    dropped.clear();
+    assertNotNull(service.validate("{\"suggestions\":[{\"text\":\"可考虑联合评估\",\"refs\":[\"K1\"]}]}",List.of(),List.of(chunk),Map.of("K1",chunk.id),dropped));
+  }
+
+  @Test void decisionCombinesBoundedNotesOrganEvidenceAndRenalGuideline() {
+    var config=props(true,url(),"fast-m","reason-m","",2000,4);config.noteReviewEnabled=true;
+    var service=service(config);
+    var source=mock(ClinicalNoteAiEvidence.class);
+    ObjectProvider<ClinicalNoteAiEvidence> notes=mock(ObjectProvider.class);when(notes.getIfAvailable()).thenReturn(source);
+    org.springframework.test.util.ReflectionTestUtils.setField(service,"noteEvidence",notes);
+    var packet=new ClinicalNoteAiEvidence.Packet();packet.facts.add(new String[]{"病程片段","合成片段：既往肾功能异常，当前基线尚未确认。"});
+    packet.sources.add(Map.of("ref","病程片段1","snapshotId","internal-note-id"));when(source.collect(any(),any())).thenReturn(packet);
+    var multi=mock(org.icu.sepsis.deterioration.DeteriorationService.class);
+    ObjectProvider<org.icu.sepsis.deterioration.DeteriorationService> organs=mock(ObjectProvider.class);when(organs.getIfAvailable()).thenReturn(multi);
+    org.springframework.test.util.ReflectionTestUtils.setField(service,"deterioration",organs);
+    when(multi.read(any(),any())).thenReturn(Map.of("summary","单系统异常","organs",List.of(Map.of("label","肾脏","detail","肌酐变化待复核")),"aki",Map.of("detail","肌酐变化候选异常","urineReason","连续尿量不完整")));
+    models.put("reason-m",req->ok("{\"assessment\":[{\"text\":\"需联合复核肾脏证据\",\"refs\":[\"E1\"]}]}"));
+    var result=service.brief(patient(),"decision","doctor",true);
+    assertEquals("ok",result.get("status"));
+    String sent=requests.toString();assertTrue(sent.contains("合成片段"));assertTrue(sent.contains("肌酐变化候选异常"));assertTrue(sent.contains("NICE NG148"));assertFalse(sent.contains("internal-note-id"));
+    assertEquals("bm25",((Map<?,?>)result.get("retrieval")).get("mode"));
+    assertTrue(((List<Map<String,Object>>)result.get("knowledge")).stream().anyMatch(k->"nice-ng148-aki".equals(k.get("docId"))));
+    verify(source).collect(any(),eq("doctor"));
+  }
+
+  @Test void decisionStatesUnavailableNotesAndStillReviewsStructuredFacts() {
+    var config=props(true,url(),"fast-m","reason-m","",2000,4);config.noteReviewEnabled=true;var service=service(config);
+    var source=mock(ClinicalNoteAiEvidence.class);ObjectProvider<ClinicalNoteAiEvidence> notes=mock(ObjectProvider.class);when(notes.getIfAvailable()).thenReturn(source);
+    org.springframework.test.util.ReflectionTestUtils.setField(service,"noteEvidence",notes);when(source.collect(any(),any())).thenThrow(new IllegalStateException("synthetic failure"));
+    models.put("reason-m",req->ok("{\"assessment\":[{\"text\":\"需核对当前结构化证据\",\"refs\":[\"E1\"]}]}"));
+    assertEquals("ok",service.brief(patient(),"decision","doctor",true).get("status"));
+    assertTrue(requests.toString().contains("病程来源暂不可用"));
   }
 
   // ---------------------------------------------------------------- v2 kinds
@@ -458,4 +516,16 @@ class AiAssistServiceTest {
  @Test void noteReviewWithoutReadableSourcesDoesNotInvokeModel(){var config=props(true,url(),"fast-m","reason-m","",2000,4);config.noteReviewEnabled=true;var service=service(config);var source=mock(ClinicalNoteAiEvidence.class);ObjectProvider<ClinicalNoteAiEvidence> provider=mock(ObjectProvider.class);when(provider.getIfAvailable()).thenReturn(source);org.springframework.test.util.ReflectionTestUtils.setField(service,"noteEvidence",provider);when(source.collect(any(),eq("doctor"))).thenReturn(new ClinicalNoteAiEvidence.Packet());ApiException failure=assertThrows(ApiException.class,()->service.brief(patient(),"note_review","doctor",true));assertTrue(failure.getMessage().contains("病程"));assertTrue(requests.isEmpty());}
  @Test void screeningAiReceivesBedsideComponentScoresTimesAndUnknownsWithoutChangingRules(){var p=patient();p.admittedAt=now.minusSeconds(86400);p.birthDate=LocalDate.of(1980,1,1);List<Observation> rows=new ArrayList<>();for(String c:List.of("SBP_NIBP","HR","RR","TEMP","AVPU")){double v=c.equals("SBP_NIBP")?95:c.equals("HR")?115:c.equals("RR")?22:37;String unit=c.equals("SBP_NIBP")?"mmHg":c.equals("HR")?"bpm":c.equals("RR")?"/min":c.equals("TEMP")?"°C":"AVPU";var o=obs(c,v,unit,now.minusSeconds(60));o.patientId=p.id;o.encounterId=p.encounterId;o.department=p.department;o.sourceSystem="SmartCare.bedside";if(c.equals("TEMP")){o.eventTime=now.minusSeconds(10800);o.ingestTime=o.eventTime;}if(c.equals("AVPU")){o.value=null;o.text="清醒";}rows.add(o);}when(provider.observations(anyString(),anyString(),any(),any())).thenReturn(rows);models.put("fast-m",req->ok("{\"screen\":[{\"text\":\"需床旁复评并核对感染线索\",\"refs\":[\"E1\"]}]}"));var svc=service(props(true,url(),"fast-m","reason-m","",2000,4));var result=svc.brief(p,"screening","doctor",true);assertEquals("ok",result.get("status"));String request=requests.toString();assertTrue(request.contains("MEWS 总分 5"));assertTrue(request.contains("是否沿用旧体温 是"));assertTrue(request.contains("分项得分"));assertTrue(request.contains("记录时间"));assertFalse(request.contains("rec-55512345678"));assertEquals(5,rows.size());}
  @Test void decisionUsesReasoningModelAndStatesMissingNotes(){models.put("reason-m",req->ok("{\"assessment\":[{\"text\":\"需核对感染与灌注证据\",\"refs\":[\"E1\"]}]}"));var svc=service(props(true,url(),"fast-m","reason-m","",2000,4));var result=svc.brief(patient(),"decision","doctor",true);assertEquals("ok",result.get("status"));assertEquals("reasoning",result.get("modelRole"));assertTrue(requests.toString().contains("本次未纳入病程片段"));assertTrue(((List<?>)result.get("noteSources")).isEmpty());}
+
+ @Test void organFactTimesHaveExplicitLocalOffsetInsteadOfUnlabelledUtc(){var service=service(props(false,"","","","",1000,2));assertEquals("2026-11-19T16:00:00+08:00",service.factTime(Instant.parse("2026-11-19T08:00:00Z")));assertEquals("时间未确认",service.factTime("unmapped"));}
+
+ @Test void renalUnionAndHourlyWindowTimesAndReferenceLevelReachAiFacts(){var svc=service(props(false,"","","","",1000,2));var facts=new ArrayList<String[]>();var window=Map.of("hours",12,"coveredHours",12,"firstHourLabel",Instant.parse("2026-11-20T00:00:00Z"),"lastHourLabel",Instant.parse("2026-11-20T11:00:00Z"),"totalMl",120,"weightKg",70,"mlKgHour",.142857,"stageReference",2);var renal=Map.of("detail","肌酐不足","urineReason","尿量候选","combined",Map.of("detail","任一路径候选需联合复核"),"urine",Map.of("detail","尿量候选","basis","逐小时记录","windows",List.of(window)));svc.addDeteriorationFacts(facts,Map.of("summary","肾脏复核","aki",renal));var text=facts.stream().map(f->f[1]).collect(java.util.stream.Collectors.joining(" "));assertTrue(text.contains("任一路径候选需联合复核"));assertTrue(text.contains("2026-11-20T08:00:00+08:00"));assertTrue(text.contains("候选级别 2"));assertTrue(text.contains("非完整分期"));}
+
+  @Test void excludedSpecialtyEvidenceIsOnlySentAsALimitationWithoutRejectedValuesOrReferences(){
+    var service=service(props(true,url(),"fast-m","reason-m","",2000,4));var facts=new ArrayList<String[]>();
+    var module=Map.of("label","CAM-ICU谵妄筛查","detail","资料不足","reviewIssues",List.of(Map.of("fieldLabel","RASS","message","复核时间不在本次有效窗口，未用于研判","value",-4,"reference","private-source-reference")));
+    service.addDeteriorationFacts(facts,Map.of("summary","证据待核对","specialty",Map.of("modules",List.of(module))));
+    String text=facts.stream().map(f->f[0]+f[1]).collect(java.util.stream.Collectors.joining());
+    assertTrue(text.contains("专项证据限制"));assertTrue(text.contains("未用于研判"));assertFalse(text.contains("private-source-reference"));assertFalse(text.contains("-4"));
+  }
 }

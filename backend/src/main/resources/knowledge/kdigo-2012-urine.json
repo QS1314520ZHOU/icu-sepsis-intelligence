@@ -1,0 +1,38 @@
+{
+  "docId": "kdigo-2012-urine",
+  "title": "KDIGO 2012 AKI肌酐与尿量路径",
+  "source": "KDIGO Clinical Practice Guideline for Acute Kidney Injury. Kidney Int Suppl. 2012;2:1–138. Table 2.",
+  "url": "https://kdigo.org/wp-content/uploads/2019/01/KDIGO-2012-AKI-Guideline-English.pdf",
+  "version": "2012-aki-summary-2",
+  "category": "international",
+  "status": "active",
+  "applicableScope": "成人尿量候选复核；仅尿量路径分层，非完整AKI诊断或分期。",
+  "chunks": [
+    {
+      "id": "kdigo12-hourly-urine",
+      "section": "Table 2 尿量分层",
+      "strength": "定义与分层摘要，未分级",
+      "tags": [
+        "AKI",
+        "尿量",
+        "连续小时",
+        "体重",
+        "分层"
+      ],
+      "text": "KDIGO 2012尿量分层：低于0.5 ml/kg/h持续6–12小时为1级参考；持续至少12小时为2级参考；低于0.3 ml/kg/h至少24小时，或无尿至少12小时为3级参考。必须有连续覆盖和适用体重；缺记录不等于无尿，尿量单路径不替代完整临床评估。"
+    },
+    {
+      "id": "kdigo12-creatinine-staging",
+      "section": "Table 2 成人肌酐与RRT分期参考",
+      "strength": "定义与分层摘要，未分级",
+      "tags": [
+        "AKI",
+        "分期",
+        "稳定基线",
+        "RRT",
+        "肌酐"
+      ],
+      "text": "成人AKI肌酐分期需确认急性改变及基线。肌酐至少升高26.5 μmol/L或为基线1.5倍可提供1期依据；2倍为2期参考；3倍、急性升至至少353.6 μmol/L或因本次AKI启动RRT可提供3期依据。与尿量取较高参考，既往维持透析和未知基线不得机械套用。"
+    }
+  ]
+}

@@ -10,7 +10,7 @@ const units:Record<string,string>={HR:'bpm',RR:'/min',SPO2:'%',TEMP:'°C',GCS:'s
 const ranges:Record<string,[number,number]>={HR:[10,300],RR:[1,100],SPO2:[0,100],TEMP:[25,45],GCS:[3,15],LACTATE:[0,40]};
 export const presets:Record<string,string[]>={circulation:['MAP_IBP','MAP_NIBP','HR','LACTATE'],respiratory:['RR','SPO2','PF_RATIO'],infection:['TEMP','HR','LACTATE','WBC','CRP','PCT']};
 function pressureName(code:string){const p=/^(MAP|SBP|DBP)(?:_(IBP|NIBP))?$/.exec(code);return p?({MAP:'平均动脉压',SBP:'收缩压',DBP:'舒张压'} as Record<string,string>)[p[1]]+(p[2]==='IBP'?'（有创）':p[2]==='NIBP'?'（无创）':''):'';}
-export const metricName=(code:string)=>({HR:'心率',RR:'呼吸频率',TEMP:'体温',SPO2:'血氧饱和度',GCS:'意识评分',LACTATE:'乳酸',PF_RATIO:'氧合指数 P/F',PLT:'血小板',TBIL:'总胆红素',CREA:'肌酐',PLATELET:'血小板',PLATELETS:'血小板',BILIRUBIN:'胆红素',CREATININE:'肌酐',WBC:'白细胞',CRP:'C反应蛋白',PCT:'降钙素原',PH:'pH',PAO2:'氧分压',PACO2:'二氧化碳分压'} as Record<string,string>)[code]||pressureName(code)||code;
+export const metricName=(code:string)=>({FIO2:'吸入氧浓度',PEEP_TOTAL:'总PEEP',PEEP_SET:'PEEP设置值',PEEP_MEASURED:'PEEP测量值',RASS:'镇静评分RASS',WEIGHT:'体重',HR:'心率',RR:'呼吸频率',TEMP:'体温',SPO2:'血氧饱和度',GCS:'意识评分',LACTATE:'乳酸',PF_RATIO:'氧合指数 P/F',PLT:'血小板',TBIL:'总胆红素',CREA:'肌酐',PLATELET:'血小板',PLATELETS:'血小板',BILIRUBIN:'胆红素',CREATININE:'肌酐',WBC:'白细胞',CRP:'C反应蛋白',PCT:'降钙素原',PH:'pH',PAO2:'氧分压',PACO2:'二氧化碳分压'} as Record<string,string>)[code]||pressureName(code)||code;
 /** Rendering reduction only. Retains the first/last and both extrema of every occupied bin. */
 export function envelope(points:Observation[],from:number,to:number,bins=240):Observation[]{
  if(points.length<=bins*2)return points;

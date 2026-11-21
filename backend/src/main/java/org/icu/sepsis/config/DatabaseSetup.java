@@ -57,6 +57,8 @@ public class DatabaseSetup implements ApplicationRunner {
                   .on("department", Sort.Direction.ASC)
                   .on("createdAt", Sort.Direction.DESC));
     }
+    db.indexOps(org.icu.sepsis.deterioration.SpecialtyEvidenceService.Record.class).ensureIndex(new Index().on("department",Sort.Direction.ASC).on("patientId",Sort.Direction.ASC).on("encounterId",Sort.Direction.ASC).on("module",Sort.Direction.ASC).on("sequence",Sort.Direction.DESC).on("createdAt",Sort.Direction.DESC));
+    db.indexOps(org.icu.sepsis.deterioration.ReviewedLabEvidenceService.Review.class).ensureIndex(new Index().on("department",Sort.Direction.ASC).on("patientId",Sort.Direction.ASC).on("encounterId",Sort.Direction.ASC).on("sequence",Sort.Direction.DESC).on("createdAt",Sort.Direction.DESC).on("_id",Sort.Direction.DESC));
     db.indexOps(org.icu.sepsis.notes.ClinicalNoteSnapshot.class).ensureIndex(new Index().on("department",Sort.Direction.ASC).on("patientId",Sort.Direction.ASC).on("encounterId",Sort.Direction.ASC).on("versionKey",Sort.Direction.ASC).unique());
     db.indexOps(org.icu.sepsis.notes.ClinicalNoteSnapshot.class).ensureIndex(new Index().on("department",Sort.Direction.ASC).on("patientId",Sort.Direction.ASC).on("encounterId",Sort.Direction.ASC).on("syncedAt",Sort.Direction.DESC).on("_id",Sort.Direction.DESC));
     db.indexOps(org.icu.sepsis.notes.ClinicalNoteSyncState.class).ensureIndex(new Index().on("department",Sort.Direction.ASC).on("patientId",Sort.Direction.ASC).on("encounterId",Sort.Direction.ASC).unique());

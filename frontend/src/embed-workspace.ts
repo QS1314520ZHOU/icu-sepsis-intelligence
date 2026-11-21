@@ -1,3 +1,4 @@
+import {UserMessageError} from './user-message-error';
 import {TimelineWorkspace} from './timeline-workspace';
 import {BundleWorkspace} from './bundle-workspace';
 import {EvidenceWorkspace} from './evidence-workspace';
@@ -358,7 +359,7 @@ export class EmbedWorkspace implements OnInit, OnDestroy {
       this.api.roles = s.roles;
       const p = await this.api.get<Patient>('/patients/' + encodeURIComponent(s.patientId));
       if (generation !== this.generation) return;
-      if (p.id !== patientId || p.encounterId !== s.encounterId) throw new Error('患者上下文不一致');
+      if (p.id !== patientId || p.encounterId !== s.encounterId) throw new UserMessageError('患者上下文不一致');
       this.patient = p; this.protocol = 'smartcare';
       if (!samePatient) { this.lastStatus = null; this.pendingCount = 0; }
       this.view = samePatient ? this.view : 'risk';
@@ -417,7 +418,7 @@ export class EmbedWorkspace implements OnInit, OnDestroy {
       this.api.roles = s.roles;
       const p = await this.api.get<Patient>('/patients/' + encodeURIComponent(s.patientId));
       if (generation !== this.generation) return;
-      if (p.id !== m.payload!.patientId || p.encounterId !== m.payload!.encounterId) throw new Error('患者上下文不一致');
+      if (p.id !== m.payload!.patientId || p.encounterId !== m.payload!.encounterId) throw new UserMessageError('患者上下文不一致');
       this.patient = p; this.protocol = 'secure'; this.lastStatus = null; this.pendingCount = 0;
       this.hostMrn = ''; this.hostGender = '';
       this.view = 'risk';

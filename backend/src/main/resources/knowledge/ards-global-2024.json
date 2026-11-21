@@ -1,0 +1,41 @@
+{
+  "docId": "ards-global-2024",
+  "title": "ARDS全球定义：氧合证据与诊断边界",
+  "version": "2024-summary-1",
+  "source": "Matthay MA, et al. A New Global Definition of Acute Respiratory Distress Syndrome. Am J Respir Crit Care Med. 2024;209:37–47. doi:10.1164/rccm.202303-0558WS",
+  "url": "https://doi.org/10.1164/rccm.202303-0558WS",
+  "category": "international",
+  "status": "active",
+  "applicableScope": "成人呼吸恶化复核参考；共识摘要，不自行赋予推荐强度或证据质量。",
+  "chunks": [
+    {
+      "id": "ards24-oxygenation",
+      "section": "氧合证据",
+      "strength": "共识定义摘要",
+      "tags": [
+        "氧合",
+        "呼吸支持",
+        "氧疗",
+        "ARDS",
+        "S/F",
+        "P/F",
+        "FiO2"
+      ],
+      "text": "全球定义允许特定呼吸支持背景下使用P/F或S/F评估低氧；S/F用于SpO₂不超过97%的情况。高饱和度时不能据此外推氧合程度；单个比值不是ARDS诊断。"
+    },
+    {
+      "id": "ards24-context",
+      "section": "联合诊断条件",
+      "strength": "共识定义摘要",
+      "tags": [
+        "ARDS",
+        "影像",
+        "起病时间",
+        "心源性",
+        "PEEP",
+        "呼吸支持"
+      ],
+      "text": "ARDS评估还需结合急性起病、影像双侧异常、病因与水肿解释及呼吸支持背景。缺少这些信息时，不能仅凭P/F或S/F自动确诊或分期。"
+    }
+  ]
+}

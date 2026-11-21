@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { acceptsBrief, hasContent, refTarget, statusNote, visibleItems, type AiBrief } from '../src/ai-assist.ts';
+import { guidelineGrade, acceptsBrief, hasContent, refTarget, statusNote, visibleItems, type AiBrief } from '../src/ai-assist.ts';
 
 const base: AiBrief = {
   interactionId: 'ai-1', patientId: 'p1', encounterId: 'e1', kind: 'summary', status: 'ok', message: '', model: 'm', modelRole: 'fast',
@@ -62,4 +62,13 @@ test('draft staleness follows page read time and invalid times never claim fresh
   assert.equal(isDraftOutdated('2026-05-01T00:00:00Z','2026-05-01T00:01:00Z'),true);
   assert.equal(isDraftOutdated('2026-05-01T00:00:00Z','2026-05-01T00:00:00Z'),false);
   assert.equal(isDraftOutdated(null,'invalid'),false);
+});
+
+test('guideline strength and evidence quality remain distinct without inventing grades', () => {
+ const k=base.knowledge[0];
+ assert.deepEqual(guidelineGrade({...k,strength:'弱推荐，极低质量证据'}),{label:'条件性推荐（弱推荐）',quality:'极低质量证据',conditional:true});
+ assert.deepEqual(guidelineGrade({...k,strength:'强推荐，低质量证据'}),{label:'强推荐',quality:'低质量证据',conditional:false});
+ assert.equal(guidelineGrade({...k,strength:'指南建议摘要'}).label,'分级未注明');
+ assert.equal(guidelineGrade({...k,strength:'强推荐'}).quality,'证据质量未注明');
+ assert.equal(guidelineGrade({...k,strength:'最佳实践声明'}).label,'最佳实践声明');
 });

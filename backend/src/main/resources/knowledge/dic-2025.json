@@ -1,0 +1,23 @@
+{
+  "docId": "dic-2025",
+  "title": "ISTH 2025显性DIC评分参考",
+  "source": "ISTH 2025显性DIC评分参考；原始发布机构/作者来源见链接",
+  "version": "2025",
+  "url": "https://doi.org/10.1016/j.jtha.2025.03.038",
+  "category": "international",
+  "status": "active",
+  "chunks": [
+    {
+      "id": "dic-2025-context",
+      "section": "完整证据与解释边界",
+      "strength": "规范/定义摘要，未自行分级",
+      "tags": [
+        "DIC",
+        "凝血",
+        "PT",
+        "血小板"
+      ],
+      "text": "基础疾病与完整检验是评分前提。血小板、PT较对照延长秒数、D二聚体相对正常上限倍数及纤维蛋白原需联合；不可用INR代替PT延长秒数，低分不排除早期DIC。"
+    }
+  ]
+}

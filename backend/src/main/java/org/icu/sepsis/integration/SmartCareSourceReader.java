@@ -50,6 +50,12 @@ public class SmartCareSourceReader {
           Map.entry("param_ibp_s", "SBP_IBP"),
           Map.entry("param_ibp_d", "DBP_IBP"),
           Map.entry("param_score_gcs_obs", "GCS"),
+          Map.entry("param_score_rass_obs", "RASS"),
+          Map.entry("param_FiO2", "FIO2"),
+          Map.entry("param_vent_pause_PEEP_TOT", "PEEP_TOTAL"),
+          Map.entry("param_vent_peep", "PEEP_SET"),
+          Map.entry("param_vent_measure_peep", "PEEP_MEASURED"),
+          Map.entry("param_体重", "WEIGHT"),
           Map.entry("param_niaoLiang", "URINE_OUTPUT"),
           Map.entry("param_urine", "URINE_OUTPUT"));
 
@@ -176,13 +182,20 @@ public class SmartCareSourceReader {
       if (parameter == null) continue;
       Double value = parseDouble(d.get("strVal"));
       if (value == null && "GCS".equals(parameter)) value = parseGcs(d.get("strVal"));
-      if (value == null && !java.util.Set.of("AVPU","HR","RR","TEMP","SBP","SBP_IBP","SBP_NIBP").contains(parameter)) continue;
+      if (value == null && !java.util.Set.of("AVPU","HR","RR","TEMP","SBP","SBP_IBP","SBP_NIBP","URINE_OUTPUT","RASS","FIO2","WEIGHT","PEEP_SET","PEEP_MEASURED","PEEP_TOTAL").contains(parameter)) continue;
       Instant event = toInstant(d.get("time"));
       if (event == null) continue;
       Observation o = observation(hostPatientId, encounterId, department, parameter, value,
           unitFor(parameter), event, null,
           "SmartCare.bedside", String.valueOf(d.get("_id")));
       o.sourceParameterCode = code;
+      if(java.util.Set.of("FIO2","PEEP_SET","PEEP_MEASURED","PEEP_TOTAL","WEIGHT").contains(parameter)) {
+        Document definition=parameterDefinition(code);
+        o.unit=dictionaryUnit(definition);
+        o.unitBasis=o.unit==null?"unknown":"parameter_dictionary";
+        if(o.unit==null){o.clinicalUse="context_only";o.qualityStatus="unverified";o.qualityNote="观察项已取得，单位待核对";}
+      }
+      if("RASS".equals(parameter)){o.unit="score";if(value==null||value< -5||value>4||value!=Math.rint(value)){o.qualityStatus="invalid";o.qualityNote="RASS超出有效整数范围";}}
       if(value==null&&!"AVPU".equals(parameter)){o.qualityStatus="invalid";o.text=d.getString("strVal");o.qualityNote="最新来源值不是可用于计分的精确数字";}
       if("AVPU".equals(parameter)){o.value=null;o.text=d.getString("strVal");o.unit="AVPU";}
       o.measurementChannel = code.startsWith("param_nibp_") ? "NIBP" : code.startsWith("param_ibp_") ? "IBP" : null;
@@ -603,7 +616,8 @@ public class SmartCareSourceReader {
   }
   private static class GasDefinition {final java.time.Instant at=java.time.Instant.now();final Document value;GasDefinition(Document value){this.value=value;}}
   private final java.util.Map<String,GasDefinition> gasDefinitions=new java.util.concurrent.ConcurrentHashMap<>();
-  private Document parameterDefinition(String code){GasDefinition cached=gasDefinitions.get(code);if(cached!=null&&cached.at.plusSeconds(300).isAfter(java.time.Instant.now()))return cached.value;try{Query q=Query.query(org.springframework.data.mongodb.core.query.Criteria.where("code").is(code).and("valid").is(true));q.fields().include("unit").include("floatCount");Document value=smartcare.findOne(q,Document.class,"configParam");gasDefinitions.put(code,new GasDefinition(value));return value;}catch(RuntimeException ignored){gasDefinitions.put(code,new GasDefinition(null));return null;}}
+  private Document parameterDefinition(String code){GasDefinition cached=gasDefinitions.get(code);if(cached!=null&&cached.at.plusSeconds(300).isAfter(java.time.Instant.now()))return cached.value;try{Query q=Query.query(org.springframework.data.mongodb.core.query.Criteria.where("code").is(code).and("valid").is(true));q.fields().include("unit").include("unitCode").include("floatCount");Document value=smartcare.findOne(q,Document.class,"configParam");gasDefinitions.put(code,new GasDefinition(value));return value;}catch(RuntimeException ignored){gasDefinitions.put(code,new GasDefinition(null));return null;}}
+  private static String dictionaryUnit(Document definition){if(definition==null)return null;Object explicit=definition.get("unit");if(explicit instanceof String&&!((String)explicit).isBlank())return (String)explicit;return "unit_cmH2O".equals(definition.get("unitCode"))?"cmH2O":null;}
   public String bloodGasUnit(Document point,String code){Object own=point.get("unit");if(own instanceof String&&!((String)own).isBlank())return (String)own;Document definition=parameterDefinition(code);return definition!=null&&definition.get("unit") instanceof String?(String)definition.get("unit"):null;}
   public static Double bloodGasNumber(Document point){Double numeric=parseDouble(point.get("fVal")),text=parseDouble(point.get("strVal"));Object raw=point.get("strVal");if(raw instanceof String&&!((String)raw).isBlank()&&text==null)return null;if(numeric==null)return text;if(text==null)return numeric;return Float.compare(numeric.floatValue(),text.floatValue())==0?text:null;}
 }

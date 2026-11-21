@@ -1,0 +1,22 @@
+{
+  "docId": "cam-icu",
+  "title": "CAM-ICU规范评估",
+  "source": "CAM-ICU规范评估；原始发布机构/作者来源见链接",
+  "version": "training-summary-2016",
+  "url": "https://www.icudelirium.org/medical-professionals/delirium/monitoring-delirium-in-the-icu",
+  "category": "international",
+  "status": "active",
+  "chunks": [
+    {
+      "id": "cam-icu-context",
+      "section": "完整证据与解释边界",
+      "strength": "规范/定义摘要，未自行分级",
+      "tags": [
+        "CAM-ICU",
+        "谵妄",
+        "RASS"
+      ],
+      "text": "CAM-ICU需规范床旁评估急性改变/波动、注意力、意识水平及思维，按要素1和2加要素3或4的组合解释。深镇静/昏迷不可评估时不能记录阴性，GCS不代替注意力测试。"
+    }
+  ]
+}

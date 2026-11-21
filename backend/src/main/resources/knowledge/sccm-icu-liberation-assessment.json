@@ -1,0 +1,25 @@
+{
+  "docId": "sccm-icu-liberation-assessment",
+  "title": "SCCM ICU Liberation：镇静与谵妄评估",
+  "version": "web-summary-20261119-1",
+  "source": "Society of Critical Care Medicine. ICU Liberation Bundle (A–F), C and D elements.",
+  "url": "https://www.sccm.org/clinical-resources/iculiberation-home/abcdef-bundles",
+  "category": "international",
+  "status": "active",
+  "applicableScope": "成人ICU镇静上下文复核参考，非谵妄诊断规则。",
+  "chunks": [
+    {
+      "id": "liberation-rass",
+      "section": "镇静与谵妄分开评估",
+      "strength": "官方资源摘要",
+      "tags": [
+        "RASS",
+        "镇静",
+        "GCS",
+        "意识",
+        "谵妄"
+      ],
+      "text": "RASS和SAS用于评估镇静深度；谵妄需独立评估。不能把RASS或GCS单项直接作为感染相关脑病或谵妄确诊依据。"
+    }
+  ]
+}

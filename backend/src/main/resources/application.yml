@@ -131,6 +131,8 @@ app:
     # 结果缓存（分钟）：病人数据与知识片段未变时复用上次成功结果；0 = 关闭。界面“重新生成”跳过缓存。
     cache-minutes: ${AI_CACHE_MINUTES:30}
     knowledge-dir: ${AI_KNOWLEDGE_DIR:}
+    # Only guideline vectors are persisted; model/source revisions invalidate stale indices.
+    vector-cache-dir: ${AI_VECTOR_CACHE_DIR:./.runtime/guideline-vectors}
     time-zone: ${AI_TIME_ZONE:Asia/Shanghai}
 
   # 病程来源快照独立长期保存；默认不接入医院源接口，不改变 AI_STORE_PROMPT。
