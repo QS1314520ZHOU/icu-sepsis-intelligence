@@ -58,6 +58,7 @@ const units: Record<string, string> = { MAP: 'mmHg', SBP: 'mmHg', LACTATE: 'mmol
 @Component({
   selector: 'sepsis-panel', standalone: true, imports: [DataQualityPanel,RenalMedicationPanel,DeteriorationPanel,AiDecisionPanel,ClinicalPathway,MewsPanel,UnverifiedReports,CommonModule, FormsModule, ClinicalTrends, UiIcon, Icu05Card, AiAssistCard],
   template: `<section class="clinical-review sx-overview" aria-label="患者脓毒症概览" [attr.aria-busy]="loading" [class.nurse-first]="nurseFirst">
+    @if(data?.available){@defer(on immediate){<deterioration-panel [patientId]="patientId" [encounterId]="encounterId" [asOf]="data!.asOf" (evidenceReviewed)="onEvidenceReviewed()"/>}}
     <div class="sx-workbench-bar" aria-label="工作台导航">
       <div class="sx-workbench-title"><ui-icon name="activity"/><strong>脓毒症工作台</strong><span>患者评估与处置</span></div>
       <nav aria-label="概览快捷入口"><button type="button" (click)="overviewOnly ? openBundle.emit() : navigateStep('bundle')"><ui-icon name="clipboard"/>Bundle 记录</button><button type="button" (click)="openTrends.emit()"><ui-icon name="chart"/>趋势查看</button><button type="button" class="sx-ai-entry" *ngIf="canAssist" (click)="overviewOnly ? openAssistant.emit() : openAi()"><ui-icon name="file"/>AI 辅助</button></nav>
@@ -103,7 +104,6 @@ const units: Record<string, string> = { MAP: 'mmHg', SBP: 'mmHg', LACTATE: 'mmol
     @if(data?.available){@defer(on immediate){<clinical-pathway [review]="data" [bundle]="icu05" [pending]="alertTotal" (navigate)="overviewOnly && $event==='bundle' ? openBundle.emit() : navigateStep($event)"/>}}
     @if(data?.available){@defer(on immediate){<data-quality-panel [patientId]="patientId" [encounterId]="encounterId" [asOf]="data!.asOf"/>}}
     @if(data?.available && api.has('DOCTOR') && !nurseFirst){@defer(on immediate){<renal-medication-panel [patientId]="patientId" [encounterId]="encounterId" [asOf]="data!.asOf"/>}}
-    @if(data?.available){@defer(on immediate){<deterioration-panel [patientId]="patientId" [encounterId]="encounterId" [asOf]="data!.asOf" (evidenceReviewed)="onEvidenceReviewed()"/>}}
     @if(data?.available && api.has('DOCTOR') && !nurseFirst){@defer(on immediate){<ai-decision-panel [patientId]="patientId" [encounterId]="encounterId" [review]="data" [evidenceRevision]="evidenceRevision"/>}}
     <section class="sx-vitals" *ngIf="data?.available && hasAnyValue" aria-label="关键指标">
       <button class="sx-tile" *ngFor="let t of tiles" [title]="t.code === 'LACTATE' ? '概览取最新可见记录；同一时点优先显示单位明确的记录。K1 为独立窗口最高值，目前窗口待确认。' : t.time ? '记录于 ' + (t.time | date:'MM-dd HH:mm') + ' · ' + ago(t.time) : ''" [attr.data-level]="t.level" [class.candidate]="!t.evidence && t.candidate" (click)="selected = t.evidence || t.candidate" [disabled]="!t.evidence && !t.candidate" [attr.aria-label]="t.label + ' ' + (t.value ?? t.candidate?.value ?? '无记录')">

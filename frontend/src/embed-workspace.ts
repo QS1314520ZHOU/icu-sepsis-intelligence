@@ -176,11 +176,11 @@ export class EmbedWorkspace implements OnInit, OnDestroy {
   private applying = false;
   tabs = [
     { key: 'risk', label: '概览' },
+    { key: 'screening', label: '科室筛查' },
     { key: 'trends', label: '组合趋势' },
     { key: 'records', label: '病程与依据' },
     { key: 'bundle', label: 'Bundle 复核' },
     { key: 'alerts', label: '预警处理' },
-    { key: 'screening', label: '全科筛查' },
     { key: 'ward', label: '科室质控' },
   ];
   /** The department board is for doctors / quality staff (director view); nurses keep the three patient tabs. */
@@ -366,7 +366,9 @@ export class EmbedWorkspace implements OnInit, OnDestroy {
       if (p.id !== patientId || p.encounterId !== s.encounterId) throw new UserMessageError('患者上下文不一致');
       this.patient = p; this.protocol = 'smartcare';
       if (!samePatient) { this.lastStatus = null; this.pendingCount = 0; }
-      this.view = samePatient ? this.view : 'risk';
+      // Doctors land on the department-wide worklist first; patient-level assessment stays one click away.
+      const canScreenDepartment = s.roles.includes('ROLE_DOCTOR') || s.roles.includes('ROLE_QUALITY');
+      this.view = samePatient ? this.view : canScreenDepartment ? 'screening' : 'risk';
       this.stopHandshake();
       this.timer = setTimeout(
         () => {
