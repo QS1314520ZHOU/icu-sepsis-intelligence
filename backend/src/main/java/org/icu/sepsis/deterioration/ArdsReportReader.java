@@ -28,13 +28,15 @@ public class ArdsReportReader {
     }catch(RuntimeException e){return Map.of("status","unavailable","reason","检查报告源暂不可用","reports",List.of());}
   }
   private ReportCache loadReports(Instant now){
-    Instant from=now.minus(Duration.ofDays(7));var grouped=new HashMap<String,List<Map<String,Object>>>();
+    Instant from=now.minus(Duration.ofDays(7));var grouped=new HashMap<String,List<Map<String,Object>>>();var seenByPid=new HashMap<String,Set<String>>();
     var query=new Document("reportTime",new Document("$gte",Date.from(from)).append("$lte",Date.from(now))).append("$or",List.of(new Document("examName",new Document("$regex","胸部|肺").append("$options","i")),new Document("title",new Document("$regex","胸部|肺").append("$options","i")),new Document("bodyParts",new Document("$regex","胸部|肺").append("$options","i"))));
     MongoCollection<Document> c=dataCenter.getCollection("VI_ICU_REPORT");
     for(Document d:c.find(query).projection(new Document("_id",0).append("pid",1).append("examName",1).append("title",1).append("bodyParts",1).append("reportDesc",1).append("conclusion",1).append("examTime",1).append("reportTime",1)).sort(new Document("reportTime",-1)).limit(10000)){
       String pid=d.getString("pid");if(pid==null||pid.isBlank())continue;
       var row=new LinkedHashMap<String,Object>();row.put("examName",first(d,"examName","title"));row.put("bodyParts",d.getString("bodyParts"));row.put("reportDesc",clip(d.getString("reportDesc"),300));row.put("conclusion",clip(d.getString("conclusion"),500));row.put("examTime",d.get("examTime"));row.put("reportTime",d.get("reportTime"));
       String text=(Objects.toString(d.getString("reportDesc"),"")+" "+Objects.toString(d.getString("conclusion"),"")).toLowerCase(Locale.ROOT);row.put("bilateralImagingHint",text.matches("(?s).*(双肺|双侧肺|两肺).*(浸润|渗出|磨玻璃|实变|炎症|阴影|病灶).*"));
+      String fingerprint=Objects.toString(row.get("examName"),"")+"|"+Objects.toString(row.get("examTime"),"")+"|"+Objects.toString(row.get("reportTime"),"")+"|"+Objects.toString(row.get("conclusion"),"")+"|"+Objects.toString(row.get("reportDesc"),"");
+      if(!seenByPid.computeIfAbsent(pid,k->new HashSet<>()).add(fingerprint))continue;
       var rows=grouped.computeIfAbsent(pid,k->new ArrayList<>());if(rows.size()<20)rows.add(row);
     }
     return new ReportCache(now,grouped);
