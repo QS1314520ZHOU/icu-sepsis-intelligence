@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 
 @Service
 public class QueryService {
+  @org.springframework.beans.factory.annotation.Autowired private org.springframework.beans.factory.ObjectProvider<org.icu.sepsis.integration.SmartCareSourceReader> patientSource;
   private final Store s;
 
   private final org.icu.sepsis.domain.ClinicalRules rules;
@@ -112,6 +113,16 @@ public class QueryService {
   }
 
   public Map<String, Object> patients(String search, int p, int z) {
+    var reader=patientSource==null?null:patientSource.getIfAvailable();
+    if(reader!=null){
+      var grant=org.icu.sepsis.embed.EmbedAccess.current();
+      if(grant!=null&&grant.patientId!=null){try{var patient=reader.loadPatientForDept(grant.patientId,grant.department==null?s.department:grant.department);if(search!=null&&!search.isBlank()&&!Objects.toString(patient.label,"").toLowerCase(Locale.ROOT).contains(search.toLowerCase(Locale.ROOT))&&!Objects.toString(patient.bed,"").toLowerCase(Locale.ROOT).contains(search.toLowerCase(Locale.ROOT)))return Views.map("items",List.of(),"total",0,"page",p,"size",z);return Views.map("items",p==0?List.of(patientWorkspace(patient)):List.of(),"total",p==0?1:0,"page",p,"size",z);}catch(RuntimeException denied){return Views.map("items",List.of(),"total",0,"page",p,"size",z);}}
+      String dept=grant!=null&&grant.department!=null?grant.department:s.department;
+      var roster=reader.listByDept(dept,p,z,search);
+      var items=new ArrayList<Map<String,Object>>();
+      for(var item:roster.items){var patient=reader.loadPatientForDept(String.valueOf(item.get("id")),dept);items.add(patientWorkspace(patient));}
+      return Views.map("items",items,"total",roster.total,"page",p,"size",z);
+    }
     Criteria c = s.scope();
     if (search != null && !search.isBlank())
       c.andOperator(
@@ -126,9 +137,11 @@ public class QueryService {
     Instant now = Instant.now();
     Map<String, Object> v = Views.patient(p);
     Map<String, Object> vitals = new LinkedHashMap<>();
+    var reader=patientSource==null?null:patientSource.getIfAvailable();
     // Bounded per-patient summaries. Current readings must pass the screening freshness contract.
-    List<Observation> observations =
-        s.db.find(
+    List<Observation> observations;boolean vitalsRead=true;
+    if(!p.simulated&&reader!=null){try{observations=reader.observations(p.id,p.encounterId,p.department,now.minus(Duration.ofHours(6)),now);}catch(RuntimeException unavailable){observations=List.of();vitalsRead=false;}}
+    else observations=s.db.find(
             Query.query(
                     s.scope()
                         .and("patientId")
@@ -154,6 +167,7 @@ public class QueryService {
                 .with(Sort.by(Sort.Direction.DESC, "createdAt")),
             Assessment.class);
     v.put("vitals", vitals);
+    v.put("vitalsReadStatus",vitalsRead?"available":"unavailable");
     v.put("latestAssessment", last == null ? null : Views.assessment(last));
     v.put("summaryAt", now);
     v.put("summaryLimitReached", observations.size() >= 1000);

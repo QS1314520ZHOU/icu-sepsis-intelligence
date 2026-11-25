@@ -4,6 +4,7 @@ import {BundleWorkspace} from './bundle-workspace';
 import {EvidenceWorkspace} from './evidence-workspace';
 import {PatientAssistant} from './patient-assistant';
 import { WardBoard } from './ward-board';
+import { DepartmentScreening } from './department-screening';
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { Component, inject, OnInit, OnDestroy, ViewChild, ViewEncapsulation } from '@angular/core';
@@ -45,7 +46,7 @@ interface HostPatientSession extends Session {
   standalone: true,
   encapsulation: ViewEncapsulation.None,
   styleUrl: './workspace.css',
-  imports: [CommonModule, Alerts, Bundles, SepsisPanel, UiIcon, WardBoard, TimelineWorkspace, BundleWorkspace, EvidenceWorkspace, PatientAssistant],
+  imports: [CommonModule, Alerts, Bundles, SepsisPanel, UiIcon, WardBoard, DepartmentScreening, TimelineWorkspace, BundleWorkspace, EvidenceWorkspace, PatientAssistant],
   template: ` <main class="icu-embed">
     <!-- 等待宿主 -->
     <section class="icu-embed-wait" *ngIf="!patient && !loading">
@@ -100,6 +101,7 @@ interface HostPatientSession extends Session {
         @if(view==='trends'){@defer(on immediate){<timeline-workspace [patientId]="p.id" [encounterId]="p.encounterId" (openEvidence)="openRecords()"/>}}
         @if(view==='records'){@defer(on immediate){<evidence-workspace [patientId]="p.id" [encounterId]="p.encounterId"/>}}
         @if(view==='bundle'){@defer(on immediate){<bundle-workspace [patientId]="p.id" [encounterId]="p.encounterId"/>}}
+        @if(view==='screening'){@defer(on immediate){<department-screening/>}}
         @if (view === 'ward') { @defer (on immediate) { <ward-board [currentPatientId]="p.id" /> } @placeholder { <p role="status">正在载入科室质控…</p> } }
         <ng-container *ngIf="view === 'alerts'">
           <header class="workspace-heading action-heading"><div><h1>预警与处置</h1><span>触发依据 → 医生复核 → 执行跟踪</span></div></header><nav class="action-tabs" aria-label="处理队列"><button [class.selected]="actionView==='alerts'" (click)="setActionView('alerts')">待复核预警</button><button [class.selected]="actionView==='tasks'" (click)="setActionView('tasks')">执行任务</button></nav>
@@ -127,7 +129,7 @@ export class EmbedWorkspace implements OnInit, OnDestroy {
   actionView:'alerts'|'tasks'='alerts';
   setActionView(value:'alerts'|'tasks'){if(this.dirty()||this.busy()){this.error='请先完成或取消当前操作。';return;}this.actionView=value;}
   openTasksView(){if(this.dirty()||this.busy()){this.error='请先完成或取消当前操作。';return;}this.setView('alerts');this.actionView='tasks';}
-  tabIcon(key:string) { return ({risk:'activity',records:'file',trends:'chart',bundle:'clipboard',alerts:'bell',ward:'chart'} as Record<string,string>)[key] || 'file'; }
+  tabIcon(key:string) { return ({risk:'activity',records:'file',trends:'chart',bundle:'clipboard',alerts:'bell',ward:'chart',screening:'activity'} as Record<string,string>)[key] || 'file'; }
   /** Status for the host's own patient list/badge. Counts that failed to load are sent as null, never 0. */
   onStatus(s: SepsisStatus) {
     if (!this.patient || s.patientId !== this.patient.id) return;
@@ -178,10 +180,11 @@ export class EmbedWorkspace implements OnInit, OnDestroy {
     { key: 'records', label: '病程与依据' },
     { key: 'bundle', label: 'Bundle 复核' },
     { key: 'alerts', label: '预警处理' },
+    { key: 'screening', label: '全科筛查' },
     { key: 'ward', label: '科室质控' },
   ];
   /** The department board is for doctors / quality staff (director view); nurses keep the three patient tabs. */
-  get visibleTabs() { return this.tabs.filter(t => t.key !== 'ward' || ((this.api.has('DOCTOR') || this.api.has('QUALITY')) && !this.api.nurseView)); }
+  get visibleTabs() { return this.tabs.filter(t => !['ward','screening'].includes(t.key) || ((this.api.has('DOCTOR') || this.api.has('QUALITY')) && !this.api.nurseView)); }
   /** 护士 / 医生视图：本机记住手动选择；未选择时按宿主登录账号（如「渝中(护士)」）推断。 */
   private viewAsKey = VIEW_AS_KEY;
   setViewAs(v: 'doctor' | 'nurse') {
@@ -197,7 +200,8 @@ export class EmbedWorkspace implements OnInit, OnDestroy {
     this.viewAsKey = id ? VIEW_AS_KEY + ':' + (h >>> 0).toString(36) : VIEW_AS_KEY;
     let stored: string | null = null;
     try { stored = localStorage.getItem(this.viewAsKey); } catch { /* ignore */ }
-    this.api.viewAs = stored === 'nurse' || stored === 'doctor' ? stored : hostAccountRole(account);
+    const hostRole = hostAccountRole(account);
+    this.api.viewAs = stored === 'nurse' || stored === 'doctor' ? stored : hostRole === 'nurse' ? 'nurse' : 'doctor';
     if (this.api.nurseView && this.view === 'ward') this.view = 'risk';
   }
   private listener = (event: MessageEvent) => void this.receive(event);
@@ -348,7 +352,7 @@ export class EmbedWorkspace implements OnInit, OnDestroy {
         await firstValueFrom(
           this.http.post<Envelope<HostPatientSession>>(
             '/embed-api/host-context?parentOrigin=' + encodeURIComponent(event.origin),
-            { patientId },
+            { patientId, account: hostAccountRole(msg.account) || 'nurse' },
           ),
         )
       ).data;

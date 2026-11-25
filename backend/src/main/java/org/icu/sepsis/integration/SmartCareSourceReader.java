@@ -6,6 +6,7 @@ import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.regex.Pattern;
 import org.bson.Document;
@@ -110,6 +111,13 @@ public class SmartCareSourceReader {
     return mapPatient(requireDocument(hostPatientId));
   }
 
+  public Patient loadPatientForDept(String hostPatientId,String deptCode) {
+    Document d=requireDocument(hostPatientId);
+    if(!Objects.equals(d.getString("deptCode"),deptCode)&&!Objects.equals(d.getString("deptCode2"),deptCode))
+      throw ApiException.notFound();
+    Patient p=mapPatient(d);p.department=deptCode;return p;
+  }
+
   public String hisPidOf(String hostPatientId) {
     Document doc =
         smartcare
@@ -122,11 +130,106 @@ public class SmartCareSourceReader {
     return hisPid == null || hisPid.isBlank() ? null : hisPid;
   }
 
+  /** ICU-08 reference-project denominator path: first 24h P/F mean, diagnosis gate, route and PEEP/flow. */
+  public Map<String,Object> icu08AdmissionEvidence(String hostPatientId,String deptCode) {
+    var out=new LinkedHashMap<String,Object>();out.put("source","icu-quality-dashboard ICU-08 (2026-10)");out.put("windowHours",24);out.put("status","unknown");
+    try {
+      Document patient=requireDocument(hostPatientId);if(!Objects.equals(patient.getString("deptCode"),deptCode)&&!Objects.equals(patient.getString("deptCode2"),deptCode)){out.put("reason","患者不在当前科室");return out;}
+      Instant admit=toInstant(patient.get("icuAdmissionTime"));if(admit==null)admit=toInstant(patient.get("admissionTime"));if(admit==null){out.put("reason","缺少入科时间");return out;}
+      String mrn=patient.getString("mrn");if(mrn==null||mrn.isBlank()){out.put("reason","缺少血气关联键");return out;}
+      Instant end=admit.plus(java.time.Duration.ofHours(24));String diagnosis=diagnosisTextForIcu08(patient);var diagHits=new ArrayList<String>();for(String kw:List.of("ARDS","急性呼吸窘迫综合征","急性呼吸窘迫","肺损伤","重症肺炎","创伤性湿肺"))if(diagnosis.toLowerCase(java.util.Locale.ROOT).contains(kw.toLowerCase(java.util.Locale.ROOT))&&!diagHits.contains(kw))diagHits.add(kw);
+      out.put("admissionTime",admit);out.put("diagnosisMatched",!diagHits.isEmpty());out.put("diagnosisEvidence",diagHits);
+      var matches=new ArrayList<Map.Entry<Instant,Double>>();var pidValues=List.of(new ObjectId(hostPatientId),hostPatientId);
+      Document elem=new Document("code",new Document("$in",List.of("param_bg_P/Fratio","param_bg_OI","param_bg_po2","param_bg_FiO2"))).append("valid","valid");
+      Document query=new Document("mrn",mrn).append("eventExe.pid",new Document("$in",pidValues)).append("eventExe.startTime",new Document("$gte",Date.from(admit)).append("$lte",Date.from(end))).append("bedsides",new Document("$elemMatch",elem));
+      for(Document bga:smartcare.getCollection("bGATemp").find(query).projection(new Document("_id",1).append("eventExe.startTime",1).append("bedsides",1)).limit(2000)){
+        Document event=bga.get("eventExe",Document.class);Instant time=event==null?null:toInstant(event.get("startTime"));Double pf=pfRatio(bga.getList("bedsides",Document.class,List.of()));if(time!=null&&pf!=null&&pf>0)matches.add(Map.entry(time,pf));
+      }
+      matches.sort(Map.Entry.comparingByKey());out.put("pfSampleCount",matches.size());if(!matches.isEmpty()){double avg=matches.stream().mapToDouble(Map.Entry::getValue).average().orElse(Double.NaN);out.put("pfAverage",Math.round(avg*10d)/10d);out.put("pfFirstTime",matches.get(0).getKey());out.put("pfLastTime",matches.get(matches.size()-1).getKey());}
+      Document pid=new Document("$in",pidValues);Document win=new Document("$gte",Date.from(admit)).append("$lte",Date.from(end));
+      Document routeDoc=smartcare.getCollection("bedside").find(new Document("pid",pid).append("code","param_XiYangTuJing").append("valid",true).append("time",win)).projection(new Document("strVal",1).append("time",1)).sort(new Document("time",-1)).first();
+      String route=routeDoc==null?"":Objects.toString(routeDoc.get("strVal"),"");String arm=icu08Arm(route);out.put("supportPath",arm);out.put("supportTime",routeDoc==null?null:toInstant(routeDoc.get("time")));
+      Double peep=null,flow=null;Document peepDoc=null,flowDoc=null;
+      if("invasive".equals(arm)||"noninvasive".equals(arm)){peepDoc=smartcare.getCollection("bedside").find(new Document("pid",pid).append("code","param_vent_peep").append("valid",true).append("time",win)).projection(new Document("strVal",1).append("time",1)).sort(new Document("time",-1)).first();if(peepDoc!=null)peep=parseDouble(stripUnit(Objects.toString(peepDoc.get("strVal"),"")));}
+      if("hfnc".equals(arm)){flowDoc=smartcare.getCollection("bedside").find(new Document("pid",pid).append("code","param_吸氧流速").append("valid",true).append("time",win)).projection(new Document("strVal",1).append("time",1)).sort(new Document("time",-1)).first();if(flowDoc!=null)flow=parseDouble(stripUnit(Objects.toString(flowDoc.get("strVal"),"")));}
+      out.put("peep",peep);out.put("peepTime",peepDoc==null?null:toInstant(peepDoc.get("time")));out.put("flow",flow);out.put("flowTime",flowDoc==null?null:toInstant(flowDoc.get("time")));
+      if(matches.isEmpty()){out.put("reason","入科后 24 小时无有效 P/F");return out;}if("unknown".equals(arm)){out.put("reason","呼吸支持途径缺失或无法归类");return out;}
+      double avg=((Number)out.get("pfAverage")).doubleValue();boolean candidate=("invasive".equals(arm)&&peep!=null&&peep>=5&&avg<150)||("noninvasive".equals(arm)&&peep!=null&&peep>=5&&avg<=200)||("hfnc".equals(arm)&&flow!=null&&flow>=30&&avg<=200);
+      boolean complete="none".equals(arm)||(("invasive".equals(arm)||"noninvasive".equals(arm))&&peep!=null)||("hfnc".equals(arm)&&flow!=null);
+      out.put("armLabel","invasive".equals(arm)?"有创":"noninvasive".equals(arm)?"无创":"hfnc".equals(arm)?"高流量":"普通氧疗");
+      if(!Boolean.TRUE.equals(out.get("diagnosisMatched"))){out.put("status",diagnosis.isBlank()?"unknown":"not_in_cohort");out.put("reason",diagnosis.isBlank()?"诊断文本未取得，无法通过 ICU-08 诊断过滤":"未命中 ICU-08 诊断关键词");return out;}
+      out.put("status",candidate?"candidate":complete?"no_observed_trigger":"unknown");out.put("reason",candidate?"符合 ICU-08 入科 24 小时生理路径，待复核":"入科 24 小时生理路径未触发或关键设置缺失");return out;
+    }catch(RuntimeException e){out.put("reason","ICU-08 来源读取失败");return out;}
+  }
+
+  /** Official monthly aggregate and patient detail cache, kept distinct from current-stay candidates. */
+  public Map<String,Object> icu08OfficialAudit(String deptCode,String period) {
+    if(period==null||!period.matches("\\d{4}-(0[1-9]|1[0-2])"))
+      throw new org.icu.sepsis.api.ApiException(org.springframework.http.HttpStatus.BAD_REQUEST,"INVALID_PERIOD","统计月份格式应为 YYYY-MM");
+    Document summary=smartcare.findOne(Query.query(Criteria.where("dept_code").is(deptCode).and("indicator").is("ICU-08").and("period").is(period)),Document.class,"icu_monthly_summary");
+    if(summary==null)return Map.of("status","no_summary","period",period,"detailStatus","unavailable");
+    Document den=smartcare.findOne(Query.query(Criteria.where("dept_code").is(deptCode).and("code").is("ICU-08").and("part").is("denominator").and("period").is(period)),Document.class,"icu_indicator_detail_cache");
+    Document num=smartcare.findOne(Query.query(Criteria.where("dept_code").is(deptCode).and("code").is("ICU-08").and("part").is("numerator").and("period").is(period)),Document.class,"icu_indicator_detail_cache");
+    int denominator=number(summary.get("denominator")), numerator=number(summary.get("numerator"));
+    List<Map<String,Object>> denRows=officialPatients(den), numRows=officialPatients(num);
+    boolean detailsPresent=den!=null&&num!=null;
+    String detailStatus;
+    if(denominator<0||numerator<0||numerator>denominator)detailStatus="inconsistent";
+    else if(denominator==0&&numerator==0)detailStatus="empty_cohort";
+    else if(!detailsPresent||denRows.size()!=denominator||numRows.size()!=numerator)detailStatus="missing";
+    else if(!uniquePatientIds(denRows)||!uniquePatientIds(numRows)||!numeratorSubset(denRows,numRows))detailStatus="inconsistent";
+    else detailStatus="available";
+    var out=new LinkedHashMap<String,Object>();out.put("status","available");out.put("period",period);out.put("denominator",denominator);out.put("numerator",numerator);out.put("rate",summary.get("value"));out.put("dataAvailable",summary.get("data_available"));out.put("updatedAt",summary.get("updated_at"));out.put("detailStatus",detailStatus);out.put("detailUpdatedAt",den==null?null:den.get("updated_at"));out.put("denominatorPatients",denRows);out.put("numeratorPatients",numRows);return out;
+  }
+
+  /** Read-only re-execution of the reference ICU-08 month cohort; results are explicitly not cache details. */
+  public Map<String,Object> icu08MonthlyRecompute(String deptCode,String period) {
+    if(period==null||!period.matches("\\d{4}-(0[1-9]|1[0-2])"))
+      throw new org.icu.sepsis.api.ApiException(org.springframework.http.HttpStatus.BAD_REQUEST,"INVALID_PERIOD","统计月份格式应为 YYYY-MM");
+    java.time.LocalDate firstDay=java.time.LocalDate.parse(period+"-01");
+    Instant monthStart=firstDay.atStartOfDay(java.time.ZoneOffset.UTC).toInstant();
+    Instant monthEnd=firstDay.plusMonths(1).atStartOfDay(java.time.ZoneOffset.UTC).toInstant().minusMillis(1);
+    Document cohortQuery=new Document("deptCode",deptCode).append("status",new Document("$ne","invalid"))
+        .append("icuAdmissionTime",new Document("$lte",Date.from(monthEnd)))
+        .append("$or",List.of(new Document("icuDischargeTime",new Document("$gte",Date.from(monthStart))),new Document("icuDischargeTime",null),new Document("icuDischargeTime",new Document("$exists",false))));
+    var denominator=new ArrayList<Map<String,Object>>();var numerator=new ArrayList<Map<String,Object>>();var pathCounts=new java.util.TreeMap<String,Integer>();int sourceErrors=0;
+    for(Document patient:smartcare.getCollection("patient").find(cohortQuery).projection(new Document("_id",1).append("name",1).append("showBed",1).append("hisBed",1).append("icuAdmissionTime",1).append("icuDischargeTime",1)).sort(new Document("showBed",1).append("hisBed",1).append("_id",1))){
+      String id=patient.getObjectId("_id").toHexString();Map<String,Object> evidence;
+      try{evidence=icu08AdmissionEvidence(id,deptCode);}catch(RuntimeException failure){sourceErrors++;continue;}
+      String status=String.valueOf(evidence.get("status"));pathCounts.merge(status,1,Integer::sum);if(!"candidate".equals(status))continue;
+      var row=new LinkedHashMap<String,Object>();String bed=patient.getString("showBed");if(bed==null||bed.isBlank())bed=patient.getString("hisBed");row.put("name",patient.getString("name"));row.put("bed_no",bed);row.put("admit_time",patient.get("icuAdmissionTime"));row.put("pfAverage",evidence.get("pfAverage"));row.put("pfSampleCount",evidence.get("pfSampleCount"));row.put("armLabel",evidence.get("armLabel"));row.put("peep",evidence.get("peep"));row.put("flow",evidence.get("flow"));row.put("diagnosisEvidence",evidence.get("diagnosisEvidence"));denominator.add(row);
+      Instant admit=toInstant(patient.get("icuAdmissionTime"));Instant discharge=toInstant(patient.get("icuDischargeTime"));Instant proneFrom=monthStart.isAfter(admit)?monthStart:admit;Instant firstPf=toInstant(evidence.get("pfFirstTime"));if(firstPf!=null&&firstPf.isAfter(proneFrom))proneFrom=firstPf;Instant proneThrough=discharge!=null&&discharge.isBefore(monthEnd)?discharge:monthEnd;
+      if(!proneFrom.isAfter(proneThrough)){
+        var pidValues=List.of(new ObjectId(id),id);Document proneQuery=new Document("pid",new Document("$in",pidValues)).append("code","param_TiWei").append("valid",true).append("strVal",new Document("$regex","俯卧位")).append("time",new Document("$gte",Date.from(proneFrom)).append("$lte",Date.from(proneThrough)));
+        Document prone=smartcare.getCollection("bedside").find(proneQuery).projection(new Document("time",1).append("_id",1)).sort(new Document("time",1)).limit(1).first();
+        if(prone!=null){var numRow=new LinkedHashMap<String,Object>(row);numRow.put("firstProneTime",prone.get("time"));Object sourceId=prone.get("_id");if(sourceId instanceof ObjectId)numRow.put("sourceRecordedAt",((ObjectId)sourceId).getDate());numerator.add(numRow);}
+      }
+    }
+    Map<String,Object> official=icu08OfficialAudit(deptCode,period);Object officialDen=official.get("denominator"),officialNum=official.get("numerator");boolean denCountMatch=officialDen instanceof Number&&((Number)officialDen).intValue()==denominator.size();boolean numCountMatch=officialNum instanceof Number&&((Number)officialNum).intValue()==numerator.size();
+    var out=new LinkedHashMap<String,Object>();out.put("status","available");out.put("period",period);out.put("basis","icu-quality-dashboard ICU-08 reference rules re-executed on SmartCare; not official cached patient details");out.put("cohortCount",pathCounts.values().stream().mapToInt(Integer::intValue).sum());out.put("pathCounts",pathCounts);out.put("recomputedDenominator",denominator.size());out.put("recomputedNumerator",numerator.size());out.put("officialDenominator",officialDen);out.put("officialNumerator",officialNum);out.put("denominatorCountMatchesOfficial",denCountMatch);out.put("numeratorCountMatchesOfficial",numCountMatch);out.put("countsMatchOfficial",denCountMatch&&numCountMatch&&sourceErrors==0);out.put("sourceErrors",sourceErrors);out.put("denominatorPatients",denominator);out.put("numeratorPatients",numerator);return out;
+  }
+  private static int number(Object value){return value instanceof Number?((Number)value).intValue():0;}
+  private static List<Map<String,Object>> officialPatients(Document detail){
+    if(detail==null||!(detail.get("patients") instanceof List))return List.of();var rows=new ArrayList<Map<String,Object>>();
+    for(Object raw:(List<?>)detail.get("patients")){if(!(raw instanceof Document))continue;Document p=(Document)raw;var row=new LinkedHashMap<String,Object>();
+      for(String key:List.of("patient_id","pid_ref","name","bed_no","dept","admit_time","value","excluded","basis"))if(p.containsKey(key))row.put(key,p.get(key));rows.add(row);
+    }return rows;
+  }
+  private static boolean uniquePatientIds(List<Map<String,Object>> rows){var ids=new java.util.HashSet<String>();for(var row:rows){Object id=row.containsKey("patient_id")?row.get("patient_id"):row.get("pid_ref");if(id==null||String.valueOf(id).isBlank()||!ids.add(String.valueOf(id).trim()))return false;}return true;}
+  private static boolean numeratorSubset(List<Map<String,Object>> denominator,List<Map<String,Object>> numerator){var ids=new java.util.HashSet<String>();for(var row:denominator){Object id=row.containsKey("patient_id")?row.get("patient_id"):row.get("pid_ref");if(id!=null)ids.add(String.valueOf(id).trim());}for(var row:numerator){Object id=row.containsKey("patient_id")?row.get("patient_id"):row.get("pid_ref");if(id==null||!ids.contains(String.valueOf(id).trim()))return false;}return true;}
+
+  private static String diagnosisTextForIcu08(Document d){var out=new StringBuilder();for(String key:List.of("clinicalDiagnosis","diagnosis","admissionDiagnosis","dischargedDiagnosis")){Object v=d.get(key);if(v instanceof String)appendText(out,(String)v);else if(v instanceof List<?>)for(Object x:(List<?>)v)appendText(out,String.valueOf(x));}Object history=d.get("diagnosisHistoryList");if(history instanceof List<?>)for(Object x:(List<?>)history){if(x instanceof Document){Document item=(Document)x;appendText(out,Objects.toString(item.get("diagnosis"),Objects.toString(item.get("name"),"")));}else if(x!=null)appendText(out,String.valueOf(x));}return out.toString();}
+  private static Double pfRatio(List<Document> points){Double pf=null,oi=null,po2=null,fio2=null;for(Document p:points){if(!"valid".equals(p.get("valid")))continue;String code=p.getString("code");if("param_bg_P/Fratio".equals(code)){pf=bloodGasNumber(p);if(pf!=null)return pf;}else if("param_bg_OI".equals(code))oi=parseDouble(p.get("strVal"));else if("param_bg_po2".equals(code))po2=bloodGasNumber(p);else if("param_bg_FiO2".equals(code))fio2=parseDouble(p.get("strVal"));}if(oi!=null)return oi;if(po2!=null&&fio2!=null&&fio2>0){double frac=fio2>1?fio2/100:fio2;return frac>0?po2/frac:null;}return null;}
+  private static String stripUnit(String raw){return raw.replace("cmH2O","").replace("cmH₂O","").replace("cmh2o","").replace("L/min","").replace("l/min","").trim();}
+  private static String icu08Arm(String route){if(route==null||route.isBlank())return "unknown";Map<String,String> modes=Map.ofEntries(Map.entry("管辅","invasive"),Map.entry("切辅","invasive"),Map.entry("有创","invasive"),Map.entry("无创呼吸机","noninvasive"),Map.entry("无创高频","noninvasive"),Map.entry("无创","noninvasive"),Map.entry("高流量","hfnc"),Map.entry("管高","hfnc"),Map.entry("切高","hfnc"),Map.entry("管氧","invasive"),Map.entry("切氧","invasive"),Map.entry("管文","invasive"),Map.entry("切文","invasive"),Map.entry("T管","invasive"),Map.entry("带管自主","invasive"),Map.entry("高频","invasive"),Map.entry("无","none"),Map.entry("自主呼吸","none"),Map.entry("鼻导管","none"),Map.entry("鼻塞","none"),Map.entry("面罩","none"),Map.entry("鼻罩","none"),Map.entry("箱氧","none"),Map.entry("储氧面罩","none"),Map.entry("储氧","none"),Map.entry("面罩吸氧","none"),Map.entry("鼻氧","none"),Map.entry("鼻管辅","none"),Map.entry("低流量","none"),Map.entry("低流量用氧","none"),Map.entry("低流量箱氧","none"),Map.entry("未吸氧","none"),Map.entry("拒绝","none"),Map.entry("拒绝吸氧","none"),Map.entry("暂停吸氧","none"),Map.entry("文丘里","none"),Map.entry("球囊","none"),Map.entry("呼吸球囊","none"),Map.entry("球囊通气","none"),Map.entry("简易呼吸器","none"),Map.entry("家用呼吸机","none"),Map.entry("家用","none"),Map.entry("鼻","none"));String normalized=route.replace('、',',').replace('，',',').replace('/',',').replace('+',',').replace(' ',',').replaceAll(",+",",");int tier=0,recognized=0;String best="none";for(String part:normalized.split(",")){String token=part.trim();if(token.isEmpty())continue;try{Double.parseDouble(token);continue;}catch(NumberFormatException ignored){}String mode=modes.get(token);if(mode==null)continue;recognized++;int current="invasive".equals(mode)?3:"noninvasive".equals(mode)?2:"hfnc".equals(mode)?1:0;if(current>tier){tier=current;best=mode;}}return recognized==0?"unknown":best;}
+
   private Document requireDocument(String hostPatientId) {
     Query q = Query.query(Criteria.where("_id").is(new ObjectId(requireId(hostPatientId))));
     q.fields().include("name").include("hisPid").include("mrn").include("hospitalTime")
         .include("deptCode").include("deptCode2").include("dept").include("showBed")
-        .include("birthday").include("hisBed").include("icuAdmissionTime").include("admissionTime");
+        .include("birthday").include("hisBed").include("icuAdmissionTime").include("admissionTime")
+        .include("clinicalDiagnosis").include("diagnosis").include("admissionDiagnosis")
+        .include("dischargedDiagnosis").include("diagnosisHistoryList");
     Document doc = smartcare.findOne(q, Document.class, "patient");
     if (doc == null) throw ApiException.notFound();
     return doc;
@@ -440,32 +543,41 @@ public class SmartCareSourceReader {
   }
 
   public List<Map<String, Object>> listByDept(String deptCode, int limit) {
-    int size = Math.max(1, Math.min(limit, 100));
+    return listByDept(deptCode, 0, Math.max(1, Math.min(limit, 100)), "").items;
+  }
+
+  public static final class PatientPage {
+    public final List<Map<String,Object>> items;
+    public final long total;
+    PatientPage(List<Map<String,Object>> items,long total){this.items=items;this.total=total;}
+  }
+
+  /** Read-only department roster, paged from the live source so batch screening sees every bed. */
+  public PatientPage listByDept(String deptCode,int page,int size,String search) {
+    int boundedSize=Math.max(1,Math.min(size,100));
+    int boundedPage=Math.max(0,Math.min(page,100000));
+    Criteria scope=new Criteria().orOperator(Criteria.where("deptCode").is(deptCode),Criteria.where("deptCode2").is(deptCode));
+    Criteria query=new Criteria().andOperator(Criteria.where("status").is("admitted"),scope);
+    if(search!=null&&!search.isBlank())query=new Criteria().andOperator(query,new Criteria().orOperator(
+        Criteria.where("name").regex(Pattern.quote(search),"i"),Criteria.where("showBed").regex(Pattern.quote(search),"i"),Criteria.where("hisBed").regex(Pattern.quote(search),"i")));
+    long total=smartcare.getCollection("patient").countDocuments(query.getCriteriaObject());
     List<Map<String, Object>> out = new ArrayList<>();
     for (Document d :
         smartcare
             .getCollection("patient")
-            .find(
-                new Document("status", "admitted")
-                    .append(
-                        "$or",
-                        List.of(
-                            new Document("deptCode", deptCode),
-                            new Document("deptCode2", deptCode))))
-            .limit(size)) {
+            .find(query.getCriteriaObject())
+            .sort(new Document("showBed",1).append("hisBed",1).append("_id",1))
+            .skip(boundedPage*boundedSize).limit(boundedSize)) {
       Map<String, Object> row = new LinkedHashMap<>();
       row.put("id", d.getObjectId("_id").toHexString());
       row.put("label", d.getString("name"));
       row.put("bed", bedOf(d));
-      row.put("hisPid", d.getString("hisPid"));
-      row.put("mrn", d.getString("mrn"));
-      row.put("dept", d.getString("dept"));
-      row.put("deptCode", firstNonBlank(d.getString("deptCode"), d.getString("deptCode2")));
-      row.put("gender", d.getString("gender"));
       row.put("admittedAt", toInstant(d.get("icuAdmissionTime")));
+      row.put("simulated",false);
+      row.put("department",deptCode);
       out.add(row);
     }
-    return out;
+    return new PatientPage(out,total);
   }
 
   // ---------- clinical events for sepsis / bundle ----------

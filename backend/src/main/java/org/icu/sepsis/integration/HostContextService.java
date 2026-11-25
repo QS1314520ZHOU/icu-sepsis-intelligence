@@ -41,11 +41,11 @@ public class HostContextService {
     this.defaultDepartment = department;
   }
 
-  public Map<String, Object> apply(String parentOrigin, String hostPatientId) {
+  public Map<String, Object> apply(String parentOrigin, String hostPatientId, String hostRole) {
     SmartCareSourceReader source = requireSource();
     Patient loaded = source.loadPatient(hostPatientId);
     Patient local = upsertLocal(loaded);
-    Map<String, Object> session = grants.issue(parentOrigin, local);
+    Map<String, Object> session = grants.issue(parentOrigin, local, hostRole);
     Map<String, Object> payload = new LinkedHashMap<>(Views.patient(local));
     payload.put("hisPid", source.hisPidOf(hostPatientId));
     payload.put("sourceMode", "smartcare");

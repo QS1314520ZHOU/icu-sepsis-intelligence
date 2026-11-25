@@ -1,0 +1,26 @@
+/* SVG treatment follows the reference HumanBodyDiagram geometry; unknown stays neutral. */
+.organ-layout{grid-template-columns:210px minmax(0,1fr);gap:16px;align-items:center}
+.body-map{width:100%;height:auto;max-height:410px;display:block}
+.body-halo{fill:rgba(48,169,222,.1);opacity:.9}
+.body-silhouette{fill:rgba(232,244,250,.96);stroke:rgba(124,160,183,.38);stroke-width:1.8}
+.body-core{fill:rgba(193,223,239,.22);stroke:rgba(141,180,205,.2);stroke-width:1.2}
+.body-guides path,.body-frame{fill:none;stroke:rgba(95,145,174,.2);stroke-linecap:round;stroke-linejoin:round}
+.body-guides path{stroke-width:1;stroke-dasharray:4 6}
+.body-frame{stroke-width:1.4}
+.body-region{cursor:pointer;outline:none;transition:opacity .2s ease}
+.organ-heat{fill:#8797aa;opacity:.3;mix-blend-mode:multiply}
+.organ-outline{fill:rgba(125,145,165,.11);stroke:rgba(105,128,151,.72);stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke;transition:fill .2s ease,stroke .2s ease,opacity .2s ease}
+.organ-outline.is-line{fill:none;stroke-opacity:.65}
+.organ-outline.is-vessel{fill:none;stroke-width:2;stroke-opacity:.62}
+.body-region[data-state=unknown] .organ-heat{opacity:.16}
+.body-region[data-state=unknown] .organ-outline{fill:rgba(125,145,165,.08);stroke:rgba(105,128,151,.55)}
+.body-region[data-state=review_required] .organ-heat{fill:#e8901c;opacity:.7}
+.body-region[data-state=review_required] .organ-outline{fill:rgba(232,144,28,.2);stroke:#a65a0c}
+.body-region[data-state=no_observed_trigger] .organ-heat{fill:#1a9c5b;opacity:.46}
+.body-region[data-state=no_observed_trigger] .organ-outline{fill:rgba(26,156,91,.13);stroke:#33865d}
+.body-region[data-state=critical] .organ-heat{fill:#d9342b;opacity:.82}
+.body-region[data-state=critical] .organ-outline{fill:rgba(217,52,43,.22);stroke:#d9342b}
+.body-region.selected .organ-outline,.body-region:focus .organ-outline{stroke-width:3}
+.body-region.selected .organ-heat{opacity:.86}
+@media(max-width:800px){.organ-layout{grid-template-columns:150px minmax(0,1fr);gap:10px}}
+@media(max-width:600px){.organ-layout{grid-template-columns:110px minmax(0,1fr)}}

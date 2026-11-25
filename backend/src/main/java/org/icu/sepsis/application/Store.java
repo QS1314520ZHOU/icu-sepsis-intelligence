@@ -15,6 +15,7 @@ import org.springframework.stereotype.Component;
 
 @Component
 public class Store {
+  @org.springframework.beans.factory.annotation.Autowired private org.springframework.beans.factory.ObjectProvider<org.icu.sepsis.integration.SmartCareSourceReader> patientSource;
   public final MongoTemplate db;
   public final String department;
   private final ObjectMapper json;
@@ -41,11 +42,14 @@ public class Store {
   /** Department-wide criteria, ignoring a patient-level embed grant (ward list views). */
   public Criteria departmentScope() {
     org.icu.sepsis.embed.EmbedAccess.Grant g = org.icu.sepsis.embed.EmbedAccess.current();
+    if (g != null && g.patientId != null && !g.departmentReadAllowed)
+      throw new ApiException(HttpStatus.FORBIDDEN, "DEPARTMENT_SCOPE_DENIED", "当前嵌入授权仅限当前患者");
     return Criteria.where("department").is(g != null && g.department != null ? g.department : department);
   }
 
   public Patient patient(String id) {
     Patient p = db.findById(id, Patient.class);
+    if(p==null&&patientSource!=null){var reader=patientSource.getIfAvailable();if(reader!=null){var grant=org.icu.sepsis.embed.EmbedAccess.current();String dept=grant!=null&&grant.department!=null?grant.department:department;try{p=reader.loadPatientForDept(id,dept);}catch(org.icu.sepsis.api.ApiException ignored){throw ignored;}catch(RuntimeException ignored){p=null;}}}
     if (p == null) throw ApiException.notFound();
     authorize(p);
     return p;

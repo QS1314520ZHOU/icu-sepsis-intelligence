@@ -19,7 +19,7 @@ public class HostGrantRegistry {
   private final Map<String, EmbedAccess.Grant> tokens = new ConcurrentHashMap<>();
   private final java.security.SecureRandom random = new java.security.SecureRandom();
 
-  public synchronized Map<String, Object> issue(String parentOrigin, Patient patient) {
+  public synchronized Map<String, Object> issue(String parentOrigin, Patient patient, String hostRole) {
     if (parentOrigin == null || parentOrigin.isBlank())
       throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_PARENT_ORIGIN", "缺少宿主来源");
     if (patient == null || patient.id == null)
@@ -29,7 +29,10 @@ public class HostGrantRegistry {
       throw new ApiException(HttpStatus.TOO_MANY_REQUESTS, "HOST_GRANT_CAPACITY", "宿主授权容量已满");
     EmbedAccess.Grant g = new EmbedAccess.Grant();
     g.username = "host";
-    g.authorities = new ArrayList<>(List.of(new SimpleGrantedAuthority("ROLE_DOCTOR")));
+    String role = "doctor".equalsIgnoreCase(hostRole) ? "DOCTOR"
+        : "quality".equalsIgnoreCase(hostRole) ? "QUALITY" : "NURSE";
+    g.authorities = new ArrayList<>(List.of(new SimpleGrantedAuthority("ROLE_" + role)));
+    g.departmentReadAllowed = "DOCTOR".equals(role) || "QUALITY".equals(role);
     g.patientId = patient.id;
     g.encounterId = patient.encounterId;
     g.department = patient.department;

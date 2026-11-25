@@ -38,6 +38,36 @@ class SmartCareSourceReaderTest {
   void beds(Document... documents){when(sc.find(any(Query.class),eq(Document.class),eq("bedside"))).thenReturn(List.of(documents));}
   void labs(Document... documents){when(dc.find(any(Query.class),eq(Document.class),eq("VI_ICU_EXAM_ITEM"))).thenReturn(List.of(documents));}
   @Test void pressureChannelsNeverCollapse(){beds(bedside("param_ibp_m","58"),bedside("param_nibp_m","76"));List<Observation> os=rows();assertEquals(2,os.size());assertEquals(Set.of("MAP_IBP","MAP_NIBP"),new HashSet<>(List.of(os.get(0).parameterCode,os.get(1).parameterCode)));assertEquals("IBP",os.get(0).measurementChannel);assertEquals("NIBP",os.get(1).measurementChannel);assertEquals("mmHg",os.get(0).unit);assertNotNull(os.get(0).id);}
+  @Test void officialIcu08AuditKeepsAggregateAndMissingPatientCacheDistinct(){
+    Document summary=new Document("denominator",3).append("numerator",0).append("value",0d).append("data_available",true).append("updated_at",Date.from(now));
+    when(sc.findOne(any(Query.class),eq(Document.class),eq("icu_monthly_summary"))).thenReturn(summary);
+    when(sc.findOne(any(Query.class),eq(Document.class),eq("icu_indicator_detail_cache"))).thenReturn(null);
+    Map<String,Object> result=reader.icu08OfficialAudit("SYNTHETIC_DEPT","2026-10");
+    assertEquals("available",result.get("status"));assertEquals(3,result.get("denominator"));assertEquals(0,result.get("numerator"));
+    assertEquals("missing",result.get("detailStatus"));assertTrue(((List<?>)result.get("denominatorPatients")).isEmpty());
+  }
+  @Test void emptyOfficialIcu08CohortIsNotReportedAsMissingDetails(){
+    when(sc.findOne(any(Query.class),eq(Document.class),eq("icu_monthly_summary")))
+        .thenReturn(new Document("denominator",0).append("numerator",0).append("value",0d));
+    when(sc.findOne(any(Query.class),eq(Document.class),eq("icu_indicator_detail_cache"))).thenReturn(null);
+    assertEquals("empty_cohort",reader.icu08OfficialAudit("SYNTHETIC_DEPT","2026-11").get("detailStatus"));
+  }
+  @Test void officialIcu08DetailCacheRequiresUniqueIdsAndNumeratorSubset(){
+    when(sc.findOne(any(Query.class),eq(Document.class),eq("icu_monthly_summary"))).thenReturn(new Document("denominator",2).append("numerator",1).append("value",50d));
+    Document den=new Document("patients",List.of(new Document("patient_id","A"),new Document("patient_id","B")));
+    Document duplicateNum=new Document("patients",List.of(new Document("patient_id","A")));
+    when(sc.findOne(any(Query.class),eq(Document.class),eq("icu_indicator_detail_cache"))).thenReturn(den,duplicateNum);
+    assertEquals("available",reader.icu08OfficialAudit("SYNTHETIC_DEPT","2026-10").get("detailStatus"));
+    reset(sc);
+    when(sc.findOne(any(Query.class),eq(Document.class),eq("icu_monthly_summary"))).thenReturn(new Document("denominator",2).append("numerator",1));
+    Document duplicateDen=new Document("patients",List.of(new Document("patient_id","A"),new Document("patient_id","A")));
+    when(sc.findOne(any(Query.class),eq(Document.class),eq("icu_indicator_detail_cache"))).thenReturn(duplicateDen,duplicateNum);
+    assertEquals("inconsistent",reader.icu08OfficialAudit("SYNTHETIC_DEPT","2026-10").get("detailStatus"));
+  }
+  @Test void invalidOfficialPeriodIsRejectedBeforeDatabaseRead(){
+    assertThrows(ApiException.class,()->reader.icu08OfficialAudit("SYNTHETIC_DEPT","2026-13"));
+    verifyNoInteractions(sc);
+  }
   @Test void sourceIngestionIsNotFabricatedFromEvent(){beds(bedside("param_HR","90"));Observation o=rows().get(0);assertNull(o.ingestTime);assertNull(o.createdAt);assertEquals("unknown",o.ingestTimeBasis);assertTrue(new ClinicalRules(new RuleConfig()).valid(o,now));}
   @Test void reportIsNotSamplingOrVerifiedEncounter(){labs(lab("4.2","mmol/L"));Observation o=rows().get(0);assertEquals("reported",o.timeBasis);assertEquals(o.eventTime,o.reportedAt);assertNull(o.sampledAt);assertNull(o.encounterId);assertEquals("unconfirmed",o.encounterLinkStatus);assertEquals("context_only",o.clinicalUse);assertEquals("unverified",o.qualityStatus);assertNull(o.sourceResultStatus);assertFalse(new ClinicalRules(new RuleConfig()).valid(o,now));}
   @Test void labUnitNeverDefaultsToMmol(){labs(lab("4.2",null));assertNull(rows().get(0).unit);}

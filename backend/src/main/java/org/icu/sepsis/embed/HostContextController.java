@@ -38,13 +38,16 @@ public class HostContextController {
   private final HostContextService service;
   private final ObjectProvider<SmartCareSourceReader> reader;
   private final String mode;
+  private final EmbedAccess embedAccess;
 
   public HostContextController(
       HostContextService s,
       ObjectProvider<SmartCareSourceReader> reader,
+      EmbedAccess embedAccess,
       @Value("${app.source.mode:demo}") String mode) {
     service = s;
     this.reader = reader;
+    this.embedAccess = embedAccess;
     this.mode = mode;
   }
 
@@ -53,9 +56,12 @@ public class HostContextController {
       @Valid @RequestBody HostContextRequest r,
       @RequestHeader(value = "Origin", required = false) String origin,
       @RequestParam(value = "parentOrigin", required = false) String parentOrigin) {
-    String resolved = origin != null && !origin.isBlank() ? origin : parentOrigin;
+    String resolved = parentOrigin != null && !parentOrigin.isBlank() ? parentOrigin : origin;
     if (resolved == null || resolved.isBlank()) resolved = "http://unknown-host";
-    return Envelope.ok(service.apply(resolved, r.patientId));
+    if (!embedAccess.allowsParentOrigin(resolved))
+      throw new org.icu.sepsis.api.ApiException(org.springframework.http.HttpStatus.FORBIDDEN,
+          "HOST_ORIGIN_DENIED", "宿主来源未配置授权");
+    return Envelope.ok(service.apply(resolved, r.patientId, r.account));
   }
 
   @GetMapping("/embed-api/source-status")

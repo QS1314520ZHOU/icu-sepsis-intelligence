@@ -19,6 +19,7 @@ public class EmbedAccess {
   public static class Grant {
     public String username, patientId, encounterId, department, parentOrigin, channel;
     public Collection<? extends GrantedAuthority> authorities;
+    public boolean departmentReadAllowed;
     public Instant expiresAt;
   }
 
@@ -34,6 +35,10 @@ public class EmbedAccess {
   public final boolean demo;
   public final boolean allowAnyFrameAncestor;
   public final boolean allowInsecureLanOrigins;
+
+  public boolean allowsParentOrigin(String origin) {
+    return origin != null && origins.contains(origin);
+  }
 
   public EmbedAccess(
       @Value("${app.demo}") boolean d,

@@ -19,6 +19,7 @@ export interface Page<T> {
 }
 export interface Patient {
   vitals?: Record<string, Observation>;
+  vitalsReadStatus?: 'available' | 'unavailable';
   latestAssessment?: Assessment | null;
   summaryLimitReached?: boolean;
   id: string;

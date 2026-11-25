@@ -116,6 +116,10 @@ class EmbedIntegrationTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.total").value(1))
         .andExpect(jsonPath("$.data.items[0].id").value("demo-normal"));
+    http.perform(get("/api/v1/department-screening/patients").header("Authorization", "Bearer " + t))
+        .andExpect(status().isForbidden());
+    http.perform(get("/api/v1/quality/icu05-board").header("Authorization", "Bearer " + t))
+        .andExpect(status().isForbidden());
   }
 
   @Test
